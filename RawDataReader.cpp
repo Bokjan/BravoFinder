@@ -68,7 +68,53 @@ void RawDataReader::ReadWaypoints(void)
 			vec.push_back(Waypoint(vertexIdent, name, lat, lon));
 			Airports.insert(std::make_pair(name, Airport(name, lat, lon)));
 			++vertexIdent;
+			fgets(note, 127, fin);
 		}
+	}
+	fclose(fin);
+}
+void RawDataReader::ReadSids(void)
+{
+	string file = GetDataPath() + "psssid.dat";
+	FILE *fin = fopen(file.c_str(), "r");
+	char row[128], apt[16], wpt[16];
+	while (fgets(row, 127, fin)){
+		if (row[0] != '[')
+			continue;
+		char *Row = row + 1;
+		for (int i = 0; i != 4; ++i)
+			apt[i] = Row[i];
+		apt[4] = '\0';
+		//JUMP SLASHES
+		{
+			int scount = 0;
+			while (scount < 3){
+				if (*Row == '/')
+					++scount;
+				++Row;
+			}
+		}
+		//JUMP SLASHES
+		//COPY WPT
+		{
+			size_t i = 0;
+			while (*Row != ']'){
+				wpt[i++] = *Row;
+				++Row;
+			}
+			wpt[i] = '\0';
+		}
+		//COPY WPT
+		//printf("%s %s\n", apt, wpt);
+		auto &v = Airports[apt].wps;
+		auto it = v.begin();
+		for (; it != v.end(); ++it)
+			if (it->name == wpt)
+				break;
+		if (it != v.end()){
+			//ADD WAYPOINT
+		}
+
 	}
 	fclose(fin);
 }
@@ -77,10 +123,10 @@ void RawDataReader::Output(void)
 	string outfile = GetOutPath() + "out.dat";
 	std::ofstream fout(outfile);
 	printf("Outputing data to %s\n", outfile.c_str());
-	for (std::map<string, std::vector<Waypoint> >::iterator it = Waypoints.begin(); \
+	for (auto it = Waypoints.begin(); \
 		it != Waypoints.end(); ++it){
 		//printf("%d\n", it->second.size());
-		for (std::vector<Waypoint>::iterator ite = it->second.begin(); \
+		for (auto ite = it->second.begin(); \
 			ite != it->second.end(); ++ite){
 			fout << ite->ident << ' ' << ite->name << ' ' << ite->lat << ' ' << ite->lon << endl;
 		}

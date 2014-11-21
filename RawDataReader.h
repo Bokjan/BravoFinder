@@ -19,5 +19,6 @@ public:
 		printf("Reading data from %s\n", GetDataPath().c_str());
 	}
 	void ReadWaypoints(void);
+	void ReadSids(void);
 	void Output(void);
 };

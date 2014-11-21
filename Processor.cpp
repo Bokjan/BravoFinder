@@ -3,7 +3,8 @@
 void ProcessRawData(void)
 {
 	RawDataReader *Reader = new RawDataReader;
-	Reader->ReadWaypoints();
-	Reader->Output();
+	/*Reader->ReadWaypoints();
+	Reader->Output();*/
+	Reader->ReadSids();
 	delete Reader;
 }
