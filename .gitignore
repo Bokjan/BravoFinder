@@ -1,3 +1,10 @@
+#Visual Studio
+*.obj
+*.log
+*.tlog
+*.idb
+*.pdb
+
 # Windows image file caches
 Thumbs.db
 ehthumbs.db
