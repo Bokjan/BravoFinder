@@ -1,11 +1,8 @@
-#include "global.h"
-#include "DataStructure.h"
-#include "Processor.h"
-std::map<string, Airport> Airports;
-std::map<string, std::vector<Waypoint> > Waypoints;
-std::vector<Vertex> g;
+#include "Interfaces.hpp"
+#define debug(...) fprintf(stderr, __VA_ARGS__)
 int main(void)
 {
-	ProcessRawData();
+	bool ret = Bravo::SetNavDataPath("/Volumes/HGST_D/Prepar3D v3/PMDG/");
+	Bravo::InitializeAirports();
 	return 0;
 }
