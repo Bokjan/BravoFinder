@@ -26,5 +26,14 @@ namespace Bravo
 		if(!IsFileExists(file.c_str()))
 			return false;
 		Internal::InitializeAirports(file);
+		return true;
+	}
+	bool InitializeNavigationRoutes(void)
+	{
+		string file = NAV_PATH + "NAVDATA/wpNavRTE.txt";
+		if(!IsFileExists(file.c_str()))
+			return false;
+		Internal::InitializeNavigationRoutes(file);
+		return true;
 	}
 }

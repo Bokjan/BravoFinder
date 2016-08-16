@@ -5,4 +5,5 @@ namespace Bravo
 	extern void HelloWorld(void);
 	extern bool SetNavDataPath(const char *);
 	extern bool InitializeAirports(void);
+	extern bool InitializeNavigationRoutes(void);
 }
