@@ -43,9 +43,14 @@ namespace Internal
 			double lat, lon;
 			int nodeId = nodes.size();
 			sscanf(row, "%s%d%s%lf%lf", route, &seq, point, &lat, &lon);
-			nodes.push_back(Node(nodeId, lat, lon));
-			nodemap[string(point)] = nodeId;
-			Bravo::StringCopy(point, nodes[nodeId].name);
+			if(nodemap.find(point) == nodemap.end())
+			{
+				nodes.push_back(Node(nodeId, lat, lon));
+				nodemap[string(point)] = nodeId;
+				Bravo::StringCopy(point, nodes[nodeId].name);
+			}
+			else
+				nodeId = nodemap[point];
 			//Route
 			if(routemap.find(route) != routemap.end())
 				continue;
