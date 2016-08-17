@@ -8,7 +8,10 @@ namespace Internal
 	{
 		AP,
 		VOR,
+		VORD,
 		NDB,
+		ILS,
+		ILSD,
 		FIX
 	};
 	struct Node

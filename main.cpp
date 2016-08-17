@@ -1,6 +1,5 @@
 #include "Interfaces.hpp"
-#include "DataConverter.hpp"
-#include "Finder.hpp"
+#include "Utilities.hpp"
 #define debug(...) fprintf(stderr, __VA_ARGS__)
 int main(void)
 {
@@ -9,5 +8,9 @@ int main(void)
 	puts("Airport data initialized!");
 	Bravo::InitializeNavigationRoutes();
 	puts("Navigation route data initialized!");
+	Bravo::InitializeDAFixes("ZGHA");
+	printf("Dep/Arr fixes of %s initialized!\n", "ZGHA");
+	Bravo::InitializeDAFixes("ZGGG");
+	printf("Dep/Arr fixes of %s initialized!\n", "ZGGG");
 	return 0;
 }

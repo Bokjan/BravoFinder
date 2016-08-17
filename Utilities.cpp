@@ -30,11 +30,24 @@ namespace Bravo
 			++dest, ++src;
 		}
 	}
+	bool StringEquals(const char *_a, const char *_b)
+	{
+		char *a = (char*)_a;
+		char *b = (char*)_b;
+		do
+		{
+			if(*a != *b)
+				return false;
+			++a, ++b;
+		}
+		while(*a != '\0' || *b != '\0');
+		return true;
+	}
 	inline double rad(double x)
 	{
 		return x * PI / 180.0;
 	}
-	double GetDistance(double lat1, double lon1, double lat2, double lon2)
+	double GetDistance_KM(double lat1, double lon1, double lat2, double lon2)
 	{
 		double radLat1 = rad(lat1);
 	    double radLat2 = rad(lat2);
@@ -44,8 +57,11 @@ namespace Bravo
 			cos(radLat1) * cos(radLat2) * pow(sin(b / 2), 2)));
 		//Get the km value
 		s *= EARTH_RADIUS;
-		//Convert to n-mile
-		s /= 1.852;
 		return s;
+	}
+	double GetDistance_NM(double lat1, double lon1, double lat2, double lon2)
+	{
+		//1 nautical mile = 1.852 kilometers
+		return GetDistance_KM(lat1, lon1, lat2, lon2) / 1.852;
 	}
 }
