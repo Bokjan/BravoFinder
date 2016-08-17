@@ -8,7 +8,10 @@ namespace Internal
 	{
 		AP,
 		VOR,
+		VORD,
 		NDB,
+		ILS,
+		ILSD,
 		FIX
 	};
 	struct Node
@@ -29,9 +32,12 @@ namespace Internal
 	};
 	extern const int MAX_V;
 	extern int idCounter;
+	extern int SidMapId;
+	extern int StarMapId;
 	extern std::map<string, int> nodemap;
 	extern std::map<string, int> routemap;
 	extern std::vector<Node> nodes;
 	extern std::vector<string> routes;
 	extern std::vector<Edge> g[];
+	extern double FindRoute(int dep, int arr);
 }
