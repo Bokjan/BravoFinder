@@ -29,6 +29,7 @@ namespace Bravo
 			*dest = *src;
 			++dest, ++src;
 		}
+		*dest = '\0';
 	}
 	bool StringEquals(const char *_a, const char *_b)
 	{

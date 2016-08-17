@@ -38,8 +38,8 @@ namespace Internal
 				continue;
 			//Node
 			int seq;
-			char route[8];
-			char point[8];
+			char route[16];
+			char point[16];
 			double lat, lon;
 			int nodeId = nodes.size();
 			sscanf(row, "%s%d%s%lf%lf", route, &seq, point, &lat, &lon);
@@ -71,11 +71,15 @@ namespace Internal
 			{
 				double dist = Bravo::GetDistance_NM(lat, lon, nodes[prevNode].lat, nodes[prevNode].lon);
 				g[prevNode].push_back(Edge(thisNode, routemap[route], dist));
-				g[thisNode].push_back(Edge(thisNode, routemap[route], dist));
+				g[thisNode].push_back(Edge(prevNode, routemap[route], dist));
 			}
 			lastSeq = seq;
-			prevNode = nodemap[point];
+			prevNode = thisNode;
 		}
+		routemap["SID"] = SidMapId = routes.size();
+		routes.push_back("SID");
+		routemap["STAR"] = StarMapId = routes.size();
+		routes.push_back("STAR");
 		fclose(fp);
 	}
 	void InitializeDAFixes(char *file, char *ICAO)
@@ -133,15 +137,13 @@ namespace Internal
 		{
 			Node &FIX = nodes[it->second];
 			double dist = Bravo::GetDistance_NM(AP.lat, AP.lon, FIX.lat, FIX.lon);
-			//Edge.way refers to -1
-			g[AP.id].push_back(Edge(FIX.id, -1, dist));
+			g[AP.id].push_back(Edge(FIX.id, SidMapId, dist));
 		}
 		for(it = arrFix.begin(); it != arrFix.end(); ++it)
 		{
 			Node &FIX = nodes[it->second];
 			double dist = Bravo::GetDistance_NM(AP.lat, AP.lon, FIX.lat, FIX.lon);
-			//Edge.way refers to -1
-			g[FIX.id].push_back(Edge(AP.id, -1, dist));
+			g[FIX.id].push_back(Edge(AP.id, StarMapId, dist));
 		}
 		fclose(fp);
 	}

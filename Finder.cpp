@@ -6,6 +6,8 @@
 namespace Internal
 {
 	int idCounter = 0;
+	int SidMapId;
+	int StarMapId;
 	const int MAX_V = 150000;
 	const double LF_INF = 1.79769e+308;
 	std::vector<Node> nodes;
@@ -33,8 +35,17 @@ namespace Internal
 		std::vector<int>::reverse_iterator it;
 		for(it = path.rbegin(); it != path.rend(); ++it)
 		{
-			puts(nodes[*it].name);
+			//puts(nodes[*it].name);
 			//printf("%d\n", nodes[*it].id);
+			std::vector<Edge>::iterator ite;
+			for(ite = g[*it].begin(); it != path.rend() - 1 && ite != g[*it].end(); ++ite)
+			{
+				if(ite->to == *(it + 1))
+				{
+					printf("%s->%s %s %lf\n", nodes[*it].name, nodes[ite->to].name, routes[ite->way].c_str(), ite->dist);
+					break;
+				}
+			}
 		}
 	}
 	double FindRoute(int dep, int arr)

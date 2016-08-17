@@ -32,6 +32,8 @@ namespace Internal
 	};
 	extern const int MAX_V;
 	extern int idCounter;
+	extern int SidMapId;
+	extern int StarMapId;
 	extern std::map<string, int> nodemap;
 	extern std::map<string, int> routemap;
 	extern std::vector<Node> nodes;
