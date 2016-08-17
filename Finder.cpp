@@ -35,8 +35,6 @@ namespace Internal
 		std::vector<int>::reverse_iterator it;
 		for(it = path.rbegin(); it != path.rend(); ++it)
 		{
-			//puts(nodes[*it].name);
-			//printf("%d\n", nodes[*it].id);
 			std::vector<Edge>::iterator ite;
 			for(ite = g[*it].begin(); it != path.rend() - 1 && ite != g[*it].end(); ++ite)
 			{
@@ -74,5 +72,4 @@ namespace Internal
 		Path(dep, arr);
 		return d[arr];
 	}
-
 }
