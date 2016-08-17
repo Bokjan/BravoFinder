@@ -2,6 +2,7 @@
 #include "Interfaces.hpp"
 #include "Utilities.hpp"
 #include "DataConverter.hpp"
+#include "Finder.hpp"
 using std::string;
 namespace Bravo
 {
@@ -43,6 +44,12 @@ namespace Bravo
 		if(!IsFileExists(file))
 			return false;
 		Internal::InitializeDAFixes(file, (char*)ICAO);
+		return true;
+	}
+	bool FindRoute(const char *Dep, const char *Arr)
+	{
+		double a = Internal::FindRoute(Internal::nodemap[Dep], Internal::nodemap[Arr]);
+		printf("%lf\n", a);
 		return true;
 	}
 }

@@ -45,7 +45,7 @@ namespace Internal
 			sscanf(row, "%s%d%s%lf%lf", route, &seq, point, &lat, &lon);
 			nodes.push_back(Node(nodeId, lat, lon));
 			nodemap[string(point)] = nodeId;
-			Bravo::StringCopy(point, nodes[idCounter].name);
+			Bravo::StringCopy(point, nodes[nodeId].name);
 			//Route
 			if(routemap.find(route) != routemap.end())
 				continue;
@@ -87,49 +87,6 @@ namespace Internal
 		char row[1024];
 		std::map<string, int> depFix;
 		std::map<string, int> arrFix;
-		/*while(fgets(row, 1023, fp))
-		{
-			offset = 0;
-			while(offset < 800 &&sscanf(row + offset, "%s", word))
-			{
-				int len = Bravo::StringLength(word);
-				offset += len;
-				printf("offset=%d word=%s len=%d\n", offset, word, len);
-				if(Bravo::StringEquals("SID", word))
-				{
-					while(sscanf(row + offset, "%s", word))
-					{
-						len = Bravo::StringLength(word);
-						offset += len;
-						if(Bravo::StringEquals("FIX", word))
-						{
-							sscanf(row + offset, "%s", fix);
-							len = Bravo::StringLength(fix);
-							offset += len;
-						}
-					}
-					if(depFix.find(fix) == depFix.end())
-						depFix[fix] = nodemap[fix];
-				}
-				else if(Bravo::StringEquals("STAR", word))
-				{
-					while(sscanf(row + offset, "%s", word))
-					{
-						len = Bravo::StringLength(word);
-						offset += len;
-						if(Bravo::StringEquals("FIX", word))
-						{
-							sscanf(row + offset, "%s", fix);
-							len = Bravo::StringLength(fix);
-							offset += len;
-							break;
-						}
-					}
-					if(arrFix.find(fix) == arrFix.end())
-						arrFix[fix] = nodemap[fix];
-				}
-			}
-		}*/
 		while(fscanf(fp, "%s", word) != EOF)
 		{
 			if(Bravo::StringEquals("SID", word))

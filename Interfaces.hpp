@@ -7,4 +7,5 @@ namespace Bravo
 	extern bool InitializeAirports(void);
 	extern bool InitializeNavigationRoutes(void);
 	extern bool InitializeDAFixes(const char *ICAO);
+	extern bool FindRoute(const char *Dep, const char *Arr);
 }
