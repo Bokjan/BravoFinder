@@ -60,9 +60,9 @@ namespace Bravo
 	double GetDistance_KM(double lat1, double lon1, double lat2, double lon2)
 	{
 		double radLat1 = rad(lat1);
-	    double radLat2 = rad(lat2);
-	    double a = radLat1 - radLat2;
-	    double b = rad(lon1) - rad(lon2);
+		double radLat2 = rad(lat2);
+		double a = radLat1 - radLat2;
+		double b = rad(lon1) - rad(lon2);
 		double s = 2 * asin(sqrt(pow(sin(a / 2), 2) +
 			cos(radLat1) * cos(radLat2) * pow(sin(b / 2), 2)));
 		//Get the km value

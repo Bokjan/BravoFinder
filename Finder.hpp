@@ -48,5 +48,5 @@ namespace Internal
 	extern std::vector<Node> nodes;
 	extern std::vector<string> routes;
 	extern std::vector<Edge> g[];
-	extern double FindRoute(int dep, int arr);
+	extern string FindRoute(int dep, int arr);
 }

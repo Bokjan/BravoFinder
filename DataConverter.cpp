@@ -110,7 +110,7 @@ namespace Internal
 			{
 				double dist = Bravo::GetDistance_NM(lat, lon, nodes[prevNode].lat, nodes[prevNode].lon);
 				g[prevNode].push_back(Edge(thisNode, routemap[route], dist));
-				//g[thisNode].push_back(Edge(prevNode, routemap[route], dist));
+				g[thisNode].push_back(Edge(prevNode, routemap[route], dist));
 			}
 			lastSeq = seq;
 			prevNode = thisNode;

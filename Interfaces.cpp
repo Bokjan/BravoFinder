@@ -48,8 +48,8 @@ namespace Bravo
 	}
 	bool FindRoute(const char *Dep, const char *Arr)
 	{
-		double a = Internal::FindRoute(Internal::GetAPIndex(Dep), Internal::GetAPIndex(Arr));
-		printf("%lf\n", a);
+		string ReadableRoute = Internal::FindRoute(Internal::GetAPIndex(Dep), Internal::GetAPIndex(Arr));
+		puts(ReadableRoute.c_str());
 		return true;
 	}
 }

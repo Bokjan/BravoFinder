@@ -1,4 +1,5 @@
 #include "Finder.hpp"
+#include "Utilities.hpp"
 #include <queue>
 #include <vector>
 #include <utility>
@@ -13,7 +14,6 @@ namespace Internal
 	const double LF_INF = 100000.0;
 	std::vector<Node> nodes;
 	std::vector<string> routes;
-	//std::map<string, int> nodemap;
 	std::vector<HashNode> nodemap[MODULUS];
 	std::map<string, int> routemap;
 	std::vector<Edge> g[MAX_V];
@@ -23,7 +23,7 @@ namespace Internal
 	int pre[MAX_V];
 	double d[MAX_V];
 
-	void Path(int dep, int arr)
+	string Path(int dep, int arr)
 	{
 		std::vector<int> path;
 		int pos = arr;
@@ -35,6 +35,10 @@ namespace Internal
 			pos = pre[pos];
 		}
 		std::vector<int>::reverse_iterator it;
+		string ReadableRoute = nodes[dep].name;
+		ReadableRoute += " ";
+		string lastRoute = "";
+		double totalDist = 0;
 		for(it = path.rbegin(); it != path.rend(); ++it)
 		{
 			std::vector<Edge>::iterator ite;
@@ -42,13 +46,23 @@ namespace Internal
 			{
 				if(ite->to == *(it + 1))
 				{
-					printf("%s->%s %s %lf\n", nodes[*it].name, nodes[ite->to].name, routes[ite->way].c_str(), ite->dist);
+					totalDist += ite->dist;
+					printf("%s->%s\t%s\t%lf\n", nodes[*it].name, nodes[ite->to].name, routes[ite->way].c_str(), totalDist);
+					if(!Bravo::StringEquals(routes[ite->way].c_str(), lastRoute.c_str()))
+					{
+						ReadableRoute += routes[ite->way].c_str();
+						ReadableRoute += " ";
+						ReadableRoute += nodes[ite->to].name;
+						ReadableRoute += " ";
+					}
+					lastRoute = routes[ite->way];
 					break;
 				}
 			}
 		}
+		return ReadableRoute;
 	}
-	double FindRoute(int dep, int arr)
+	string FindRoute(int dep, int arr)
 	{
 		std::priority_queue<P, std::vector<P>, std::greater<P> > queue;
 		for(int i = 0; i != MAX_V; ++i)
@@ -71,7 +85,6 @@ namespace Internal
 					queue.push(P(d[it->to], it->to));
 				}
 		}
-		Path(dep, arr);
-		return d[arr];
+		return Path(dep, arr);
 	}
 }

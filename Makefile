@@ -1,8 +1,8 @@
-SRCS = main.cpp Interfaces.cpp Utilities.cpp DataConverter.cpp Finder.cpp
+SRCS = main.en-US.cpp Interfaces.cpp Utilities.cpp DataConverter.cpp Finder.cpp
 OBJS = $(SRCS:.cpp=.o)
 PROG = bravo.out
-CXX	= clang++
-CXXFLAGS = -O2 -g
+CXX	= g++
+CXXFLAGS = -O2
 $(PROG) : $(OBJS)
 		$(CXX) $(CXXFLAGS) -o $@ $^
 
