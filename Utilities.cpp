@@ -44,6 +44,15 @@ namespace Bravo
 		while(*a != '\0' || *b != '\0');
 		return true;
 	}
+	unsigned int BKDRHash(const char *_str)
+	{
+		char *str = (char*)_str;
+		unsigned int seed = 131;
+		unsigned int hash = 0;
+		while(*str)
+			hash = hash * seed + (*str++);
+		return hash & 0x7FFFFFFF;
+	}
 	inline double rad(double x)
 	{
 		return x * PI / 180.0;
