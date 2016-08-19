@@ -76,7 +76,7 @@ namespace Internal
 			{
 				double dist = Bravo::GetDistance_NM(lat, lon, nodes[prevNode].lat, nodes[prevNode].lon);
 				g[prevNode].push_back(Edge(thisNode, routemap[route], dist));
-				//g[thisNode].push_back(Edge(prevNode, routemap[route], dist));
+				g[thisNode].push_back(Edge(prevNode, routemap[route], dist));
 			}
 			lastSeq = seq;
 			prevNode = thisNode;
@@ -86,6 +86,19 @@ namespace Internal
 		routemap["STAR"] = StarMapId = routes.size();
 		routes.push_back("STAR");
 		fclose(fp);
+	}
+	inline void GetDepArrFixString(FILE *fp, char *str)
+	{
+		fscanf(fp, "%s", str);
+		/*NAVDATA appends "NB" to the end of a NDB waypoint
+		  Example:
+		  There is an NDB near ZBAA called CDY(Che Dao Yu)
+		  in SIDSTAR files CDY becomes CDYNB
+		  So the following codes detect and change these NDBs to correct format
+		 */
+		int len = Bravo::StringLength(str);
+		if(len == 5 && str[len - 1] == 'B' && str[len - 2] == 'N')
+			str[len - 2] = '\0';
 	}
 	void InitializeDAFixes(char *file, char *ICAO)
 	{
@@ -104,7 +117,7 @@ namespace Internal
 				while(fscanf(fp, "%s", word))
 				{
 					if(Bravo::StringEquals("FIX", word))
-						fscanf(fp, "%s", fix);
+						GetDepArrFixString(fp, word);
 					else if(Bravo::StringEquals("SID", word))
 					{
 						if(depFix.find(fix) == depFix.end())
@@ -128,7 +141,7 @@ namespace Internal
 				{
 					if(Bravo::StringEquals("FIX", word))
 					{
-						fscanf(fp, "%s", fix);
+						GetDepArrFixString(fp, word);
 						break;
 					}
 				}

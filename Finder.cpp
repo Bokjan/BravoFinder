@@ -9,7 +9,7 @@ namespace Internal
 	int SidMapId;
 	int StarMapId;
 	const int MAX_V = 150000;
-	const double LF_INF = 1.79769e+308;
+	const double LF_INF = 100000.0;
 	std::vector<Node> nodes;
 	std::vector<string> routes;
 	std::map<string, int> nodemap;
