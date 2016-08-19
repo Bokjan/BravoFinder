@@ -3,8 +3,6 @@
 #define debug(...) fprintf(stderr, __VA_ARGS__)
 int main(int argc, char *argv[])
 {
-	//char dep[] = "ZSAM";
-	//char arr[] = "ZSFZ";
 	char *dep = argv[1];
 	char *arr = argv[2];
 	bool ret = Bravo::SetNavDataPath("/Volumes/HGST_D/Prepar3D v3/PMDG/");
