@@ -11,7 +11,12 @@ int main(int argc, char *argv[])
 	FILE *fp = fopen("navdata.txt", "r");
 	fgets(NavDataPath, 1023, fp);
 	fclose(fp);
-	NavDataPath[Bravo::StringLength(NavDataPath) - 1] = '\0';
+	for(int i = 1023; i > 0; --i)
+		if(NavDataPath[i] == '\\' || NavDataPath[i] == '/')
+		{
+			NavDataPath[i + 1] = '\0';
+			break;
+		}
 	if(!Bravo::SetNavDataPath(NavDataPath))
 	{
 		puts("Configuration Error!");
