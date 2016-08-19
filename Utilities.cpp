@@ -44,7 +44,7 @@ namespace Bravo
 		while(*a != '\0' || *b != '\0');
 		return true;
 	}
-	unsigned int BKDRHash(const char *_str)
+	unsigned int BkdrHash(const char *_str)
 	{
 		char *str = (char*)_str;
 		unsigned int seed = 131;

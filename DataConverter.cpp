@@ -11,7 +11,7 @@ namespace Internal
 	{
 		static int id = 0;
 		std::vector<HashNode>::iterator it;
-		int hash = Bravo::BKDRHash(str) % MODULUS;
+		int hash = Bravo::BkdrHash(str) % MODULUS;
 		std::vector<HashNode> &vector = nodemap[hash];
 		for(it = vector.begin(); it != vector.end(); ++it)
 			if(it->lat == lat)
@@ -22,7 +22,7 @@ namespace Internal
 	int GetAPIndex(const char *str)
 	{
 		std::vector<HashNode>::iterator it;
-		int hash = Bravo::BKDRHash(str) % MODULUS;
+		int hash = Bravo::BkdrHash(str) % MODULUS;
 		std::vector<HashNode> &vector = nodemap[hash];
 		for(it = vector.begin(); it != vector.end(); ++it)
 			return it->id;
@@ -33,7 +33,7 @@ namespace Internal
 		double alat = nodes[ApId].lat;
 		double alon = nodes[ApId].lon;
 		std::vector<HashNode>::iterator it;
-		int hash = Bravo::BKDRHash(str) % MODULUS;
+		int hash = Bravo::BkdrHash(str) % MODULUS;
 		std::vector<HashNode> &vector = nodemap[hash];
 		for(it = vector.begin(); it != vector.end(); ++it)
 		{
