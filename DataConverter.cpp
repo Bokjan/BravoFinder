@@ -1,11 +1,49 @@
 #include <map>
 #include <cstdio>
 #include <string>
+#include <vector>
 #include "Finder.hpp"
 #include "Utilities.hpp"
 using std::string;
 namespace Internal
 {
+	int GetNodeIndex(char *str, double lat)
+	{
+		static int id = 0;
+		std::vector<HashNode>::iterator it;
+		int hash = Bravo::BkdrHash(str) % MODULUS;
+		std::vector<HashNode> &vector = nodemap[hash];
+		for(it = vector.begin(); it != vector.end(); ++it)
+			if(it->lat == lat)
+				return it->id;
+		nodemap[hash].push_back(HashNode(id, lat));
+		return id++;
+	}
+	int GetAPIndex(const char *str)
+	{
+		std::vector<HashNode>::iterator it;
+		int hash = Bravo::BkdrHash(str) % MODULUS;
+		std::vector<HashNode> &vector = nodemap[hash];
+		for(it = vector.begin(); it != vector.end(); ++it)
+			return it->id;
+		return 0;
+	}
+	int GetDAIndex(int ApId, char *str)
+	{
+		double alat = nodes[ApId].lat;
+		double alon = nodes[ApId].lon;
+		std::vector<HashNode>::iterator it;
+		int hash = Bravo::BkdrHash(str) % MODULUS;
+		std::vector<HashNode> &vector = nodemap[hash];
+		for(it = vector.begin(); it != vector.end(); ++it)
+		{
+			double flat = it->lat;
+			double flon = nodes[it->id].lon;
+			if(Bravo::GetDistance_NM(alat, alon, flat, flon) < 1000)
+				return it->id;
+		}
+		return 0;
+	}
 	void InitializeAirports(string file)
 	{
 		FILE *fp = fopen(file.c_str(), "r");
@@ -17,11 +55,10 @@ namespace Internal
 		{
 			if(row[0] == ';')
 				continue;
-			int currentId = nodes.size();
 			for(int i = 0; i < 4; ++i)
 				icao[i] = row[i];
 			sscanf(row + 4, "%lf%lf", &lat, &lon);
-			nodemap[string(icao)] = currentId;
+			int currentId = GetNodeIndex(icao, lat);
 			nodes.push_back(Node(currentId, lat, lon));
 			for(int i = 0; i < 5; ++i)
 				nodes[currentId].name[i] = icao[i];
@@ -41,16 +78,13 @@ namespace Internal
 			char route[16];
 			char point[16];
 			double lat, lon;
-			int nodeId = nodes.size();
 			sscanf(row, "%s%d%s%lf%lf", route, &seq, point, &lat, &lon);
-			if(nodemap.find(point) == nodemap.end())
+			int nodeId = GetNodeIndex(point, lat);
+			if(nodeId == nodes.size())
 			{
 				nodes.push_back(Node(nodeId, lat, lon));
-				nodemap[string(point)] = nodeId;
 				Bravo::StringCopy(point, nodes[nodeId].name);
 			}
-			else
-				nodeId = nodemap[point];
 			//Route
 			if(routemap.find(route) != routemap.end())
 				continue;
@@ -71,12 +105,12 @@ namespace Internal
 			char point[8];
 			double lat, lon;
 			sscanf(row, "%s%d%s%lf%lf", route, &seq, point, &lat, &lon);
-			thisNode = nodemap[point];
+			thisNode = GetNodeIndex(point, lat);
 			if(lastSeq == seq - 1)
 			{
 				double dist = Bravo::GetDistance_NM(lat, lon, nodes[prevNode].lat, nodes[prevNode].lon);
 				g[prevNode].push_back(Edge(thisNode, routemap[route], dist));
-				g[thisNode].push_back(Edge(prevNode, routemap[route], dist));
+				//g[thisNode].push_back(Edge(prevNode, routemap[route], dist));
 			}
 			lastSeq = seq;
 			prevNode = thisNode;
@@ -90,14 +124,15 @@ namespace Internal
 	inline void GetDepArrFixString(FILE *fp, char *str)
 	{
 		fscanf(fp, "%s", str);
-		/*NAVDATA appends "NB" to the end of a NDB waypoint
+		/*
+		  NAVDATA appends "NB" to the end of a NDB waypoint
 		  Example:
 		  There is an NDB near ZBAA called CDY(Che Dao Yu)
 		  in SIDSTAR files CDY becomes CDYNB
 		  So the following codes detect and change these NDBs to correct format
-		 */
+		*/
 		int len = Bravo::StringLength(str);
-		if(len == 5 && str[len - 1] == 'B' && str[len - 2] == 'N')
+		if(len > 3 && str[len - 1] == 'B' && str[len - 2] == 'N')
 			str[len - 2] = '\0';
 	}
 	void InitializeDAFixes(char *file, char *ICAO)
@@ -109,6 +144,7 @@ namespace Internal
 		char row[1024];
 		std::map<string, int> depFix;
 		std::map<string, int> arrFix;
+		int ApId = GetAPIndex(ICAO);
 		while(fscanf(fp, "%s", word) != EOF)
 		{
 			if(Bravo::StringEquals("SID", word))
@@ -117,22 +153,22 @@ namespace Internal
 				while(fscanf(fp, "%s", word))
 				{
 					if(Bravo::StringEquals("FIX", word))
-						GetDepArrFixString(fp, word);
+						GetDepArrFixString(fp, fix);
 					else if(Bravo::StringEquals("SID", word))
 					{
 						if(depFix.find(fix) == depFix.end())
-							depFix[fix] = nodemap[fix];
+							depFix[fix] = GetDAIndex(ApId, fix);
 						goto SID_LABEL;
 					}
 					else if(Bravo::StringEquals("STAR", word))
 					{
 						if(depFix.find(fix) == depFix.end())
-							depFix[fix] = nodemap[fix];
+							depFix[fix] = GetDAIndex(ApId, fix);
 						goto STAR_LABEL;
 					}
 				}
 				if(depFix.find(fix) == depFix.end())
-					depFix[fix] = nodemap[fix];
+					depFix[fix] = GetDAIndex(ApId, fix);
 			}
 			else if(Bravo::StringEquals("STAR", word))
 			{
@@ -141,16 +177,16 @@ namespace Internal
 				{
 					if(Bravo::StringEquals("FIX", word))
 					{
-						GetDepArrFixString(fp, word);
+						GetDepArrFixString(fp, fix);
 						break;
 					}
 				}
 				if(arrFix.find(fix) == arrFix.end())
-					arrFix[fix] = nodemap[fix];
+					arrFix[fix] = GetDAIndex(ApId, fix);
 			}
 		}
 		std::map<string, int>::iterator it;
-		Node &AP = nodes[nodemap[ICAO]];
+		Node &AP = nodes[GetAPIndex(ICAO)];
 		for(it = depFix.begin(); it != depFix.end(); ++it)
 		{
 			Node &FIX = nodes[it->second];

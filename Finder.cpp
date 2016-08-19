@@ -9,10 +9,12 @@ namespace Internal
 	int SidMapId;
 	int StarMapId;
 	const int MAX_V = 150000;
+	const int MODULUS = 1000003;
 	const double LF_INF = 100000.0;
 	std::vector<Node> nodes;
 	std::vector<string> routes;
-	std::map<string, int> nodemap;
+	//std::map<string, int> nodemap;
+	std::vector<HashNode> nodemap[MODULUS];
 	std::map<string, int> routemap;
 	std::vector<Edge> g[MAX_V];
 

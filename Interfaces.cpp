@@ -48,7 +48,7 @@ namespace Bravo
 	}
 	bool FindRoute(const char *Dep, const char *Arr)
 	{
-		double a = Internal::FindRoute(Internal::nodemap[Dep], Internal::nodemap[Arr]);
+		double a = Internal::FindRoute(Internal::GetAPIndex(Dep), Internal::GetAPIndex(Arr));
 		printf("%lf\n", a);
 		return true;
 	}

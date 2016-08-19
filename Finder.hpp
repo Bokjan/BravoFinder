@@ -23,6 +23,13 @@ namespace Internal
 		Node(int id, double lat, double lon):
 			id(id), lat(lat), lon(lon) { }
 	};
+	struct HashNode
+	{
+		int id;
+		double lat;
+		HashNode(int id, double lat):
+			id(id), lat(lat) { }
+	};
 	struct Edge
 	{
 		int to, way;
@@ -31,10 +38,12 @@ namespace Internal
 			to(to), way(way), dist(dist) { }
 	};
 	extern const int MAX_V;
+	extern const int MODULUS;
 	extern int idCounter;
 	extern int SidMapId;
 	extern int StarMapId;
-	extern std::map<string, int> nodemap;
+	//extern std::map<string, int> nodemap;
+	extern std::vector<HashNode> nodemap[];
 	extern std::map<string, int> routemap;
 	extern std::vector<Node> nodes;
 	extern std::vector<string> routes;
