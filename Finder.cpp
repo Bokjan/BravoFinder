@@ -35,10 +35,11 @@ namespace Internal
 			pos = pre[pos];
 		}
 		std::vector<int>::reverse_iterator it;
-		string ReadableRoute = nodes[dep].name;
-		ReadableRoute += " ";
+		string ReadableRoute;
 		string lastRoute = "";
 		double totalDist = 0;
+		std::vector<string> wpt;
+		std::vector<string> rte;
 		for(it = path.rbegin(); it != path.rend(); ++it)
 		{
 			std::vector<Edge>::iterator ite;
@@ -50,16 +51,23 @@ namespace Internal
 					printf("%s->%s\t%s\t%lf\n", nodes[*it].name, nodes[ite->to].name, routes[ite->way].c_str(), totalDist);
 					if(!Bravo::StringEquals(routes[ite->way].c_str(), lastRoute.c_str()))
 					{
-						ReadableRoute += routes[ite->way].c_str();
-						ReadableRoute += " ";
-						ReadableRoute += nodes[ite->to].name;
-						ReadableRoute += " ";
+						wpt.push_back(nodes[*it].name);
+						rte.push_back(routes[ite->way]);
 					}
 					lastRoute = routes[ite->way];
 					break;
 				}
 			}
 		}
+		std::vector<string>::iterator it1, it2;
+		it1 = wpt.begin();
+		it2 = rte.begin();
+		for(; it1 != wpt.end(); ++it1, ++it2)
+		{
+			ReadableRoute += *it1 + " ";
+			ReadableRoute += *it2 + " ";
+		}
+		ReadableRoute += nodes[arr].name;
 		return ReadableRoute;
 	}
 	string FindRoute(int dep, int arr)
