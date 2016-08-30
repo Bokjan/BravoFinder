@@ -71,7 +71,7 @@ namespace Internal
 		char row[128];
 		while(fgets(row, 127, fp))
 		{
-			if(row[0] == ';')
+			if(row[0] == ';' || row[0] == '/')
 				continue;
 			//Node
 			int seq;

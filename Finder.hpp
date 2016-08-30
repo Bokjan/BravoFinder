@@ -17,7 +17,6 @@ namespace Internal
 	struct Node
 	{
 		int id;
-		//NodeType type;
 		char name[8];
 		double lat, lon;
 		Node(int id, double lat, double lon):
@@ -42,7 +41,6 @@ namespace Internal
 	extern int idCounter;
 	extern int SidMapId;
 	extern int StarMapId;
-	//extern std::map<string, int> nodemap;
 	extern std::vector<HashNode> nodemap[];
 	extern std::map<string, int> routemap;
 	extern std::vector<Node> nodes;

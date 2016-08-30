@@ -18,7 +18,7 @@ namespace Internal
 	std::map<string, int> routemap;
 	std::vector<Edge> g[MAX_V];
 
-	typedef std::pair<double, int> P;//first 最短距离, second 顶点编号
+	typedef std::pair<double, int> P;
 
 	int pre[MAX_V];
 	double d[MAX_V];
@@ -93,6 +93,9 @@ namespace Internal
 					queue.push(P(d[it->to], it->to));
 				}
 		}
+		if(d[arr] == LF_INF)
+			pre[arr] = dep;
+		//return string("");
 		return Path(dep, arr);
 	}
 }
