@@ -4,7 +4,7 @@
 #include "Utilities.hpp"
 #define debug(...) fprintf(stderr, __VA_ARGS__)
 using std::string;
-int main(int argc, char *argv[])
+int no_compile_main(int argc, char *argv[])
 {
 	string dep, arr;
 	char NavDataPath[1024];
