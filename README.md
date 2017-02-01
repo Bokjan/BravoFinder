@@ -2,7 +2,7 @@
 A flight route finder tool written in C++.
 
 # Introduction
-Very simple route finder based on PMDG navigation dataset. For more detailed information, checkout the link in the description(simplified chinese only).
+Very simple route finder based on PMDG navigation dataset. For more detailed information, checkout the link in the description(simplified Chinese only).
 
 # How to build
 
