@@ -147,7 +147,7 @@ namespace Internal
 		int ApId = GetAPIndex(ICAO);
 		while(fscanf(fp, "%s", word) != EOF)
 		{
-			if(Bravo::StringEquals("SID", word))
+  			if(Bravo::StringEquals("SIDS", word))
 			{
 				SID_LABEL:
 				while(fscanf(fp, "%s", word))
@@ -165,6 +165,10 @@ namespace Internal
 						if(depFix.find(fix) == depFix.end())
 							depFix[fix] = GetDAIndex(ApId, fix);
 						goto STAR_LABEL;
+					}
+					else if (Bravo::StringEquals("ENDSIDS", word)) 
+					{
+						break;
 					}
 				}
 				if(depFix.find(fix) == depFix.end())
