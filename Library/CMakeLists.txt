@@ -7,5 +7,5 @@ set(SOURCE_FILES
     DataSet/DataSet.cpp
     DataStructure/Coordinate.cpp
     DataStructure/GraphHelper.cpp
-    DataStructure/Graph.cpp)
+    DataStructure/Graph.cpp DataStructure/Vertex.cpp)
 add_library(bfinder SHARED ${SOURCE_FILES})

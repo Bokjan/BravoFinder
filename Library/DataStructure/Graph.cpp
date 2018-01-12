@@ -52,8 +52,8 @@ void bf::Graph::AddUndirectedEdge(int v1, int v2, int route)
 	auto c1 = vertices[v1].coord;
 	auto c2 = vertices[v2].coord;
 	float dist = DistanceBetween(c1.latitude, c1.longitude, c2.latitude, c2.longitude);
-	edges[v1].push_back(Edge(v2, dist, route));
-	edges[v2].push_back(Edge(v1, dist, route));
+	edges[v1].emplace_back(Edge(v2, dist, route));
+	edges[v2].emplace_back(Edge(v1, dist, route));
 }
 
 void bf::Graph::AddEdge(int v1, int v2, int route)
@@ -62,7 +62,7 @@ void bf::Graph::AddEdge(int v1, int v2, int route)
 	auto c1 = vertices[v1].coord;
 	auto c2 = vertices[v2].coord;
 	float dist = DistanceBetween(c1.latitude, c1.longitude, c2.latitude, c2.longitude);
-	edges[v1].push_back(Edge(v2, dist, route));
+	edges[v1].emplace_back(Edge(v2, dist, route));
 }
 
 void bf::Graph::SetGraphHelper(bf::GraphHelper *gh)

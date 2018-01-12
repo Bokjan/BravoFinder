@@ -18,13 +18,8 @@ void bf::GraphHelper::AddVertex(const string &ident, float latitude, float longi
 {
 	if (FindVertexId(ident, latitude) != -1)
 		return;
-	Vertex v;
-	v.id = vid++;
-	v.coord.latitude = latitude;
-	v.coord.longitude = longitude;
-	v.name = ident;
-	vertices.push_back(v);
-	vmap.insert(std::make_pair(ident, v.id));
+	vertices.emplace_back(Vertex(vid, Coordinate(latitude, longitude), ident));
+	vmap.insert(std::make_pair(ident, vid++));
 }
 
 int bf::GraphHelper::FindVertexId(const string &ident, float latitude)
@@ -50,7 +45,7 @@ const std::string &bf::GraphHelper::GetRouteString(int index)
 
 void bf::GraphHelper::AddRouteString(const std::string &route)
 {
-	routes.push_back(route);
+	routes.emplace_back(route);
 	rmap.insert(std::make_pair(route, (int) (routes.size() - 1)));
 }
 

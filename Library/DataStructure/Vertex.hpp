@@ -12,6 +12,10 @@ namespace bf
 		int id;
 		Coordinate coord;
 		std::string name;
+
+		Vertex(void);
+
+		Vertex(int id, Coordinate coord, std::string name);
 	};
 }
 
