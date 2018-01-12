@@ -36,6 +36,8 @@ namespace bf
 		void AddUndirectedEdge(int v1, int v2, int route);
 
 		void SetGraphHelper(GraphHelper *graphHelper);
+
+		void Dijkstra(int start, int terminal);
 	};
 }
 #endif //LIBRARY_GRAPH_HPP

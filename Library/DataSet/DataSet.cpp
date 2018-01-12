@@ -15,7 +15,91 @@ namespace bf
 	{
 	public:
 		std::set<string> initializedAirports;
+
+		std::set<int> ParseSID(int vid, std::ifstream &is, GraphHelper *gh);
+
+		std::set<int> ParseSTAR(int vid, std::ifstream &is, GraphHelper *gh);
 	};
+}
+
+static inline void TruncateNB(string &s)
+{
+	if (s.size() < 4)
+		return;
+	if (s[s.size() - 2] == 'N'
+	    && s[s.size() - 1] == 'B')
+		s.pop_back(), s.pop_back();
+}
+
+std::set<int> bf::InternalStruct::ParseSID(int vid, std::ifstream &is, GraphHelper *gh)
+{
+	std::set<int> v;
+	static auto vertices = gh->GetVertices();
+	const static int bufferSize = 1024;
+	char buffer[bufferSize];
+	string s, fix;
+	while (is >> s)
+		if (s == "SIDS")
+			break;
+	while (is.getline(buffer, bufferSize))
+	{
+		if(buffer[0] == 'E' && buffer[1] == 'N' && buffer[2] == 'D')
+			break;
+		std::istringstream iss(buffer);
+		while (iss >> s)
+			if (s == "FIX")
+				iss >> fix;
+		TruncateNB(fix);
+		int fixid = -1;
+		auto range = gh->GetVertexRange(fix);
+		for (auto i = range.first; i != range.second; ++i)
+		{
+			// magic number, solving duplicated fixes
+			if (vertices[vid].coord.DistanceFrom(vertices[i->second].coord) < 400)
+			{
+				fixid = i->second;
+				break;
+			}
+		}
+		if (fixid != -1)
+			v.insert(fixid);
+	}
+	return v;
+}
+
+std::set<int> bf::InternalStruct::ParseSTAR(int vid, std::ifstream &is, GraphHelper *gh)
+{
+	std::set<int> v;
+	static auto vertices = gh->GetVertices();
+	const static int bufferSize = 1024;
+	char buffer[bufferSize];
+	string s, fix;
+	while (is.getline(buffer, bufferSize))
+	{
+		if(buffer[0] == 'E' && buffer[1] == 'N' && buffer[2] == 'D')
+			break;
+		std::istringstream iss(buffer);
+		iss >> s;
+		while (iss >> s)
+			if (s == "FIX")
+			{
+				iss >> fix;
+				break;
+			}
+		TruncateNB(fix);
+		int fixId = -1;
+		auto range = gh->GetVertexRange(fix);
+		for (auto i = range.first; i != range.second; ++i)
+			// magic number, solving duplicated fixes
+			if (vertices[vid].coord.DistanceFrom(vertices[i->second].coord) < 400)
+			{
+				fixId = i->second;
+				break;
+			}
+		if (fixId != -1)
+			v.insert(fixId);
+	}
+	return v;
 }
 
 void bf::DataSet::SetDataPath(const std::string &s)
@@ -37,7 +121,6 @@ bf::DataSet::~DataSet(void)
 
 void bf::DataSet::InitializeAirports(void)
 {
-	puts("iap");
 	static bool done = false;
 	if (done)
 		return;
@@ -61,7 +144,6 @@ void bf::DataSet::InitializeAirports(void)
 
 void bf::DataSet::InitializeFixes(void)
 {
-	puts("if");
 	static bool done = false;
 	if (done)
 		return;
@@ -89,7 +171,6 @@ void bf::DataSet::InitializeFixes(void)
 
 void bf::DataSet::InitializeRoutes(void)
 {
-	puts("ir");
 	static bool done = false;
 	if (done)
 		return;
@@ -145,23 +226,38 @@ void bf::DataSet::Initialize(void)
 	InitializeFixes();
 	InitializeRoutes();
 	InitializeRoutes();
-	puts("init complete");
 }
 
 void bf::DataSet::InitializeAirport(string s)
 {
 	for (auto &i : s)
 		i = (char) toupper(i);
-	if(is->initializedAirports.find(s) != is->initializedAirports.end())
+	if (is->initializedAirports.find(s) != is->initializedAirports.end())
 		return;
+	static auto SID_ID = graph->graphHelper->GetRouteIndex("SID");
+	static auto STAR_ID = graph->graphHelper->GetRouteIndex("STAR");
+	static auto vertices = graph->graphHelper->GetVertices();
 	is->initializedAirports.insert(s);
-	printf("init ap %s\n", s.c_str());
 	std::ostringstream oss;
-	oss << path << "/SIDSTARS/" << s;
+	oss << path << "/SIDSTARS/" << s << ".txt";
 	std::ifstream ifs(oss.str());
 	if (!ifs.is_open())
 		throw std::runtime_error("Failed to open file: SIDSTARS/" + s + ".txt");
-	const static int bufferSize = 1024;
-	char buffer[bufferSize];
+	int airportVid = graph->graphHelper->FindVertexId(s);
+	if (airportVid == -1)
+		throw std::invalid_argument(s + " vertex doesn't exist");
+	auto sidFixes = is->ParseSID(airportVid, ifs, graph->graphHelper);
+	auto starFixes = is->ParseSTAR(airportVid, ifs, graph->graphHelper);
+	for (auto i : sidFixes)
+		graph->AddEdge(airportVid, i, SID_ID);
+	for (auto i : starFixes)
+		graph->AddEdge(i, airportVid, STAR_ID);
+	ifs.close();
+}
 
+void bf::DataSet::Dijkstra(const string &i, const string &j)
+{
+	int u = graph->graphHelper->FindVertexId(i);
+	int v = graph->graphHelper->FindVertexId(j);
+	graph->Dijkstra(u, v);
 }

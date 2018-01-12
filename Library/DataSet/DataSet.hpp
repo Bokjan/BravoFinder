@@ -5,13 +5,16 @@
 
 namespace bf
 {
+	using std::string;
+
 	class Graph;
+
 	class InternalStruct;
 
 	class DataSet
 	{
 	private:
-		std::string path;
+		string path;
 		Graph *graph;
 		InternalStruct *is;
 
@@ -26,11 +29,13 @@ namespace bf
 
 		~DataSet(void);
 
-		void SetDataPath(const std::string &s);
+		void SetDataPath(const string &s);
 
 		void Initialize(void);
 
-		void InitializeAirport(std::string s);
+		void InitializeAirport(string s);
+
+		void Dijkstra(const string &i, const string &j);
 	};
 }
 #endif //LIBRARY_DATASET_HPP

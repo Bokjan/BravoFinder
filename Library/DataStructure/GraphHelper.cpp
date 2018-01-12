@@ -1,5 +1,7 @@
 #include "GraphHelper.hpp"
 
+using std::string;
+
 inline static float abs(float x)
 {
 	return x > 0 ? x : -x;
@@ -61,4 +63,10 @@ int bf::GraphHelper::GetRouteIndex(const std::string &route)
 {
 	auto f = rmap.find(route);
 	return f == rmap.end() ? -1 : f->second;
+}
+
+std::pair<std::multimap<string, int>::iterator, std::multimap<string, int>::iterator>
+bf::GraphHelper::GetVertexRange(const std::string &ident)
+{
+	return vmap.equal_range(ident);
 }

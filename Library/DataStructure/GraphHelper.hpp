@@ -30,6 +30,9 @@ namespace bf
 
 		int FindVertexId(const string &ident, float latitude);
 
+		std::pair<std::multimap<string, int>::iterator, std::multimap<string, int>::iterator>
+		GetVertexRange(const string &ident);
+
 		void AddRouteString(const string &route);
 
 		const string &GetRouteString(int index);

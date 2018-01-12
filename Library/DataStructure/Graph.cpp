@@ -1,4 +1,6 @@
+#include <queue>
 #include <cmath>
+#include <cstdio>
 #include "Graph.hpp"
 
 bf::Graph::Graph(void)
@@ -17,13 +19,6 @@ bf::Graph::Edge::Edge(int id, float dist, int routeId) :
 		id(id), dist(dist), routeId(routeId)
 {
 
-}
-
-void bf::Graph::AddEdge(int v1, int v2, int route)
-{
-	auto vertices = graphHelper->GetVertices();
-	float dist = vertices[v1].coord.DistanceFrom(vertices[v2].coord);
-	edges[v1].emplace_back(Edge(v2, dist, route));
 }
 
 static inline double rad(double x)
@@ -61,7 +56,45 @@ void bf::Graph::AddUndirectedEdge(int v1, int v2, int route)
 	edges[v2].push_back(Edge(v1, dist, route));
 }
 
-void bf::Graph::SetGraphHelper(bf::GraphHelper *graphHelper)
+void bf::Graph::AddEdge(int v1, int v2, int route)
 {
-	Graph::graphHelper = graphHelper;
+	static auto vertices = graphHelper->GetVertices();
+	auto c1 = vertices[v1].coord;
+	auto c2 = vertices[v2].coord;
+	float dist = DistanceBetween(c1.latitude, c1.longitude, c2.latitude, c2.longitude);
+	edges[v1].push_back(Edge(v2, dist, route));
+}
+
+void bf::Graph::SetGraphHelper(bf::GraphHelper *gh)
+{
+	graphHelper = gh;
+}
+
+void bf::Graph::Dijkstra(int start, int terminal)
+{
+	using P = std::pair<float, int>;
+	const static float INF = 30000.0;
+	auto d = new float[MAX_VERTICES];
+	std::priority_queue<P, std::vector<P>, std::greater<P>> pq;
+	std::fill(d, d + MAX_VERTICES, INF);
+	d[start] = 0;
+	pq.push(std::make_pair(0.0, start));
+	while (!pq.empty())
+	{
+		auto c = pq.top();
+		pq.pop();
+		if (d[c.second] < c.first)
+			continue;
+		for (auto i : edges[c.second])
+		{
+			if (d[c.second] + i.dist < d[i.id])
+			{
+				d[i.id] = d[c.second] + i.dist;
+				pq.push(std::make_pair(d[i.id], i.id));
+			}
+		}
+	}
+	printf("%f\n", d[terminal]);
+	printf("%d %d\n", start, terminal);
+	delete[] d;
 }
