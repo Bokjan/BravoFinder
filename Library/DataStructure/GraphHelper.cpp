@@ -38,9 +38,14 @@ int bf::GraphHelper::FindVertexId(const std::string &ident)
 	return f == vmap.end() ? -1 : f->second;
 }
 
-const std::string &bf::GraphHelper::GetRouteString(int index)
+string bf::GraphHelper::GetRouteString(int index)
 {
 	return routes[index];
+}
+
+string bf::GraphHelper::GetVertexString(int index)
+{
+	return vertices[index].name;
 }
 
 void bf::GraphHelper::AddRouteString(const std::string &route)

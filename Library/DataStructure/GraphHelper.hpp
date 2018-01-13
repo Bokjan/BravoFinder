@@ -35,7 +35,9 @@ namespace bf
 
 		void AddRouteString(const string &route);
 
-		const string &GetRouteString(int index);
+		string GetRouteString(int index);
+
+		string GetVertexString(int index);
 
 		int GetRouteIndex(const string &route);
 

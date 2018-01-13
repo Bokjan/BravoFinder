@@ -2,6 +2,8 @@
 #define LIBRARY_DATASET_HPP
 
 #include <string>
+#include <vector>
+#include "Leg.hpp"
 
 namespace bf
 {
@@ -35,7 +37,9 @@ namespace bf
 
 		void InitializeAirport(string s);
 
-		void Dijkstra(const string &i, const string &j);
+		string GenerateRouteString(const std::vector<Leg> &legs);
+
+		std::vector<Leg> FindDetailedRoute(const string &depature, const string &arrival);
 	};
 }
 #endif //LIBRARY_DATASET_HPP

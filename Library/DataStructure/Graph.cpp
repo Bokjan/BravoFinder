@@ -1,6 +1,7 @@
 #include <queue>
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include "Graph.hpp"
 
 bf::Graph::Graph(void)
@@ -70,11 +71,14 @@ void bf::Graph::SetGraphHelper(bf::GraphHelper *gh)
 	graphHelper = gh;
 }
 
-void bf::Graph::Dijkstra(int start, int terminal)
+std::vector<bf::Leg> bf::Graph::Dijkstra(int start, int terminal)
 {
+	std::vector<Leg> ret;
 	using P = std::pair<float, int>;
 	const static float INF = 30000.0;
 	auto d = new float[MAX_VERTICES];
+	auto prev = new int[MAX_VERTICES];
+	static auto vertices = graphHelper->GetVertices();
 	std::priority_queue<P, std::vector<P>, std::greater<P>> pq;
 	std::fill(d, d + MAX_VERTICES, INF);
 	d[start] = 0;
@@ -89,12 +93,50 @@ void bf::Graph::Dijkstra(int start, int terminal)
 		{
 			if (d[c.second] + i.dist < d[i.id])
 			{
+				prev[i.id] = c.second;
 				d[i.id] = d[c.second] + i.dist;
 				pq.push(std::make_pair(d[i.id], i.id));
 			}
 		}
 	}
-	printf("%f\n", d[terminal]);
-	printf("%d %d\n", start, terminal);
+	if (d[terminal] == INF)
+		ret.emplace_back(Leg(vertices[start].coord.DistanceFrom(vertices[terminal].coord),
+		                     graphHelper->GetVertexString(start),
+		                     graphHelper->GetVertexString(terminal), "DCT"));
+	else
+		this->ConstructLegs(ret, start, terminal, d, prev);
 	delete[] d;
+	delete[] prev;
+	return ret;
+}
+
+void bf::Graph::ConstructLegs(std::vector<Leg> &l, int s, int t, float *d, int *prev)
+{
+	std::vector<int> path;
+	for (int pos = t;;)
+	{
+		path.emplace_back(pos);
+		if (pos == s)
+			break;
+		pos = prev[pos];
+	}
+	std::reverse(path.begin(), path.end());
+	for (auto i = 0; i < path.size() - 1; ++i)
+	{
+		string route;
+		float distance = 0;
+		auto from = graphHelper->GetVertexString(path[i]);
+		auto to = graphHelper->GetVertexString(path[i + 1]);
+		for (auto &e : edges[path[i]])
+		{
+			if (e.id == path[i + 1])
+			{
+				if (!route.empty() && route != "DCT")
+					break;
+				distance = e.dist;
+				route = graphHelper->GetRouteString(e.routeId);
+			}
+		}
+		l.emplace_back(Leg(distance, from, to, route));
+	}
 }

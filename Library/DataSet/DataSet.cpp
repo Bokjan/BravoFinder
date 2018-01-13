@@ -43,7 +43,7 @@ std::set<int> bf::InternalStruct::ParseSID(int vid, std::ifstream &is, GraphHelp
 			break;
 	while (is.getline(buffer, bufferSize))
 	{
-		if(buffer[0] == 'E' && buffer[1] == 'N' && buffer[2] == 'D')
+		if (buffer[0] == 'E' && buffer[1] == 'N' && buffer[2] == 'D')
 			break;
 		std::istringstream iss(buffer);
 		while (iss >> s)
@@ -76,7 +76,7 @@ std::set<int> bf::InternalStruct::ParseSTAR(int vid, std::ifstream &is, GraphHel
 	string s, fix;
 	while (is.getline(buffer, bufferSize))
 	{
-		if(buffer[0] == 'E' && buffer[1] == 'N' && buffer[2] == 'D')
+		if (buffer[0] == 'E' && buffer[1] == 'N' && buffer[2] == 'D')
 			break;
 		std::istringstream iss(buffer);
 		iss >> s;
@@ -234,6 +234,7 @@ void bf::DataSet::InitializeAirport(string s)
 		i = (char) toupper(i);
 	if (is->initializedAirports.find(s) != is->initializedAirports.end())
 		return;
+	static auto DCT_ID = graph->graphHelper->GetRouteIndex("DCT");
 	static auto SID_ID = graph->graphHelper->GetRouteIndex("SID");
 	static auto STAR_ID = graph->graphHelper->GetRouteIndex("STAR");
 	static auto vertices = graph->graphHelper->GetVertices();
@@ -249,15 +250,80 @@ void bf::DataSet::InitializeAirport(string s)
 	auto sidFixes = is->ParseSID(airportVid, ifs, graph->graphHelper);
 	auto starFixes = is->ParseSTAR(airportVid, ifs, graph->graphHelper);
 	for (auto i : sidFixes)
+	{
 		graph->AddEdge(airportVid, i, SID_ID);
+		//		graph->AddEdge(i, airportVid, DCT_ID);
+	}
 	for (auto i : starFixes)
+	{
 		graph->AddEdge(i, airportVid, STAR_ID);
+		//		graph->AddEdge(airportVid, i, DCT_ID);
+	}
 	ifs.close();
 }
 
-void bf::DataSet::Dijkstra(const string &i, const string &j)
+inline static string StringToUpper(const string &s)
 {
-	int u = graph->graphHelper->FindVertexId(i);
-	int v = graph->graphHelper->FindVertexId(j);
-	graph->Dijkstra(u, v);
+	auto r = s;
+	for (auto &i : r)
+		i = (char) toupper(i);
+	return r;
+}
+
+std::vector<bf::Leg> bf::DataSet::FindDetailedRoute(const string &depature, const string &arrival)
+{
+	int u = graph->graphHelper->FindVertexId(StringToUpper(depature));
+	int v = graph->graphHelper->FindVertexId(StringToUpper(arrival));
+	return graph->Dijkstra(u, v);
+}
+
+/*string ReadableRoute;
+		string lastRoute = "";
+		double totalDist = 0;
+		std::vector<string> wpt;
+		std::vector<string> rte;
+		for(it = path.rbegin(); it != path.rend(); ++it)
+		{
+			std::vector<Edge>::iterator ite;
+			for(ite = g[*it].begin(); it != path.rend() - 1 && ite != g[*it].end(); ++ite)
+			{
+				if(ite->to == *(it + 1))
+				{
+					totalDist += ite->dist;
+					printf("%s->%s\t%s\t%lf\n", nodes[*it].name, nodes[ite->to].name, routes[ite->way].c_str(), totalDist);
+					if(!Bravo::StringEquals(routes[ite->way].c_str(), lastRoute.c_str()))
+					{
+						wpt.push_back(nodes[*it].name);
+						rte.push_back(routes[ite->way]);
+					}
+					lastRoute = routes[ite->way];
+					break;
+				}
+			}
+		}
+		std::vector<string>::iterator it1, it2;
+		it1 = wpt.begin();
+		it2 = rte.begin();
+		for(; it1 != wpt.end(); ++it1, ++it2)
+		{
+			ReadableRoute += *it1 + " ";
+			ReadableRoute += *it2 + " ";
+		}
+		ReadableRoute += nodes[arr].name;
+		return ReadableRoute;
+ * */
+string bf::DataSet::GenerateRouteString(const std::vector<Leg> &legs)
+{
+	string r = legs.front().from + " ";
+	string lastRoute = legs.front().route;
+	for (auto i = 0; i < legs.size(); ++i)
+	{
+		if (legs[i].route == lastRoute)
+			continue;
+		lastRoute = legs[i].route;
+		r += legs[i - 1].to + " ";
+		r += legs[i].route + " ";
+	}
+	r += legs.back().to;
+	return r;
 }
