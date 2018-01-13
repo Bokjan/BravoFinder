@@ -252,12 +252,10 @@ void bf::DataSet::InitializeAirport(string s)
 	for (auto i : sidFixes)
 	{
 		graph->AddEdge(airportVid, i, SID_ID);
-		//		graph->AddEdge(i, airportVid, DCT_ID);
 	}
 	for (auto i : starFixes)
 	{
 		graph->AddEdge(i, airportVid, STAR_ID);
-		//		graph->AddEdge(airportVid, i, DCT_ID);
 	}
 	ifs.close();
 }
@@ -272,46 +270,13 @@ inline static string StringToUpper(const string &s)
 
 std::vector<bf::Leg> bf::DataSet::FindDetailedRoute(const string &depature, const string &arrival)
 {
+	this->InitializeAirport(depature);
+	this->InitializeAirport(arrival);
 	int u = graph->graphHelper->FindVertexId(StringToUpper(depature));
 	int v = graph->graphHelper->FindVertexId(StringToUpper(arrival));
 	return graph->Dijkstra(u, v);
 }
 
-/*string ReadableRoute;
-		string lastRoute = "";
-		double totalDist = 0;
-		std::vector<string> wpt;
-		std::vector<string> rte;
-		for(it = path.rbegin(); it != path.rend(); ++it)
-		{
-			std::vector<Edge>::iterator ite;
-			for(ite = g[*it].begin(); it != path.rend() - 1 && ite != g[*it].end(); ++ite)
-			{
-				if(ite->to == *(it + 1))
-				{
-					totalDist += ite->dist;
-					printf("%s->%s\t%s\t%lf\n", nodes[*it].name, nodes[ite->to].name, routes[ite->way].c_str(), totalDist);
-					if(!Bravo::StringEquals(routes[ite->way].c_str(), lastRoute.c_str()))
-					{
-						wpt.push_back(nodes[*it].name);
-						rte.push_back(routes[ite->way]);
-					}
-					lastRoute = routes[ite->way];
-					break;
-				}
-			}
-		}
-		std::vector<string>::iterator it1, it2;
-		it1 = wpt.begin();
-		it2 = rte.begin();
-		for(; it1 != wpt.end(); ++it1, ++it2)
-		{
-			ReadableRoute += *it1 + " ";
-			ReadableRoute += *it2 + " ";
-		}
-		ReadableRoute += nodes[arr].name;
-		return ReadableRoute;
- * */
 string bf::DataSet::GenerateRouteString(const std::vector<Leg> &legs)
 {
 	string r = legs.front().from + " ";

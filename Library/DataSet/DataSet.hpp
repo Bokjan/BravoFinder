@@ -24,6 +24,8 @@ namespace bf
 
 		void InitializeRoutes(void);
 
+		void InitializeAirport(string s);
+
 		void InitializeAirports(void);
 
 	public:
@@ -34,8 +36,6 @@ namespace bf
 		void SetDataPath(const string &s);
 
 		void Initialize(void);
-
-		void InitializeAirport(string s);
 
 		string GenerateRouteString(const std::vector<Leg> &legs);
 
