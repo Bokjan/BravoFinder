@@ -279,6 +279,8 @@ std::vector<bf::Leg> bf::DataSet::FindDetailedRoute(const string &depature, cons
 
 string bf::DataSet::GenerateRouteString(const std::vector<Leg> &legs)
 {
+	if (legs.size() == 1)
+		return legs.front().from + " " + legs.front().route + " " + legs.front().to;
 	string r = legs.front().from + " ";
 	string lastRoute = legs.front().route;
 	for (auto i = 0; i < legs.size(); ++i)
