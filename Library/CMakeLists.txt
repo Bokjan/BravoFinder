@@ -11,7 +11,13 @@ set(SOURCE_FILES
     DataStructure/Vertex.cpp
     DataStructure/Graph.cpp
     )
-file(GLOB HEADER_FILES "*.hpp")
+set(
+    HEADER_FILES
+    DataSet/DataSet.hpp
+    DataSet/Leg.hpp
+    )
 add_library(bfinder SHARED ${SOURCE_FILES})
+set_target_properties(bfinder PROPERTIES VERSION 0.0.1 SOVERSION 0.0.1)
 install(TARGETS bfinder LIBRARY DESTINATION lib)
-install(FILES bfinder.h ${HEADER_FILES} DESTINATION include/bfinder)
+install(FILES bfinder.h DESTINATION include/bfinder)
+install(FILES ${HEADER_FILES} DESTINATION include/bfinder/DataSet)
