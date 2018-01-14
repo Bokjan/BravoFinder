@@ -27,9 +27,13 @@ int main(int argc, char *argv[])
 		std::cin >> dep;
 		std::cout << "Arrival (ICAO): ";
 		std::cin >> arr;
-		auto path = ds.FindDetailedRoute(dep, arr);
-		for(auto &i : path)
-			std::cout << i.from << '\t' << i.route << '\t' << i.to << '\t' << i.distance << std::endl;
-		std::cout << ds.GenerateRouteString(path) << std::endl;
+		auto result = ds.FindRoute(dep, arr);
+		std::cout << result->route << std::endl;
+		std::cout << "From\tTo\tVia\tDistance" << std::endl;
+		for(auto &i : result->legs)
+			std::cout << i.from << '\t' << i.to << '\t' << i.route << '\t' << i.distance << std::endl;
+		std::cout << "Wpt\tLat\tLon" << std::endl;
+		for(auto &i : result->waypoints)
+			std::cout << i.name << '\t' << i.coord.lat << '\t' << i.coord.lon << std::endl;
 	}
 }

@@ -1,10 +1,12 @@
 #ifndef LIBRARY_GRAPH_HPP
 #define LIBRARY_GRAPH_HPP
 
+#include <memory>
 #include <vector>
 #include <string>
 #include "GraphHelper.hpp"
 #include "../DataSet/Leg.hpp"
+#include "../DataSet/Result.hpp"
 
 namespace bf
 {
@@ -26,7 +28,7 @@ namespace bf
 		const static size_t EST_DEGREE = 16;
 		std::vector<Edge> edges[MAX_VERTICES];
 
-		void ConstructLegs(std::vector<Leg> &l, int s, int t, float *d, int *prev);
+		void ConstructResult(std::shared_ptr<Result> result, int s, int t, float *d, int *prev);
 
 	public:
 		GraphHelper *graphHelper;
@@ -41,7 +43,7 @@ namespace bf
 
 		void SetGraphHelper(GraphHelper *graphHelper);
 
-		std::vector<Leg> Dijkstra(int start, int terminal);
+		std::shared_ptr<Result> Dijkstra(int start, int terminal);
 	};
 }
 #endif //LIBRARY_GRAPH_HPP

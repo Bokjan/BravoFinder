@@ -11,10 +11,7 @@ bf::Graph::Graph(void)
 	this->SetGraphHelper(new GraphHelper);
 }
 
-bf::Graph::~Graph(void)
-{
-
-}
+bf::Graph::~Graph(void) = default;
 
 bf::Graph::Edge::Edge(int id, float dist, int routeId) :
 		id(id), dist(dist), routeId(routeId)
@@ -71,14 +68,15 @@ void bf::Graph::SetGraphHelper(bf::GraphHelper *gh)
 	graphHelper = gh;
 }
 
-std::vector<bf::Leg> bf::Graph::Dijkstra(int start, int terminal)
+std::shared_ptr<bf::Result> bf::Graph::Dijkstra(int start, int terminal)
 {
-	std::vector<Leg> ret;
 	using P = std::pair<float, int>;
 	const static float INF = 30000.0;
 	auto d = new float[MAX_VERTICES];
 	auto prev = new int[MAX_VERTICES];
 	static auto vertices = graphHelper->GetVertices();
+	auto r = std::make_shared<Result>(Result());
+	auto &legs = r->legs;
 	std::priority_queue<P, std::vector<P>, std::greater<P>> pq;
 	std::fill(d, d + MAX_VERTICES, INF);
 	d[start] = 0;
@@ -100,36 +98,44 @@ std::vector<bf::Leg> bf::Graph::Dijkstra(int start, int terminal)
 		}
 	}
 	if (d[terminal] == INF)
-		ret.emplace_back(Leg(vertices[start].coord.DistanceFrom(vertices[terminal].coord),
-		                     graphHelper->GetVertexString(start),
-		                     graphHelper->GetVertexString(terminal), "DCT"));
+		legs.emplace_back(Leg(vertices[start].coord.DistanceFrom(vertices[terminal].coord),
+		                      graphHelper->GetVertexString(start),
+		                      graphHelper->GetVertexString(terminal), "DCT"));
 	else
-		this->ConstructLegs(ret, start, terminal, d, prev);
-	delete[] d;
+		this->ConstructResult(r, start, terminal, d, prev);
 	delete[] prev;
-	return ret;
+	delete[] d;
+	return r;
 }
 
-void bf::Graph::ConstructLegs(std::vector<Leg> &l, int s, int t, float *d, int *prev)
+void bf::Graph::ConstructResult(std::shared_ptr<Result> result, int s, int t, float *d, int *prev)
 {
-	std::vector<int> path;
+	static auto vertices = graphHelper->GetVertices();
+	// Get way-points
+	std::vector<int> wpts;
 	for (int pos = t;;)
 	{
-		path.emplace_back(pos);
+		wpts.emplace_back(pos);
 		if (pos == s)
 			break;
 		pos = prev[pos];
 	}
-	std::reverse(path.begin(), path.end());
-	for (auto i = 0; i < path.size() - 1; ++i)
+	std::reverse(wpts.begin(), wpts.end());
+	// Generate Result::waypoints
+	for (auto i : wpts)
+	{
+		result->waypoints.emplace_back(WayPoint(vertices[i].name, vertices[i].coord));
+	}
+	// Generate Result::legs
+	for (auto i = 0; i < wpts.size() - 1; ++i)
 	{
 		string route;
 		float distance = 0;
-		auto from = graphHelper->GetVertexString(path[i]);
-		auto to = graphHelper->GetVertexString(path[i + 1]);
-		for (auto &e : edges[path[i]])
+		auto from = graphHelper->GetVertexString(wpts[i]);
+		auto to = graphHelper->GetVertexString(wpts[i + 1]);
+		for (auto &e : edges[wpts[i]])
 		{
-			if (e.id == path[i + 1])
+			if (e.id == wpts[i + 1])
 			{
 				if (!route.empty() && route != "DCT")
 					break;
@@ -137,6 +143,6 @@ void bf::Graph::ConstructLegs(std::vector<Leg> &l, int s, int t, float *d, int *
 				route = graphHelper->GetRouteString(e.routeId);
 			}
 		}
-		l.emplace_back(Leg(distance, from, to, route));
+		result->legs.emplace_back(Leg(distance, from, to, route));
 	}
 }

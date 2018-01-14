@@ -268,13 +268,16 @@ inline static string StringToUpper(const string &s)
 	return r;
 }
 
-std::vector<bf::Leg> bf::DataSet::FindDetailedRoute(const string &depature, const string &arrival)
+std::shared_ptr<bf::Result> bf::DataSet::FindRoute(const string &depature, const string &arrival)
 {
 	this->InitializeAirport(depature);
 	this->InitializeAirport(arrival);
 	int u = graph->graphHelper->FindVertexId(StringToUpper(depature));
 	int v = graph->graphHelper->FindVertexId(StringToUpper(arrival));
-	return graph->Dijkstra(u, v);
+	auto r = graph->Dijkstra(u, v);
+	// Generate route string
+	r->route = this->GenerateRouteString(r->legs);
+	return r;
 }
 
 string bf::DataSet::GenerateRouteString(const std::vector<Leg> &legs)

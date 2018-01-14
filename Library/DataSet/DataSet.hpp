@@ -1,9 +1,11 @@
 #ifndef LIBRARY_DATASET_HPP
 #define LIBRARY_DATASET_HPP
 
+#include <memory>
 #include <string>
 #include <vector>
 #include "Leg.hpp"
+#include "Result.hpp"
 
 namespace bf
 {
@@ -39,7 +41,7 @@ namespace bf
 
 		string GenerateRouteString(const std::vector<Leg> &legs);
 
-		std::vector<Leg> FindDetailedRoute(const string &depature, const string &arrival);
+		std::shared_ptr<Result> FindRoute(const string &depature, const string &arrival);
 	};
 }
 #endif //LIBRARY_DATASET_HPP

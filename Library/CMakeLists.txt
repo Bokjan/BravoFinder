@@ -10,14 +10,10 @@ set(SOURCE_FILES
     DataStructure/GraphHelper.cpp
     DataStructure/Vertex.cpp
     DataStructure/Graph.cpp
-    )
-set(
-    HEADER_FILES
-    DataSet/DataSet.hpp
-    DataSet/Leg.hpp
-    )
+    DataSet/Result.cpp DataSet/Result.hpp)
 add_library(bfinder SHARED ${SOURCE_FILES})
 set_target_properties(bfinder PROPERTIES VERSION 0.0.1 SOVERSION 0.0.1)
 install(TARGETS bfinder LIBRARY DESTINATION lib)
 install(FILES bfinder.h DESTINATION include/bfinder)
-install(FILES ${HEADER_FILES} DESTINATION include/bfinder/DataSet)
+install(FILES DataSet/DataSet.hpp DataSet/Leg.hpp DataSet/Result.hpp DESTINATION include/bfinder/DataSet)
+install(FILES DataStructure/Coordinate.hpp DataStructure/Vertex.hpp DESTINATION include/bfinder/DataStructure)
