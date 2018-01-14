@@ -124,7 +124,6 @@ void bf::DataSet::InitializeAirports(void)
 	static bool done = false;
 	if (done)
 		return;
-	done = true;
 	std::ifstream ifs(path + "/NAVDATA/airports.dat");
 	if (!ifs.is_open())
 		throw std::runtime_error("Failed to open file: NAVDATA/airports.dat");
@@ -140,6 +139,7 @@ void bf::DataSet::InitializeAirports(void)
 		graph->graphHelper->AddVertex(icao, (float) atof(latitude.c_str()), (float) atof(longitude.c_str()));
 	}
 	ifs.close();
+	done = true;
 }
 
 void bf::DataSet::InitializeFixes(void)
@@ -147,7 +147,6 @@ void bf::DataSet::InitializeFixes(void)
 	static bool done = false;
 	if (done)
 		return;
-	done = true;
 	std::ifstream ifs(path + "/NAVDATA/wpNavRTE.txt");
 	if (!ifs.is_open())
 		throw std::runtime_error("Failed to open file: NAVDATA/wpNavRTE.txt");
@@ -169,6 +168,7 @@ void bf::DataSet::InitializeFixes(void)
 	ifs.close();
 	graph->SetMaxVertices(graph->graphHelper->GetVertices().size());
 	graph->AllocateEdges();
+	done = true;
 }
 
 void bf::DataSet::InitializeRoutes(void)
@@ -176,7 +176,6 @@ void bf::DataSet::InitializeRoutes(void)
 	static bool done = false;
 	if (done)
 		return;
-	done = true;
 	std::ifstream ifs(path + "/NAVDATA/wpNavRTE.txt");
 	if (!ifs.is_open())
 		throw std::runtime_error("Failed to open file: NAVDATA/wpNavRTE.txt");
@@ -220,6 +219,7 @@ void bf::DataSet::InitializeRoutes(void)
 		lastLat = lat;
 	}
 	ifs.close();
+	done = true;
 }
 
 void bf::DataSet::Initialize(void)
@@ -240,7 +240,6 @@ void bf::DataSet::InitializeAirport(string s)
 	static auto SID_ID = graph->graphHelper->GetRouteIndex("SID");
 	static auto STAR_ID = graph->graphHelper->GetRouteIndex("STAR");
 	static auto vertices = graph->graphHelper->GetVertices();
-	is->initializedAirports.insert(s);
 	std::ostringstream oss;
 	oss << path << "/SIDSTARS/" << s << ".txt";
 	std::ifstream ifs(oss.str());
@@ -260,6 +259,7 @@ void bf::DataSet::InitializeAirport(string s)
 		graph->AddEdge(i, airportVid, STAR_ID);
 	}
 	ifs.close();
+	is->initializedAirports.insert(s);
 }
 
 inline static string StringToUpper(const string &s)
