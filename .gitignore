@@ -56,3 +56,5 @@ Temporary Items
 .idea
 ignore
 cmake-build*
+build
+bfinder

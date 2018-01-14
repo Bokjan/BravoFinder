@@ -24,9 +24,9 @@ namespace bf
 			Edge(int id, float dist, int routeId);
 		};
 
-		const static size_t MAX_VERTICES = 50000;
+		size_t MAX_VERTICES = 100000;
 		const static size_t EST_DEGREE = 16;
-		std::vector<Edge> edges[MAX_VERTICES];
+		std::vector<Edge> *edges;
 
 		void ConstructResult(std::shared_ptr<Result> result, int s, int t, float *d, int *prev);
 
@@ -41,9 +41,11 @@ namespace bf
 
 		void AddUndirectedEdge(int v1, int v2, int route);
 
-		void SetGraphHelper(GraphHelper *graphHelper);
-
 		std::shared_ptr<Result> Dijkstra(int start, int terminal);
+
+		void SetMaxVertices(size_t MAX_VERTICES);
+
+		void AllocateEdges(void);
 	};
 }
 #endif //LIBRARY_GRAPH_HPP

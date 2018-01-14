@@ -1,14 +1,12 @@
 #include <queue>
 #include <cmath>
 #include <cstdio>
-#include <algorithm>
 #include "Graph.hpp"
 
-bf::Graph::Graph(void)
+bf::Graph::Graph(void):
+	graphHelper(new GraphHelper)
 {
-	for (auto &i : edges)
-		i.reserve(this->EST_DEGREE);
-	this->SetGraphHelper(new GraphHelper);
+
 }
 
 bf::Graph::~Graph(void) = default;
@@ -61,11 +59,6 @@ void bf::Graph::AddEdge(int v1, int v2, int route)
 	auto c2 = vertices[v2].coord;
 	float dist = DistanceBetween(c1.latitude, c1.longitude, c2.latitude, c2.longitude);
 	edges[v1].emplace_back(Edge(v2, dist, route));
-}
-
-void bf::Graph::SetGraphHelper(bf::GraphHelper *gh)
-{
-	graphHelper = gh;
 }
 
 std::shared_ptr<bf::Result> bf::Graph::Dijkstra(int start, int terminal)
@@ -145,4 +138,14 @@ void bf::Graph::ConstructResult(std::shared_ptr<Result> result, int s, int t, fl
 		}
 		result->legs.emplace_back(Leg(distance, from, to, route));
 	}
+}
+
+void bf::Graph::SetMaxVertices(size_t MAX_VERTICES)
+{
+	this->MAX_VERTICES = MAX_VERTICES;
+}
+
+void bf::Graph::AllocateEdges(void)
+{
+	this->edges = new std::vector<Edge>[MAX_VERTICES];
 }

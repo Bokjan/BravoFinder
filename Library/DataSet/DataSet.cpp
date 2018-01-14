@@ -167,6 +167,8 @@ void bf::DataSet::InitializeFixes(void)
 	while (ifs >> ident >> ident >> ident >> latitude >> longitude)
 		graph->graphHelper->AddVertex(ident, latitude, longitude);
 	ifs.close();
+	graph->SetMaxVertices(graph->graphHelper->GetVertices().size());
+	graph->AllocateEdges();
 }
 
 void bf::DataSet::InitializeRoutes(void)

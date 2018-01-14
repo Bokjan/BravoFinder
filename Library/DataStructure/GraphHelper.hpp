@@ -14,7 +14,7 @@ namespace bf
 	{
 	private:
 		const static size_t MAX_ROUTES = 10000;
-		const static size_t MAX_VERTICES = 50000;
+		const static size_t MAX_VERTICES = 70000;
 		int vid = 0;
 		std::vector<string> routes;
 		std::vector<Vertex> vertices;
