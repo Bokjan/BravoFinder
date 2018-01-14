@@ -1,6 +1,7 @@
 #include <queue>
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include "Graph.hpp"
 
 bf::Graph::Graph(void):
