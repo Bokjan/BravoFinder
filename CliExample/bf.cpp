@@ -29,11 +29,14 @@ int main(int argc, char *argv[])
 		std::cin >> arr;
 		auto result = ds.FindRoute(dep, arr);
 		std::cout << result->route << std::endl;
+		std::cout << std::endl;
 		std::cout << "From\tTo\tVia\tDistance" << std::endl;
 		for(auto &i : result->legs)
 			std::cout << i.from << '\t' << i.to << '\t' << i.route << '\t' << i.distance << std::endl;
+		std::cout << std::endl;
 		std::cout << "Wpt\tLat\tLon" << std::endl;
 		for(auto &i : result->waypoints)
-			std::cout << i.name << '\t' << i.coord.lat << '\t' << i.coord.lon << std::endl;
+			std::cout << i.name << '\t' << i.coord.latitude << '\t' << i.coord.longitude << std::endl;
+		std::cout << std::endl;
 	}
 }
