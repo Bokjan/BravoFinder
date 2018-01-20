@@ -6,6 +6,7 @@
 #include <iostream>
 #include "DataSet.hpp"
 #include "../DataStructure/Graph.hpp"
+#include <stdlib.h>
 
 using std::string;
 
