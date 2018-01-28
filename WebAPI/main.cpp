@@ -46,6 +46,7 @@ int main(int argc, char *argv[])
         Writer<StringBuffer> w(s);
         std::shared_ptr<DataSet> ds;
         std::shared_ptr<Result> result;
+        res.type("json");
         w.StartObject();
         w.Key("status");
         if(dss.find(req.params["cycle"]) == dss.end())

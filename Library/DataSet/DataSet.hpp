@@ -41,7 +41,7 @@ namespace bf
 
 		string GenerateRouteString(const std::vector<Leg> &legs);
 
-		std::shared_ptr<Result> FindRoute(const string &depature, const string &arrival);
+		std::shared_ptr<Result> FindRoute(const string &departure, const string &arrival);
 	};
 }
 #endif //LIBRARY_DATASET_HPP
