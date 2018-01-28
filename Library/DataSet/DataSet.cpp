@@ -270,11 +270,11 @@ inline static string StringToUpper(const string &s)
 	return r;
 }
 
-std::shared_ptr<bf::Result> bf::DataSet::FindRoute(const string &departure, const string &arrival)
+std::shared_ptr<bf::Result> bf::DataSet::FindRoute(const string &depature, const string &arrival)
 {
-	this->InitializeAirport(departure);
+	this->InitializeAirport(depature);
 	this->InitializeAirport(arrival);
-	int u = graph->graphHelper->FindVertexId(StringToUpper(departure));
+	int u = graph->graphHelper->FindVertexId(StringToUpper(depature));
 	int v = graph->graphHelper->FindVertexId(StringToUpper(arrival));
 	auto r = graph->Dijkstra(u, v);
 	// Generate route string
