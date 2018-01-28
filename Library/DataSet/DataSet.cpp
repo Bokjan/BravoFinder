@@ -236,7 +236,7 @@ void bf::DataSet::InitializeAirport(string s)
 		i = (char) toupper(i);
 	if (is->initializedAirports.find(s) != is->initializedAirports.end())
 		return;
-	static auto DCT_ID = graph->graphHelper->GetRouteIndex("DCT");
+//	static auto DCT_ID = graph->graphHelper->GetRouteIndex("DCT");
 	static auto SID_ID = graph->graphHelper->GetRouteIndex("SID");
 	static auto STAR_ID = graph->graphHelper->GetRouteIndex("STAR");
 	static auto vertices = graph->graphHelper->GetVertices();
@@ -287,8 +287,9 @@ string bf::DataSet::GenerateRouteString(const std::vector<Leg> &legs)
 	if (legs.size() == 1)
 		return legs.front().from + " " + legs.front().route + " " + legs.front().to;
 	string r = legs.front().from + " ";
-	string lastRoute = legs.front().route;
-	for (auto i = 0; i < legs.size(); ++i)
+	r += legs.front().route + " ";
+	string lastRoute;
+	for (decltype(legs.size()) i = 1; i < legs.size(); ++i)
 	{
 		if (legs[i].route == lastRoute)
 			continue;

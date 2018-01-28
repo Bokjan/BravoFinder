@@ -121,7 +121,7 @@ void bf::Graph::ConstructResult(std::shared_ptr<Result> result, int s, int t, fl
 		result->waypoints.emplace_back(WayPoint(vertices[i].name, vertices[i].coord));
 	}
 	// Generate Result::legs
-	for (auto i = 0; i < wpts.size() - 1; ++i)
+	for (decltype(wpts.size()) i = 0; i < wpts.size() - 1; ++i)
 	{
 		string route;
 		float distance = 0;
