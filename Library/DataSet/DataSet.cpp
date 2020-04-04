@@ -107,7 +107,10 @@ void bf::DataSet::SetDataPath(const std::string &s)
 	path = s;
 }
 
-bf::DataSet::DataSet(void)
+bf::DataSet::DataSet(void):
+	bIsAirportsInitialized(false),
+	bIsFixesInitialized(false),
+	bIsRoutesInitialized(false)
 {
 	graph = new Graph;
 	is = new InternalStruct;
