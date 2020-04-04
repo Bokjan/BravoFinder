@@ -34,8 +34,8 @@ static inline void TruncateNB(string &s)
 std::set<int> bf::InternalStruct::ParseSID(int vid, std::ifstream &is, GraphHelper *gh)
 {
 	std::set<int> v;
-	static auto vertices = gh->GetVertices();
-	const static int bufferSize = 1024;
+	auto vertices = gh->GetVertices();
+	constexpr int bufferSize = 1024;
 	char buffer[bufferSize];
 	string s, fix;
 	while (is >> s)
@@ -70,8 +70,8 @@ std::set<int> bf::InternalStruct::ParseSID(int vid, std::ifstream &is, GraphHelp
 std::set<int> bf::InternalStruct::ParseSTAR(int vid, std::ifstream &is, GraphHelper *gh)
 {
 	std::set<int> v;
-	static auto vertices = gh->GetVertices();
-	const static int bufferSize = 1024;
+	auto vertices = gh->GetVertices();
+	constexpr int bufferSize = 1024;
 	char buffer[bufferSize];
 	string s, fix;
 	while (is.getline(buffer, bufferSize))
@@ -121,8 +121,7 @@ bf::DataSet::~DataSet(void)
 
 void bf::DataSet::InitializeAirports(void)
 {
-	static bool done = false;
-	if (done)
+	if (bIsAirportsInitialized)
 		return;
 	std::ifstream ifs(path + "/NAVDATA/airports.dat");
 	if (!ifs.is_open())
@@ -139,13 +138,12 @@ void bf::DataSet::InitializeAirports(void)
 		graph->graphHelper->AddVertex(icao, (float) atof(latitude.c_str()), (float) atof(longitude.c_str()));
 	}
 	ifs.close();
-	done = true;
+	bIsAirportsInitialized = true;
 }
 
 void bf::DataSet::InitializeFixes(void)
 {
-	static bool done = false;
-	if (done)
+	if (bIsFixesInitialized)
 		return;
 	std::ifstream ifs(path + "/NAVDATA/wpNavRTE.txt");
 	if (!ifs.is_open())
@@ -168,13 +166,12 @@ void bf::DataSet::InitializeFixes(void)
 	ifs.close();
 	graph->SetMaxVertices(graph->graphHelper->GetVertices().size());
 	graph->AllocateEdges();
-	done = true;
+	bIsFixesInitialized = true;
 }
 
 void bf::DataSet::InitializeRoutes(void)
 {
-	static bool done = false;
-	if (done)
+	if (bIsRoutesInitialized)
 		return;
 	std::ifstream ifs(path + "/NAVDATA/wpNavRTE.txt");
 	if (!ifs.is_open())
@@ -219,7 +216,7 @@ void bf::DataSet::InitializeRoutes(void)
 		lastLat = lat;
 	}
 	ifs.close();
-	done = true;
+	bIsRoutesInitialized = true;
 }
 
 void bf::DataSet::Initialize(void)
@@ -236,10 +233,10 @@ void bf::DataSet::InitializeAirport(string s)
 		i = (char) toupper(i);
 	if (is->initializedAirports.find(s) != is->initializedAirports.end())
 		return;
-//	static auto DCT_ID = graph->graphHelper->GetRouteIndex("DCT");
-	static auto SID_ID = graph->graphHelper->GetRouteIndex("SID");
-	static auto STAR_ID = graph->graphHelper->GetRouteIndex("STAR");
-	static auto vertices = graph->graphHelper->GetVertices();
+//	auto DCT_ID = graph->graphHelper->GetRouteIndex("DCT");
+	auto SID_ID = graph->graphHelper->GetRouteIndex("SID");
+	auto STAR_ID = graph->graphHelper->GetRouteIndex("STAR");
+	auto vertices = graph->graphHelper->GetVertices();
 	std::ostringstream oss;
 	oss << path << "/SIDSTARS/" << s << ".txt";
 	std::ifstream ifs(oss.str());

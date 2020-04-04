@@ -21,6 +21,10 @@ namespace bf
 		string path;
 		Graph *graph;
 		InternalStruct *is;
+		bool bIsAirportsInitialized;
+		bool bIsFixesInitialized;
+		bool bIsRoutesInitialized;
+		
 
 		void InitializeFixes(void);
 
