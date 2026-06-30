@@ -47,15 +47,18 @@
   "buildPresets": [
     {
       "name": "debug",
-      "configurePreset": "debug"
+      "configurePreset": "debug",
+      "jobs": 0
     },
     {
       "name": "release",
-      "configurePreset": "release"
+      "configurePreset": "release",
+      "jobs": 0
     },
     {
       "name": "tsan",
-      "configurePreset": "tsan"
+      "configurePreset": "tsan",
+      "jobs": 0
     }
   ],
   "testPresets": [
