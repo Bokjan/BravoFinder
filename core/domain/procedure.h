@@ -10,23 +10,33 @@
 namespace bf {
 
 // ARINC 424 path-and-termination code: how a procedure leg is flown and what
-// ends it. X-Plane CIFP uses the full set; all fourteen are recognized here.
-// The first four (TF/IF/DF/CF) terminate at a definite fix and dominate (~85%
-// of legs); the rest fly a heading/arc/altitude/hold and have no fixed end
-// point, so they are collapsed to an equivalent edge when wiring the graph.
+// ends it. The full corpus (all 14838 cycle-2601 airports) uses 23 distinct
+// codes; the first four (TF/IF/DF/CF) terminate at a definite fix and dominate
+// (~80% of legs), while the rest fly a heading/course/arc/distance/altitude/
+// hold and have no fixed end point, so they are collapsed to an equivalent edge
+// when wiring the graph.
 enum class PathTerminator {
   kTF,       // Track to Fix
   kIF,       // Initial Fix
   kDF,       // Direct to Fix
   kCF,       // Course to Fix
-  kCA,       // Course to Altitude
-  kFM,       // From Fix to Manual termination
-  kVA,       // Heading to Altitude
-  kVM,       // Heading to Manual termination
-  kVI,       // Heading to Intercept
-  kVR,       // Heading to Radial
+  kAF,       // Arc to Fix (constant-DME arc)
   kRF,       // Constant Radius to Fix
+  kCA,       // Course to Altitude
+  kFA,       // Track from Fix to Altitude
+  kVA,       // Heading to Altitude
+  kHA,       // Hold to Altitude
+  kCD,       // Course to DME distance
+  kFD,       // Track from Fix to DME distance
   kVD,       // Heading to DME distance
+  kCI,       // Course to Intercept
+  kVI,       // Heading to Intercept
+  kCR,       // Course to Radial
+  kVR,       // Heading to Radial
+  kFC,       // Track from Fix for a Distance
+  kFM,       // From Fix to Manual termination
+  kVM,       // Heading to Manual termination
+  kPI,       // Procedure turn (to Intercept)
   kHM,       // Hold to Manual termination
   kHF,       // Hold to Fix
   kUnknown,  // unrecognized code (kept so parsing never silently drops a leg)

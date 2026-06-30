@@ -125,10 +125,12 @@ TEST_CASE("CIFP parser: RWY records yield threshold coordinates", "[cifp]") {
   CHECK_THAT(r.threshold.longitude, WithinAbs(-73.7847, 1e-3));
 }
 
-TEST_CASE("CIFP parser: all fourteen path terminators are recognized", "[cifp]") {
-  // Round-trip every terminator token through parse + name.
-  const std::vector<std::string> tokens = {"TF", "IF", "DF", "CF", "CA", "FM", "VA",
-                                           "VM", "VI", "VR", "RF", "VD", "HM", "HF"};
+TEST_CASE("CIFP parser: all ARINC 424 path terminators are recognized", "[cifp]") {
+  // Round-trip every terminator token through parse + name. The full cycle-2601
+  // corpus (14838 airports) uses all 23 of these; none must fall to kUnknown.
+  const std::vector<std::string> tokens = {"TF", "IF", "DF", "CF", "AF", "RF", "CA", "FA",
+                                           "VA", "HA", "CD", "FD", "VD", "CI", "VI", "CR",
+                                           "VR", "FC", "FM", "VM", "PI", "HM", "HF"};
   for (const std::string& tok : tokens) {
     const bf::PathTerminator t = bf::ParsePathTerminator(tok);
     CHECK(t != bf::PathTerminator::kUnknown);
