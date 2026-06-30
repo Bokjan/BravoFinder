@@ -27,6 +27,12 @@ endif()
 # ---------------------------------------------------------------------------
 include(FetchContent)
 
+FetchContent_Declare(
+  CLI11
+  GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+  GIT_TAG v2.4.2)
+FetchContent_MakeAvailable(CLI11)
+
 if(BRAVOFINDER_BUILD_TESTS)
   FetchContent_Declare(
     Catch2
@@ -41,6 +47,8 @@ endif()
 # Subdirectories
 # ---------------------------------------------------------------------------
 add_subdirectory(core)
+add_subdirectory(io)
+add_subdirectory(apps/cli)
 
 if(BRAVOFINDER_BUILD_TESTS)
   enable_testing()

@@ -16,29 +16,44 @@ procedures.
 
 ## Status
 
-v3 is being rewritten from scratch. See the milestones below; the API, CLI, and data
-format support are still evolving.
+v3 is being rewritten from scratch and is under active development.
 
-### Planned (first phase)
+**Working today (milestone M1):** routing over the enroute airway network. The tool
+loads X-Plane 12 navigation data, builds a directed graph honoring airway
+directionality, and finds the shortest path between two airports (or waypoints) with
+A*. For example, `KJFK KLAX` resolves to a plausible ~2161 NM airway route.
 
-- **`core/`** — domain library: domain model, compact CSR graph, A* + Yen
-  K-shortest, pluggable constraints. No global/static state; `bf::Result<T, E>` error
-  handling.
-- **`bf` CLI** — `bf build` (parse nav data and produce a compact `.bfdb` cache) and
-  `bf route` (query candidate routes fast).
-- **Data source** — X-Plane 12 native `.dat` (incl. ARINC 424 procedure parsing).
+### Roadmap
 
-Not in the first phase: Web API, map visualization.
+- **M1 (done)** — enroute airway network, A* search, `bf route` CLI.
+- **M2** — pluggable constraints: airway direction, altitude bands, high/low level,
+  MORA; Yen K-shortest for multiple candidate routes.
+- **M3** — SID/STAR/approach procedures (ARINC 424 / CIFP), MSA.
+- **M4** — procedure leg refinement and a compact `.bfdb` cache for instant startup.
+
+Not planned for the first phase: Web API, map visualization.
 
 ## Building
 
-Requires a C++20 compiler and CMake. Dependencies (Catch2, CLI11) are fetched
+Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11) are fetched
 automatically via FetchContent.
 
 ```bash
-cmake --preset debug
+cmake --preset debug      # or: release
 cmake --build --preset debug
+ctest --preset debug      # runs unit tests; integration tests need data (see below)
 ```
+
+## Usage
+
+```bash
+# Find a route (reads navigation data from ./navdata by default)
+bf route KJFK KLAX
+bf route EGLL LFPG --format json
+bf route KSEA KBOS --data /path/to/xplane/data
+```
+
+Endpoints are airport ICAO codes or waypoint idents, case-insensitive.
 
 ## Navigation Data
 

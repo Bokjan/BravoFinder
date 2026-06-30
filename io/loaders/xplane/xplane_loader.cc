@@ -1,0 +1,173 @@
+#include "io/loaders/xplane/xplane_loader.h"
+
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <unordered_set>
+
+#include "core/domain/ident.h"
+
+namespace bf {
+
+namespace {
+
+// X-Plane data files share a header: a one-char line ("I"/"A"), then a line
+// containing "Version", then data rows, terminated by a line "99". This reads
+// the file and invokes `parse_row` for each data row (as an istringstream),
+// skipping the header. Returns false if the file cannot be opened.
+template <class RowFn>
+bool ForEachDataRow(const std::string& path, RowFn parse_row) {
+  std::ifstream in(path);
+  if (!in.is_open()) {
+    return false;
+  }
+  std::string line;
+  bool in_data = false;
+  while (std::getline(in, line)) {
+    if (!in_data) {
+      // Header ends at the line containing the "Version" token.
+      if (line.find("Version") != std::string::npos) {
+        in_data = true;
+      }
+      continue;
+    }
+    if (line.empty()) {
+      continue;
+    }
+    if (line == "99") {
+      break;
+    }
+    std::istringstream row(line);
+    parse_row(row);
+  }
+  return true;
+}
+
+// Map an earth_nav.dat row code to a routable waypoint kind, or kOther for row
+// codes that are not enroute navaids (ILS components, markers, etc.).
+WaypointKind NavKindFromRowCode(int code) {
+  switch (code) {
+    case 2:
+      return WaypointKind::kNdb;
+    case 3:
+      return WaypointKind::kVor;
+    case 12:
+      return WaypointKind::kDme;
+    case 13:
+      return WaypointKind::kDme;  // TACAN, treated as a DME-class point
+    default:
+      return WaypointKind::kOther;
+  }
+}
+
+AirwayDirection ParseDirection(const std::string& token) {
+  if (token == "F") return AirwayDirection::kForward;
+  if (token == "B") return AirwayDirection::kBackward;
+  return AirwayDirection::kBoth;  // 'N'
+}
+
+}  // namespace
+
+Result<NavData> XPlaneLoader::Load(const std::string& data_dir) {
+  NavData data;
+  // Track which (ident, region) points already exist so navaids do not add
+  // duplicates (e.g. a co-located VOR and DME share an ident).
+  std::unordered_set<Ident> seen;
+
+  // --- earth_fix.dat: lat lon ident terminal region type ... ---
+  const bool fixes_ok = ForEachDataRow(data_dir + "/earth_fix.dat", [&](std::istringstream& row) {
+    double lat = 0;
+    double lon = 0;
+    std::string ident;
+    std::string terminal;
+    std::string region;
+    if (!(row >> lat >> lon >> ident >> terminal >> region)) {
+      return;
+    }
+    Ident key(ident, region);
+    if (seen.insert(key).second) {
+      data.waypoints.push_back(Waypoint{key, Coordinate{lat, lon}, WaypointKind::kFix});
+    }
+  });
+  if (!fixes_ok) {
+    return Result<NavData>::Err(Error(ErrorCode::kDataMissing, "cannot open earth_fix.dat"));
+  }
+
+  // --- earth_nav.dat: code lat lon elev freq range hdg ident terminal region ... ---
+  const bool nav_ok = ForEachDataRow(data_dir + "/earth_nav.dat", [&](std::istringstream& row) {
+    int code = 0;
+    double lat = 0;
+    double lon = 0;
+    int elev = 0;
+    int freq = 0;
+    double range = 0;
+    double hdg = 0;
+    std::string ident;
+    std::string terminal;
+    std::string region;
+    if (!(row >> code >> lat >> lon >> elev >> freq >> range >> hdg >> ident >> terminal >>
+          region)) {
+      return;
+    }
+    WaypointKind kind = NavKindFromRowCode(code);
+    if (kind == WaypointKind::kOther) {
+      return;  // not an enroute-routable navaid
+    }
+    Ident key(ident, region);
+    if (seen.insert(key).second) {
+      data.waypoints.push_back(Waypoint{key, Coordinate{lat, lon}, kind});
+    }
+  });
+  if (!nav_ok) {
+    return Result<NavData>::Err(Error(ErrorCode::kDataMissing, "cannot open earth_nav.dat"));
+  }
+
+  // --- earth_awy.dat: from freg ftype to treg ttype dir hilo baseFL topFL name ---
+  const bool awy_ok = ForEachDataRow(data_dir + "/earth_awy.dat", [&](std::istringstream& row) {
+    std::string from;
+    std::string freg;
+    std::string ftype;
+    std::string to;
+    std::string treg;
+    std::string ttype;
+    std::string dir;
+    int hilo = 0;
+    int base_fl = 0;
+    int top_fl = 0;
+    std::string name;
+    if (!(row >> from >> freg >> ftype >> to >> treg >> ttype >> dir >> hilo >> base_fl >> top_fl >>
+          name)) {
+      return;
+    }
+    AirwaySegment seg;
+    seg.name = name;
+    seg.direction = ParseDirection(dir);
+    seg.level = (hilo == 2) ? AirwayLevel::kHigh : AirwayLevel::kLow;
+    seg.base_fl = base_fl;
+    seg.top_fl = top_fl;
+    data.airways.push_back(AirwayConnection{Ident(from, freg), Ident(to, treg), seg});
+  });
+  if (!awy_ok) {
+    return Result<NavData>::Err(Error(ErrorCode::kDataMissing, "cannot open earth_awy.dat"));
+  }
+
+  // --- earth_aptmeta.dat: icao region lat lon elev ... ---
+  const bool apt_ok = ForEachDataRow(data_dir + "/earth_aptmeta.dat", [&](std::istringstream& row) {
+    std::string icao;
+    std::string region;
+    double lat = 0;
+    double lon = 0;
+    int elev = 0;
+    if (!(row >> icao >> region >> lat >> lon >> elev)) {
+      return;
+    }
+    data.airports.push_back(Airport{icao, region, Coordinate{lat, lon}, elev});
+  });
+  if (!apt_ok) {
+    return Result<NavData>::Err(Error(ErrorCode::kDataMissing, "cannot open earth_aptmeta.dat"));
+  }
+
+  return Result<NavData>::Ok(std::move(data));
+}
+
+}  // namespace bf

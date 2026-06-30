@@ -1,6 +1,7 @@
-# The core domain library: pure logic, no I/O framework dependencies.
+# The graph + A* search live in core (pure logic, no I/O).
 add_library(bf_core
-            domain/coordinate.cc)
+            domain/coordinate.cc
+            graph/astar.cc)
 
 # Headers are included as "core/..." so the include root is the project root.
 target_include_directories(bf_core PUBLIC ${PROJECT_SOURCE_DIR})
