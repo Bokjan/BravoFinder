@@ -4,6 +4,8 @@ add_executable(bf_tests
                unit/coordinate_test.cc
                unit/result_test.cc
                unit/graph_test.cc
+               unit/constraint_test.cc
+               unit/yen_test.cc
                integration/route_integration_test.cc)
 
 target_link_libraries(bf_tests PRIVATE bf::io Catch2::Catch2WithMain)

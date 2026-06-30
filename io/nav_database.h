@@ -2,7 +2,9 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "core/domain/mora_grid.h"
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
@@ -25,12 +27,15 @@ class NavDatabase {
   // ready database or an Error.
   static Result<NavDatabase> Open(const std::string& data_dir);
 
-  // Find a route for `request`. Endpoints are resolved as airport ICAO first,
-  // then as a waypoint ident. Case-insensitive.
-  Result<Route> FindRoute(const RouteRequest& request) const;
+  // Find up to request.k candidate routes, ordered best-first, honoring the
+  // request's altitude/level constraints. Endpoints resolve as airport ICAO
+  // first, then waypoint ident; case-insensitive. Returns an Error if an
+  // endpoint is unknown or no route exists.
+  Result<std::vector<Route>> FindRoutes(const RouteRequest& request) const;
 
  private:
   std::unique_ptr<GraphBuilder> builder_;
+  MoraGrid mora_;
 };
 
 }  // namespace bf

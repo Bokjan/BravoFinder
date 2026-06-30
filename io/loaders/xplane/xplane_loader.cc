@@ -167,6 +167,26 @@ Result<NavData> XPlaneLoader::Load(const std::string& data_dir) {
     return Result<NavData>::Err(Error(ErrorCode::kDataMissing, "cannot open earth_aptmeta.dat"));
   }
 
+  // --- earth_mora.dat: lat lon0 then 30 MORA values (hundreds of feet). ---
+  // Each row covers 30 one-degree cells starting at lon0. MORA is optional: a
+  // missing file simply leaves the grid empty (no altitude floor applied).
+  ForEachDataRow(data_dir + "/earth_mora.dat", [&](std::istringstream& row) {
+    int lat = 0;
+    int lon0 = 0;
+    if (!(row >> lat >> lon0)) {
+      return;
+    }
+    for (int i = 0; i < 30; ++i) {
+      int value = 0;
+      if (!(row >> value)) {
+        break;
+      }
+      if (value > 0) {
+        data.mora.SetCell(lat, lon0 + i, static_cast<int16_t>(value));
+      }
+    }
+  });
+
   return Result<NavData>::Ok(std::move(data));
 }
 

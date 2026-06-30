@@ -26,8 +26,8 @@ A*. For example, `KJFK KLAX` resolves to a plausible ~2161 NM airway route.
 ### Roadmap
 
 - **M1 (done)** — enroute airway network, A* search, `bf route` CLI.
-- **M2** — pluggable constraints: airway direction, altitude bands, high/low level,
-  MORA; Yen K-shortest for multiple candidate routes.
+- **M2 (done)** — pluggable constraints: altitude bands, MORA safety floor,
+  high/low level preference; Yen K-shortest for multiple candidate routes.
 - **M3** — SID/STAR/approach procedures (ARINC 424 / CIFP), MSA.
 - **M4** — procedure leg refinement and a compact `.bfdb` cache for instant startup.
 
@@ -51,6 +51,12 @@ ctest --preset debug      # runs unit tests; integration tests need data (see be
 bf route KJFK KLAX
 bf route EGLL LFPG --format json
 bf route KSEA KBOS --data /path/to/xplane/data
+
+# Constrain by cruise altitude (enables altitude-band and MORA filtering)
+bf route KJFK KLAX --alt 350
+
+# Prefer high (Jet) or low (Victor) airways; ask for several candidates
+bf route KJFK KLAX --level high -k 3
 ```
 
 Endpoints are airport ICAO codes or waypoint idents, case-insensitive.

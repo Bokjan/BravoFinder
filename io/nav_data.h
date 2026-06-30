@@ -5,6 +5,7 @@
 #include "core/domain/airport.h"
 #include "core/domain/airway.h"
 #include "core/domain/ident.h"
+#include "core/domain/mora_grid.h"
 #include "core/domain/waypoint.h"
 
 namespace bf {
@@ -25,6 +26,7 @@ struct NavData {
   std::vector<Waypoint> waypoints;
   std::vector<AirwayConnection> airways;
   std::vector<Airport> airports;
+  MoraGrid mora;
 };
 
 }  // namespace bf

@@ -22,7 +22,8 @@ v3 正在从零重写，处于积极开发中。
 ### 路线图
 
 - **M1（已完成）** —— 航路网、A\* 搜索、`bf route` CLI。
-- **M2** —— 可插拔约束：航路方向、高度band、高低空、MORA；Yen K-shortest 多候选航路。
+- **M2（已完成）** —— 可插拔约束：高度band、MORA 安全下限、高低空偏好；
+  Yen K-shortest 多候选航路。
 - **M3** —— SID/STAR/进近程序（ARINC 424 / CIFP）、MSA。
 - **M4** —— 程序 leg 精修，以及用于秒级启动的紧凑 `.bfdb` 缓存。
 
@@ -45,6 +46,12 @@ ctest --preset debug      # 跑单元测试；集成测试需要数据（见下�
 bf route KJFK KLAX
 bf route EGLL LFPG --format json
 bf route KSEA KBOS --data /path/to/xplane/data
+
+# 按巡航高度约束（启用高度band 与 MORA 过滤）
+bf route KJFK KLAX --alt 350
+
+# 偏好高空(Jet)或低空(Victor)航路；要求多条候选
+bf route KJFK KLAX --level high -k 3
 ```
 
 端点为机场 ICAO 代码或航路点 ident，大小写不敏感。

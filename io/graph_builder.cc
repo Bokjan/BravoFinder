@@ -87,7 +87,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   auto add_edge = [&](int from, int to, int airway_id, const AirwaySegment& s) {
     const double dist = graph_.coords_[from].DistanceTo(graph_.coords_[to]);
     adj[from].push_back(GraphEdge{to, dist, airway_id, static_cast<int16_t>(s.base_fl),
-                                  static_cast<int16_t>(s.top_fl)});
+                                  static_cast<int16_t>(s.top_fl), s.level == AirwayLevel::kHigh});
   };
 
   for (const AirwayConnection& conn : data.airways) {

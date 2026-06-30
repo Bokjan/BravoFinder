@@ -10,14 +10,15 @@ namespace bf {
 // A directed edge in the navigation graph, stored in compressed-sparse-row
 // (CSR) form. `to` is the destination vertex index; `distance_nm` is the
 // great-circle length of the segment. `airway_id` indexes into the graph's
-// airway-name table (-1 for a synthetic direct/DCT edge). Altitude band is kept
-// for constraint filtering in a later milestone.
+// airway-name table (0 is the reserved "DCT" entry for synthetic edges).
+// Altitude band and level are kept for constraint filtering.
 struct GraphEdge {
   int to = -1;
   double distance_nm = 0.0;
   int airway_id = -1;
-  int16_t base_fl = 0;
-  int16_t top_fl = 0;
+  int16_t base_fl = 0;   // lowest usable flight level (0 = no limit, e.g. DCT)
+  int16_t top_fl = 0;    // highest usable flight level (0 = no limit)
+  bool is_high = false;  // true for Jet (high) airways, false for Victor (low)
 };
 
 // An immutable directed graph over navigation waypoints, stored as CSR for

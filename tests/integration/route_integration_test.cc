@@ -3,12 +3,11 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/nav_database.h"
-
-using Catch::Matchers::WithinRel;
 
 namespace {
 
@@ -27,6 +26,13 @@ bool HasData(const std::string& dir) {
   return f.is_open();
 }
 
+bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
+  bf::RouteRequest r;
+  r.departure = dep;
+  r.arrival = arr;
+  return r;
+}
+
 TEST_CASE("real data: KJFK to KLAX route is plausible", "[integration]") {
   const std::string dir = NavDataDir();
   if (!HasData(dir)) {
@@ -36,17 +42,15 @@ TEST_CASE("real data: KJFK to KLAX route is plausible", "[integration]") {
   bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
   REQUIRE(db);
 
-  bf::RouteRequest request{"KJFK", "KLAX"};
-  bf::Result<bf::Route> route = db.value().FindRoute(request);
-  REQUIRE(route);
+  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
 
-  const bf::Route& r = route.value();
-  // The route must start at the departure and end at the arrival.
+  const bf::Route& r = routes.value().front();
   REQUIRE(r.points.size() >= 2);
   CHECK(r.points.front().ident == "KJFK");
   CHECK(r.points.back().ident == "KLAX");
-  // The great-circle distance JFK-LAX is ~2144 NM. A real airway route follows
-  // fixed waypoints, so it is somewhat longer but should stay within ~15%.
+  // Great-circle JFK-LAX is ~2144 NM; an airway route is longer but within ~15%.
   CHECK(r.total_distance_nm > 2144.0);
   CHECK(r.total_distance_nm < 2144.0 * 1.15);
 }
@@ -58,7 +62,7 @@ TEST_CASE("real data: case-insensitive endpoints", "[integration]") {
   }
   bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
   REQUIRE(db);
-  CHECK(db.value().FindRoute(bf::RouteRequest{"kjfk", "klax"}));
+  CHECK(db.value().FindRoutes(MakeRequest("kjfk", "klax")));
 }
 
 TEST_CASE("real data: unknown airport reports an error", "[integration]") {
@@ -68,9 +72,47 @@ TEST_CASE("real data: unknown airport reports an error", "[integration]") {
   }
   bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
   REQUIRE(db);
-  bf::Result<bf::Route> route = db.value().FindRoute(bf::RouteRequest{"ZZZZ", "KLAX"});
-  REQUIRE_FALSE(route);
-  CHECK(route.error().code == bf::ErrorCode::kAirportNotFound);
+  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("ZZZZ", "KLAX"));
+  REQUIRE_FALSE(routes);
+  CHECK(routes.error().code == bf::ErrorCode::kAirportNotFound);
+}
+
+TEST_CASE("real data: K-shortest returns distinct ordered routes", "[integration]") {
+  const std::string dir = NavDataDir();
+  if (!HasData(dir)) {
+    SKIP("navigation data not found in '" << dir << "'");
+  }
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  REQUIRE(db);
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.k = 3;
+  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(req);
+  REQUIRE(routes);
+  const std::vector<bf::Route>& rs = routes.value();
+  REQUIRE(rs.size() >= 2);
+  // Routes are ordered shortest-first and must be distinct.
+  for (size_t i = 1; i < rs.size(); ++i) {
+    CHECK(rs[i].total_distance_nm >= rs[i - 1].total_distance_nm - 1e-6);
+    CHECK(rs[i].route_string != rs[i - 1].route_string);
+  }
+}
+
+TEST_CASE("real data: high cruise altitude still finds a route", "[integration]") {
+  const std::string dir = NavDataDir();
+  if (!HasData(dir)) {
+    SKIP("navigation data not found in '" << dir << "'");
+  }
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  REQUIRE(db);
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.cruise_fl = 350;  // FL350: enables altitude-band and MORA filtering
+  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(req);
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  // The altitude-constrained route should still be a sane length.
+  CHECK(routes.value().front().total_distance_nm > 2144.0);
 }
 
 }  // namespace
