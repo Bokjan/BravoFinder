@@ -156,6 +156,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   // Persist the on-network flags (computed before DCT edges were added) so
   // procedure wiring can tell true enroute vertices from terminal-only fixes.
   on_network_ = std::move(on_network);
+  first_airport_vertex_ = waypoint_count;
 }
 
 int GraphBuilder::VertexByIdent(const Ident& ident) const {
@@ -193,6 +194,10 @@ int GraphBuilder::VertexByIdent(const std::string& ident) const {
 int GraphBuilder::VertexByAirport(const std::string& icao) const {
   auto it = airport_index_.find(icao);
   return it == airport_index_.end() ? -1 : it->second;
+}
+
+bool GraphBuilder::IsAirport(int vertex) const {
+  return vertex >= first_airport_vertex_ && vertex < graph_.VertexCount();
 }
 
 const std::string& GraphBuilder::AirwayName(int airway_id) const {

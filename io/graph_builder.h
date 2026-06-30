@@ -35,6 +35,13 @@ class GraphBuilder {
   // Resolve an airport by ICAO code to its vertex index, or -1.
   int VertexByAirport(const std::string& icao) const;
 
+  // Whether `vertex` is an airport node (as opposed to a waypoint/navaid).
+  // Airports occupy the contiguous tail of the vertex range. Airports are valid
+  // route endpoints but must never be used as intermediate transit nodes, since
+  // their synthetic DCT links would otherwise let a search cut through an
+  // unrelated airport.
+  bool IsAirport(int vertex) const;
+
   // Whether `vertex` participates in the enroute airway network (has at least
   // one airway edge, as opposed to only synthetic DCT edges or none). Terminal
   // fixes that only appear in procedures are not on-network until procedures
@@ -55,6 +62,7 @@ class GraphBuilder {
   NavGraph graph_;
   std::vector<Ident> idents_;     // per-vertex ident, size = V
   std::vector<bool> on_network_;  // per-vertex: participates in an airway, size = V
+  int first_airport_vertex_ = 0;  // vertices [this, V) are airports
   std::vector<std::string> airway_names_;
   std::unordered_map<Ident, int> ident_index_;          // (ident,region) -> vertex
   std::unordered_map<std::string, int> ident_first_;    // ident -> first vertex

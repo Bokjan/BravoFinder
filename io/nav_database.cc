@@ -229,6 +229,12 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   if (request.level != LevelPreference::kNone) {
     options.constraints.push_back(&level_pref);
   }
+  // Airports must not be transit nodes: their synthetic DCT links would let the
+  // search cut through an unrelated airport (e.g. ...MIE DCT KMIE SNKPT...).
+  // Endpoints connect via seeded connection fixes, not airport vertices, so
+  // blocking all airport vertices as intermediate nodes is safe.
+  const GraphBuilder* builder_ptr = builder_.get();
+  options.node_blocked = [builder_ptr](int v) { return builder_ptr->IsAirport(v); };
 
   const NavGraph& graph = builder_->graph();
   const std::vector<SeededEndpoint> sources = ProcedureConnector::ToEndpoints(dep.connections);

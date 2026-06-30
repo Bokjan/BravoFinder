@@ -99,9 +99,16 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
       const std::set<int> banned_nodes(root.begin(), root.end() - 1);
 
       SearchOptions spur_opts = base_options;
-      spur_opts.node_blocked = [&banned_nodes](int v) { return banned_nodes.count(v) != 0; };
-      spur_opts.edge_blocked = [&banned_edges](int from, int to) {
-        return banned_edges.count({from, to}) != 0;
+      // Compose Yen's bans with any caller-supplied node/edge filter (e.g. the
+      // "no transit through airports" rule) rather than overwriting it.
+      auto base_node_blocked = base_options.node_blocked;
+      auto base_edge_blocked = base_options.edge_blocked;
+      spur_opts.node_blocked = [&banned_nodes, base_node_blocked](int v) {
+        return banned_nodes.count(v) != 0 || (base_node_blocked && base_node_blocked(v));
+      };
+      spur_opts.edge_blocked = [&banned_edges, base_edge_blocked](int from, int to) {
+        return banned_edges.count({from, to}) != 0 ||
+               (base_edge_blocked && base_edge_blocked(from, to));
       };
 
       const ShortestPath spur = FindShortestPath(graph, spur_node, goal, spur_opts);

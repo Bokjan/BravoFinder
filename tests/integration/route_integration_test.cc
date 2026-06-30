@@ -174,6 +174,30 @@ TEST_CASE("real data: a departure runway filter still yields a route", "[integra
   CHECK_FALSE(routes.value().front().sid.empty());
 }
 
+TEST_CASE("real data: a route does not transit through an intermediate airport", "[integration]") {
+  const std::string dir = NavDataDir();
+  if (!HasData(dir)) {
+    SKIP("navigation data not found in '" << dir << "'");
+  }
+  if (!HasCifp(dir, "KJFK") || !HasCifp(dir, "KLAX")) {
+    SKIP("CIFP procedures not present in '" << dir << "'");
+  }
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  REQUIRE(db);
+  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(routes);
+  const bf::Route& r = routes.value().front();
+  REQUIRE(r.points.size() >= 2);
+  // Airports connect via synthetic DCT links and used to be exploitable as
+  // free pass-through hubs (e.g. ...MIE DCT KMIE SNKPT...). Only the first and
+  // last points may be airport ICAOs; no interior point should be one.
+  for (size_t i = 1; i + 1 < r.points.size(); ++i) {
+    const std::string& id = r.points[i].ident;
+    const bool looks_like_us_airport = id.size() == 4 && id.front() == 'K';
+    CHECK_FALSE(looks_like_us_airport);
+  }
+}
+
 TEST_CASE("real data: KJFK publishes terminal-area MSA sectors", "[integration]") {
   const std::string dir = NavDataDir();
   if (!HasData(dir)) {
