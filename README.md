@@ -36,8 +36,11 @@ A single loaded database is safe to query concurrently from multiple threads.
 - **M3 (done)** — SID/STAR/approach procedures (ARINC 424 / CIFP, all 23 path
   terminators), terminal-area MSA, procedure-based airport connection, procedures
   surfaced in the route and CLI output.
-- **M4** — procedure leg refinement (heading/arc/altitude legs), fuller
-  multi-procedure K-shortest, and a compact `.bfdb` cache for instant startup.
+- **M4 (in progress)** — done: a procedure exposes every on-network fix it passes
+  as a candidate connection (with an along-track seed), and the K-shortest search
+  spans different connection fixes / procedures rather than one fixed pair.
+  Remaining: equivalent modeling of heading/arc/altitude legs, and a compact
+  `.bfdb` cache for instant startup.
 
 Not planned for the first phase: Web API, map visualization.
 
