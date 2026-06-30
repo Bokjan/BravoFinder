@@ -28,6 +28,12 @@ struct RouteRequest {
 
   // Number of candidate routes to return (Yen K-shortest). Defaults to 1.
   int k = 1;
+
+  // Optional runway filters for procedure selection. When set, only SIDs/STARs
+  // serving that runway (or runway-independent ones) are considered for the
+  // departure/arrival airport. Empty means "any runway".
+  std::string departure_runway;
+  std::string arrival_runway;
 };
 
 }  // namespace bf

@@ -81,4 +81,64 @@ TEST_CASE("unreachable vertices report no path", "[graph]") {
   CHECK_FALSE(bf::FindShortestPath(builder.graph(), a, b).found);
 }
 
+TEST_CASE("multi-source/goal A* picks the cheapest seeded combination", "[graph]") {
+  // A-B-C-D in a line (~60 NM per degree-step at the equator). Sources seed at
+  // A and B; goals seed at C and D. The search must weigh seed costs against
+  // enroute distance to choose the best end-to-end combination.
+  bf::GraphBuilder builder(MakeLineData());
+  const int a = builder.VertexByIdent("AAA");
+  const int b = builder.VertexByIdent("BBB");
+  const int c = builder.VertexByIdent("CCC");
+  const int d = builder.VertexByIdent("DDD");
+  const bf::NavGraph& g = builder.graph();
+
+  SECTION("cheap seeds at the near pair win") {
+    // Source B (seed 0) -> goal C (seed 0): just the B-C enroute leg (~60 NM).
+    // Source A (seed 0) would add the A-B leg; goal D would add C-D. So the
+    // optimum is B..C.
+    std::vector<bf::SeededEndpoint> sources = {{a, 0.0}, {b, 0.0}};
+    std::vector<bf::SeededEndpoint> goals = {{c, 0.0}, {d, 0.0}};
+    bf::ShortestPath p = bf::FindShortestPathMulti(g, sources, goals, bf::SearchOptions{});
+    REQUIRE(p.found);
+    CHECK(p.vertices.front() == b);
+    CHECK(p.vertices.back() == c);
+    CHECK_THAT(p.distance_nm, WithinRel(60.0, 0.02));
+  }
+
+  SECTION("a large seed cost steers the choice to another endpoint") {
+    // Make source B expensive so source A (seed 0) wins despite the extra leg;
+    // goal D is cheap (seed 0) and goal C is heavily penalized, so the path
+    // runs A..D end to end.
+    std::vector<bf::SeededEndpoint> sources = {{a, 0.0}, {b, 1000.0}};
+    std::vector<bf::SeededEndpoint> goals = {{c, 1000.0}, {d, 0.0}};
+    bf::ShortestPath p = bf::FindShortestPathMulti(g, sources, goals, bf::SearchOptions{});
+    REQUIRE(p.found);
+    CHECK(p.vertices.front() == a);
+    CHECK(p.vertices.back() == d);
+    // Three enroute steps ~180 NM, both seeds zero.
+    CHECK_THAT(p.distance_nm, WithinRel(180.0, 0.02));
+  }
+
+  SECTION("seed costs are included in the reported distance") {
+    std::vector<bf::SeededEndpoint> sources = {{a, 7.0}};
+    std::vector<bf::SeededEndpoint> goals = {{d, 5.0}};
+    bf::ShortestPath p = bf::FindShortestPathMulti(g, sources, goals, bf::SearchOptions{});
+    REQUIRE(p.found);
+    // 180 NM enroute + 7 source seed + 5 goal seed.
+    CHECK_THAT(p.distance_nm, WithinRel(192.0, 0.02));
+  }
+}
+
+TEST_CASE("multi-source/goal A* reports no path when disconnected", "[graph]") {
+  bf::NavData d;
+  d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
+                 bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{10, 10}, {}}};
+  bf::GraphBuilder builder(d);  // no airways
+  const int a = builder.VertexByIdent("AAA");
+  const int b = builder.VertexByIdent("BBB");
+  bf::ShortestPath p =
+      bf::FindShortestPathMulti(builder.graph(), {{a, 0.0}}, {{b, 0.0}}, bf::SearchOptions{});
+  CHECK_FALSE(p.found);
+}
+
 }  // namespace

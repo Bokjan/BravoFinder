@@ -120,7 +120,6 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
       on_network[v] = true;
     }
   }
-
   AirwaySegment dct;  // default-constructed: name empty, FL 0..0
   for (int i = 0; i < airport_count; ++i) {
     const Airport& a = data.airports[i];
@@ -153,6 +152,37 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   for (int v = 0; v < total; ++v) {
     graph_.edges_.insert(graph_.edges_.end(), adj[v].begin(), adj[v].end());
   }
+
+  // Persist the on-network flags (computed before DCT edges were added) so
+  // procedure wiring can tell true enroute vertices from terminal-only fixes.
+  on_network_ = std::move(on_network);
+}
+
+int GraphBuilder::VertexByIdent(const Ident& ident) const {
+  auto it = ident_index_.find(ident);
+  return it == ident_index_.end() ? -1 : it->second;
+}
+
+bool GraphBuilder::OnNetwork(int vertex) const {
+  return vertex >= 0 && vertex < static_cast<int>(on_network_.size()) && on_network_[vertex];
+}
+
+std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int count) const {
+  std::vector<int> candidates;
+  const int v_count = graph_.VertexCount();
+  candidates.reserve(256);
+  for (int v = 0; v < v_count; ++v) {
+    if (on_network_[v]) {
+      candidates.push_back(v);
+    }
+  }
+  std::sort(candidates.begin(), candidates.end(), [&](int x, int y) {
+    return coord.DistanceTo(graph_.coords_[x]) < coord.DistanceTo(graph_.coords_[y]);
+  });
+  if (static_cast<int>(candidates.size()) > count) {
+    candidates.resize(count);
+  }
+  return candidates;
 }
 
 int GraphBuilder::VertexByIdent(const std::string& ident) const {

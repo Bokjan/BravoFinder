@@ -41,4 +41,28 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
 // Convenience overload: unconstrained shortest path.
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal);
 
+// A graph vertex pre-loaded with a starting/ending cost, used to attach
+// procedures to the enroute network. A SID becomes a source: its connection fix
+// with the (estimated) distance flown from the runway to that fix. A STAR
+// becomes a goal: its entry fix with the distance flown from there to the
+// runway. The connection fixes are ordinary graph vertices, so procedures need
+// no graph mutation.
+struct SeededEndpoint {
+  int vertex = -1;
+  double cost = 0.0;  // SID distance (source) or STAR distance (goal), in NM
+};
+
+// Multi-source, multi-goal A*: find the cheapest path that starts at any of
+// `sources` (paying its seed cost) and ends at any of `goals` (paying its seed
+// cost), over the enroute graph. The returned path's first vertex is the chosen
+// source fix and its last vertex the chosen goal fix; distance_nm and cost
+// include both seed costs. Returns found=false when no source reaches any goal.
+//
+// The seed costs are non-negative, so the per-vertex heuristic (great-circle
+// distance to the nearest goal fix) stays admissible and the result is optimal.
+ShortestPath FindShortestPathMulti(const NavGraph& graph,
+                                   const std::vector<SeededEndpoint>& sources,
+                                   const std::vector<SeededEndpoint>& goals,
+                                   const SearchOptions& options);
+
 }  // namespace bf

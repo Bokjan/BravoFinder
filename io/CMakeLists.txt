@@ -2,6 +2,7 @@
 add_library(bf_io
             loaders/xplane/xplane_loader.cc
             loaders/xplane/cifp/cifp_parser.cc
+            loaders/xplane/cifp/procedure_connector.cc
             graph_builder.cc
             nav_database.cc)
 

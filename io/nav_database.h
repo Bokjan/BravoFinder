@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "core/domain/mora_grid.h"
@@ -9,6 +10,7 @@
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
+#include "io/loaders/xplane/cifp/cifp_parser.h"
 
 namespace bf {
 
@@ -39,9 +41,17 @@ class NavDatabase {
   std::vector<MsaSector> MsaForAirport(const std::string& icao) const;
 
  private:
+  // Load (and cache) an airport's CIFP procedures on demand. Returns nullptr if
+  // the airport has no CIFP file. The cache accumulates across queries so a
+  // session of related queries pays each airport's parse cost only once.
+  const CifpData* ProceduresFor(const std::string& icao) const;
+
   std::unique_ptr<GraphBuilder> builder_;
   MoraGrid mora_;
   std::vector<MsaSector> msa_;
+  std::string data_dir_;
+  // Mutable: FindRoutes is logically const but lazily fills this cache.
+  mutable std::unordered_map<std::string, std::unique_ptr<CifpData>> procedure_cache_;
 };
 
 }  // namespace bf

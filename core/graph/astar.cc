@@ -117,4 +117,132 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal) {
   return FindShortestPath(graph, start, goal, SearchOptions{});
 }
 
+ShortestPath FindShortestPathMulti(const NavGraph& graph,
+                                   const std::vector<SeededEndpoint>& sources,
+                                   const std::vector<SeededEndpoint>& goals,
+                                   const SearchOptions& options) {
+  ShortestPath result;
+  const int n = graph.VertexCount();
+  if (sources.empty() || goals.empty()) {
+    return result;
+  }
+
+  // Per-vertex goal seed cost: -1 means "not a goal". A vertex may appear once
+  // as a goal (connection fixes are distinct); the smallest seed wins if not.
+  std::vector<double> goal_seed(n, -1.0);
+  for (const SeededEndpoint& gp : goals) {
+    if (gp.vertex < 0 || gp.vertex >= n) {
+      continue;
+    }
+    if (goal_seed[gp.vertex] < 0.0 || gp.cost < goal_seed[gp.vertex]) {
+      goal_seed[gp.vertex] = gp.cost;
+    }
+  }
+
+  // Admissible, consistent heuristic: the least possible remaining cost to
+  // finish is the straight-line distance to some goal fix plus that goal's
+  // (non-negative) seed cost. Goal seeds are few, so this loop is cheap.
+  auto heuristic = [&](int v) {
+    const Coordinate c = graph.CoordOf(v);
+    double best = kInfinity;
+    for (const SeededEndpoint& gp : goals) {
+      if (gp.vertex < 0 || gp.vertex >= n) {
+        continue;
+      }
+      const double h = c.DistanceTo(graph.CoordOf(gp.vertex)) + gp.cost;
+      if (h < best) {
+        best = h;
+      }
+    }
+    return best;
+  };
+
+  std::vector<double> g(n, kInfinity);  // best known effective cost from a source
+  std::vector<double> geo(n, 0.0);      // geographic distance along best path
+  std::vector<int> prev(n, -1);
+  std::vector<bool> closed(n, false);
+
+  std::priority_queue<QueueNode, std::vector<QueueNode>, std::greater<>> open;
+  for (const SeededEndpoint& s : sources) {
+    if (s.vertex < 0 || s.vertex >= n) {
+      continue;
+    }
+    if (options.node_blocked && options.node_blocked(s.vertex)) {
+      continue;
+    }
+    // A source's seed cost is the procedure distance already flown to reach it;
+    // it counts as both effective cost and geographic distance.
+    if (s.cost < g[s.vertex]) {
+      g[s.vertex] = s.cost;
+      geo[s.vertex] = s.cost;
+      open.push(QueueNode{s.cost + heuristic(s.vertex), s.vertex});
+    }
+  }
+
+  double best_total = kInfinity;  // best (g + goal seed) reached so far
+  int best_goal = -1;
+
+  while (!open.empty()) {
+    const QueueNode top = open.top();
+    open.pop();
+    const int u = top.vertex;
+    if (closed[u]) {
+      continue;
+    }
+    // With a consistent heuristic, once the cheapest open f-value cannot beat
+    // the best finished total, no remaining goal can improve it.
+    if (top.f >= best_total) {
+      break;
+    }
+    closed[u] = true;
+
+    // Finishing at u (if it is a goal) costs g[u] plus its seed.
+    if (goal_seed[u] >= 0.0) {
+      const double total = g[u] + goal_seed[u];
+      if (total < best_total) {
+        best_total = total;
+        best_goal = u;
+      }
+    }
+
+    for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
+      const int v = e->to;
+      if (closed[v]) {
+        continue;
+      }
+      if (options.node_blocked && options.node_blocked(v)) {
+        continue;
+      }
+      if (options.edge_blocked && options.edge_blocked(u, v)) {
+        continue;
+      }
+      double extra_cost = 0.0;
+      if (!EdgeAllowed(options, *e, graph.CoordOf(v), extra_cost)) {
+        continue;
+      }
+      const double tentative = g[u] + e->distance_nm + extra_cost;
+      if (tentative < g[v]) {
+        g[v] = tentative;
+        geo[v] = geo[u] + e->distance_nm;
+        prev[v] = u;
+        open.push(QueueNode{tentative + heuristic(v), v});
+      }
+    }
+  }
+
+  if (best_goal < 0) {
+    return result;  // no source reached any goal
+  }
+
+  for (int at = best_goal; at != -1; at = prev[at]) {
+    result.vertices.push_back(at);
+  }
+  std::reverse(result.vertices.begin(), result.vertices.end());
+  // Include the chosen goal's seed cost in the reported totals.
+  result.distance_nm = geo[best_goal] + goal_seed[best_goal];
+  result.cost = best_total;
+  result.found = true;
+  return result;
+}
+
 }  // namespace bf
