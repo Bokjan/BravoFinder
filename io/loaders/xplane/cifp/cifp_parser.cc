@@ -1,0 +1,258 @@
+#include "io/loaders/xplane/cifp/cifp_parser.h"
+
+#include <array>
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace bf {
+
+namespace {
+
+// Trim leading/trailing ASCII spaces from a view into `s`.
+std::string Trim(std::string_view s) {
+  size_t b = 0;
+  size_t e = s.size();
+  while (b < e && s[b] == ' ') ++b;
+  while (e > b && s[e - 1] == ' ') --e;
+  return std::string(s.substr(b, e - b));
+}
+
+// Split `s` on `delim` into trimmed-as-stored fields (no trimming here; callers
+// trim what they need so column positions stay exact).
+std::vector<std::string> Split(std::string_view s, char delim) {
+  std::vector<std::string> out;
+  size_t start = 0;
+  while (true) {
+    const size_t pos = s.find(delim, start);
+    if (pos == std::string_view::npos) {
+      out.emplace_back(s.substr(start));
+      break;
+    }
+    out.emplace_back(s.substr(start, pos - start));
+    start = pos + 1;
+  }
+  return out;
+}
+
+// Field index (0-based, after splitting a leg line on ',') for each datum.
+// Verified against cycle 2601 CIFP files.
+constexpr int kRouteType = 1;
+constexpr int kProcName = 2;
+constexpr int kTransition = 3;
+constexpr int kFixIdent = 4;
+constexpr int kFixRegion = 5;
+constexpr int kPathTerm = 11;
+constexpr int kCourse = 20;    // magnetic course, tenths of a degree
+constexpr int kDistance = 21;  // leg distance, tenths of a nautical mile
+constexpr int kAltDesc = 22;   // altitude descriptor: + - @ B (or blank)
+constexpr int kAlt1 = 23;      // altitude one, feet
+constexpr int kAlt2 = 24;      // altitude two, feet (lower bound for 'B')
+constexpr int kMinLegFields = 25;
+
+// Read a field as an integer, treating blank/non-numeric as 0.
+int FieldInt(const std::vector<std::string>& f, int idx) {
+  if (idx < 0 || idx >= static_cast<int>(f.size())) {
+    return 0;
+  }
+  const std::string t = Trim(f[idx]);
+  if (t.empty()) {
+    return 0;
+  }
+  return std::atoi(t.c_str());
+}
+
+std::string FieldStr(const std::vector<std::string>& f, int idx) {
+  if (idx < 0 || idx >= static_cast<int>(f.size())) {
+    return {};
+  }
+  return Trim(f[idx]);
+}
+
+ProcedureType TypeFromTag(std::string_view tag) {
+  if (tag == "STAR") return ProcedureType::kStar;
+  if (tag == "APPCH") return ProcedureType::kApproach;
+  return ProcedureType::kSid;
+}
+
+// Parse the altitude restriction from descriptor + the two altitude columns.
+AltitudeConstraint ParseAltConstraint(const std::vector<std::string>& f) {
+  AltitudeConstraint ac;
+  const std::string desc = FieldStr(f, kAltDesc);
+  const int a1 = FieldInt(f, kAlt1);
+  const int a2 = FieldInt(f, kAlt2);
+  if (desc == "+") {
+    ac.kind = AltConstraintKind::kAtOrAbove;
+    ac.alt1_ft = a1;
+  } else if (desc == "-") {
+    ac.kind = AltConstraintKind::kAtOrBelow;
+    ac.alt1_ft = a1;
+  } else if (desc == "B") {
+    ac.kind = AltConstraintKind::kBetween;
+    ac.alt1_ft = a1;  // upper
+    ac.alt2_ft = a2;  // lower
+  } else if (a1 != 0) {
+    // '@' or blank descriptor with an altitude present means "cross at".
+    ac.kind = AltConstraintKind::kAt;
+    ac.alt1_ft = a1;
+  }
+  return ac;
+}
+
+// Convert an X-Plane packed coordinate (e.g. "N40372318" = 40 deg 37 min
+// 23.18 sec, "W073470505" = 073 deg 47 min 05.05 sec) to signed degrees.
+double PackedToDegrees(std::string_view s) {
+  if (s.size() < 2) {
+    return 0.0;
+  }
+  const char hemi = s[0];
+  const bool is_lon = (hemi == 'E' || hemi == 'W');
+  const bool negative = (hemi == 'S' || hemi == 'W');
+  const std::string digits(s.substr(1));
+  const size_t deg_len = is_lon ? 3 : 2;
+  if (digits.size() < deg_len + 2) {
+    return 0.0;
+  }
+  const double deg = std::atoi(digits.substr(0, deg_len).c_str());
+  const double min = std::atoi(digits.substr(deg_len, 2).c_str());
+  // Remaining digits are seconds with two implied decimal places (SSss).
+  const std::string rest = digits.substr(deg_len + 2);
+  const double sec = rest.empty() ? 0.0 : std::atof(rest.c_str()) / 100.0;
+  const double value = deg + min / 60.0 + sec / 3600.0;
+  return negative ? -value : value;
+}
+
+// Parse one RWY record into a Runway, or return false if it lacks coordinates.
+// Format: `RWY:RW04L,...,<elev>,...;<lat>,<lon>,<tch>;`
+bool ParseRunway(std::string_view line, Runway& out) {
+  const std::vector<std::string> parts = Split(line, ';');
+  if (parts.size() < 2) {
+    return false;
+  }
+  const std::vector<std::string> head = Split(parts[0], ',');
+  if (head.empty()) {
+    return false;
+  }
+  // head[0] is "RWY:RW04L"; the runway ident follows the colon.
+  const std::vector<std::string> tag = Split(head[0], ':');
+  if (tag.size() < 2) {
+    return false;
+  }
+  out.ident = Trim(tag[1]);
+  out.elevation_ft = FieldInt(head, 3);  // threshold elevation, feet
+  const std::vector<std::string> coords = Split(parts[1], ',');
+  if (coords.size() < 2) {
+    return false;
+  }
+  out.threshold = Coordinate{PackedToDegrees(Trim(coords[0])), PackedToDegrees(Trim(coords[1]))};
+  return true;
+}
+
+}  // namespace
+
+CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
+  CifpData data;
+
+  // Group consecutive legs sharing (type, name, transition, route type) into
+  // one Procedure. A change in any of these starts a new procedure.
+  ProcedureType cur_type = ProcedureType::kSid;
+  std::string cur_name;
+  std::string cur_trans;
+  int cur_route = -1;
+  bool have_current = false;
+
+  auto flush = [&](Procedure& p) {
+    if (!p.legs.empty()) {
+      data.procedures.push_back(std::move(p));
+    }
+  };
+  Procedure current;
+
+  for (const std::string& raw : lines) {
+    if (raw.empty()) {
+      continue;
+    }
+    const size_t colon = raw.find(':');
+    if (colon == std::string::npos) {
+      continue;
+    }
+    const std::string_view tag(raw.data(), colon);
+
+    if (tag == "RWY") {
+      Runway rwy;
+      if (ParseRunway(raw, rwy)) {
+        data.runways.push_back(std::move(rwy));
+      }
+      continue;
+    }
+    if (tag != "SID" && tag != "STAR" && tag != "APPCH") {
+      continue;  // PRDAT and anything else
+    }
+
+    // Drop the trailing record terminator and everything after it.
+    std::string_view body(raw);
+    const size_t semi = body.find(';');
+    if (semi != std::string_view::npos) {
+      body = body.substr(0, semi);
+    }
+    const std::vector<std::string> f = Split(body, ',');
+    if (static_cast<int>(f.size()) < kMinLegFields) {
+      continue;  // malformed / too short to carry a path terminator + altitudes
+    }
+
+    const ProcedureType type = TypeFromTag(tag);
+    const int route_type = FieldInt(f, kRouteType);
+    const std::string name = FieldStr(f, kProcName);
+    const std::string trans = FieldStr(f, kTransition);
+
+    if (!have_current || type != cur_type || name != cur_name || trans != cur_trans ||
+        route_type != cur_route) {
+      flush(current);
+      current = Procedure{};
+      current.type = type;
+      current.name = name;
+      current.transition_ident = trans;
+      current.route_type = route_type;
+      if (trans.rfind("RW", 0) == 0) {
+        current.runway = trans;
+      }
+      cur_type = type;
+      cur_name = name;
+      cur_trans = trans;
+      cur_route = route_type;
+      have_current = true;
+    }
+
+    ProcedureLeg leg;
+    leg.fix = Ident(FieldStr(f, kFixIdent), FieldStr(f, kFixRegion));
+    leg.path_term = ParsePathTerminator(FieldStr(f, kPathTerm));
+    leg.course_deg = FieldInt(f, kCourse) / 10.0;
+    leg.distance_nm = FieldInt(f, kDistance) / 10.0;
+    leg.alt = ParseAltConstraint(f);
+    current.legs.push_back(std::move(leg));
+  }
+  flush(current);
+
+  return data;
+}
+
+Result<CifpData> CifpParser::Parse(const std::string& path) {
+  std::ifstream in(path);
+  if (!in.is_open()) {
+    return Result<CifpData>::Err(Error(ErrorCode::kDataMissing, "cannot open CIFP file: " + path));
+  }
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();  // tolerate CRLF
+    }
+    lines.push_back(std::move(line));
+  }
+  return Result<CifpData>::Ok(ParseLines(lines));
+}
+
+}  // namespace bf

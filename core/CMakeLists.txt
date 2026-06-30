@@ -1,6 +1,7 @@
 # The graph + A* search live in core (pure logic, no I/O).
 add_library(bf_core
             domain/coordinate.cc
+            domain/procedure.cc
             graph/astar.cc
             graph/yen_kshortest.cc)
 

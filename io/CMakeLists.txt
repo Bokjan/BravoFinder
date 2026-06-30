@@ -1,6 +1,7 @@
 # The I/O layer: data loaders, graph builder, and the NavDatabase facade.
 add_library(bf_io
             loaders/xplane/xplane_loader.cc
+            loaders/xplane/cifp/cifp_parser.cc
             graph_builder.cc
             nav_database.cc)
 
