@@ -19,4 +19,21 @@ namespace bf {
 std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, int goal, int k,
                                              const SearchOptions& base_options);
 
+// Find up to `k` shortest loopless paths over a multi-source / multi-goal search,
+// where each candidate may start at a different source fix (paying its seed) and
+// end at a different goal fix (paying its seed). This is the procedure-aware form
+// used for routing: different candidates can join the network through different
+// SID/STAR connection fixes, not just diverge between a single fixed fix pair.
+//
+// Results are ordered by effective cost ascending (seed + enroute + seed); the
+// first equals FindShortestPathMulti. Each path's distance_nm includes both seed
+// costs, matching FindShortestPathMulti. `base_options` carries the
+// constraints/request and any caller node/edge bans (e.g. "no transit through
+// airports"); Yen composes its own bans on top, so callers should not preset the
+// node_blocked / edge_blocked fields with Yen-specific bans.
+std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
+                                                  const std::vector<SeededEndpoint>& sources,
+                                                  const std::vector<SeededEndpoint>& goals, int k,
+                                                  const SearchOptions& base_options);
+
 }  // namespace bf

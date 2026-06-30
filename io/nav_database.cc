@@ -254,65 +254,59 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   const std::vector<SeededEndpoint> sources = ProcedureConnector::ToEndpoints(dep.connections);
   const std::vector<SeededEndpoint> goals = ProcedureConnector::ToEndpoints(arr.connections);
 
-  // First, find the single best connection-fix pair via multi-source/goal A*.
-  const ShortestPath best = FindShortestPathMulti(graph, sources, goals, options);
-  if (!best.found || best.vertices.empty()) {
-    return Result<Routes>::Err(Error(ErrorCode::kNoRoute, "no route between endpoints"));
-  }
-  const int dep_fix = best.vertices.front();
-  const int arr_fix = best.vertices.back();
-
-  // For k>1, expand alternatives between the chosen connection fixes with Yen.
-  // The seed distances are constant offsets for a fixed fix pair, so ranking by
-  // enroute cost preserves the overall ordering.
+  // Find up to k candidate routes. Unlike the earlier scheme that fixed a single
+  // best connection-fix pair and only varied the enroute portion between them,
+  // the multi-endpoint Yen lets each candidate join through a different SID/STAR
+  // connection fix, so the alternatives can use genuinely different procedures.
+  // Both forms report distance_nm with both seed costs already included.
   const int k = std::max(1, request.k);
   std::vector<ShortestPath> paths;
-  if (k == 1 || dep_fix == arr_fix) {
-    paths.push_back(best);
-  } else {
-    paths = FindKShortestPaths(graph, dep_fix, arr_fix, k, options);
-    if (paths.empty()) {
+  if (k == 1) {
+    const ShortestPath best = FindShortestPathMulti(graph, sources, goals, options);
+    if (best.found && !best.vertices.empty()) {
       paths.push_back(best);
     }
+  } else {
+    paths = FindKShortestPathsMulti(graph, sources, goals, k, options);
+  }
+  if (paths.empty()) {
+    return Result<Routes>::Err(Error(ErrorCode::kNoRoute, "no route between endpoints"));
   }
 
-  // Seed distances to add back when Yen reported only the enroute portion.
-  double dep_seed = 0.0;
-  for (const SeededEndpoint& s : sources) {
-    if (s.vertex == dep_fix) {
-      dep_seed = s.cost;
-      break;
+  // Look up a connection fix's seed cost among an endpoint's seeded fixes.
+  auto seed_of = [](const std::vector<SeededEndpoint>& eps, int vertex) {
+    for (const SeededEndpoint& e : eps) {
+      if (e.vertex == vertex) {
+        return e.cost;
+      }
     }
-  }
-  double arr_seed = 0.0;
-  for (const SeededEndpoint& g : goals) {
-    if (g.vertex == arr_fix) {
-      arr_seed = g.cost;
-      break;
-    }
-  }
-
-  // Procedure selection is identical across the k candidates (the connection
-  // fix pair is fixed), so resolve it once.
-  std::string sid_name;
-  std::string dep_rwy;
-  std::vector<std::string> sid_options;
-  SelectProcedures(dep, dep_fix, sid_name, dep_rwy, sid_options);
-  std::string star_name;
-  std::string arr_rwy;
-  std::vector<std::string> star_options;
-  SelectProcedures(arr, arr_fix, star_name, arr_rwy, star_options);
+    return 0.0;
+  };
 
   Routes routes;
   routes.reserve(paths.size());
   for (const ShortestPath& p : paths) {
-    ShortestPath adjusted = p;
-    // The multi-source result already includes both seeds; Yen paths do not.
-    if (!(k == 1 || dep_fix == arr_fix)) {
-      adjusted.distance_nm += dep_seed + arr_seed;
+    if (p.vertices.empty()) {
+      continue;
     }
-    Route route = MakeRoute(*builder_, graph, adjusted, dep.airport_icao, arr.airport_icao,
-                            sid_name, star_name, dep_seed, arr_seed);
+    const int dep_fix = p.vertices.front();
+    const int arr_fix = p.vertices.back();
+    const double dep_seed = seed_of(sources, dep_fix);
+    const double arr_seed = seed_of(goals, arr_fix);
+
+    // Procedure selection depends on the candidate's own fix pair, which may
+    // differ across candidates, so resolve it per path.
+    std::string sid_name;
+    std::string dep_rwy;
+    std::vector<std::string> sid_options;
+    SelectProcedures(dep, dep_fix, sid_name, dep_rwy, sid_options);
+    std::string star_name;
+    std::string arr_rwy;
+    std::vector<std::string> star_options;
+    SelectProcedures(arr, arr_fix, star_name, arr_rwy, star_options);
+
+    Route route = MakeRoute(*builder_, graph, p, dep.airport_icao, arr.airport_icao, sid_name,
+                            star_name, dep_seed, arr_seed);
     route.sid = sid_name;
     route.dep_runway = dep_rwy;
     route.sid_options = sid_options;

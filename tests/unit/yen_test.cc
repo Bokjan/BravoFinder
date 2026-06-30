@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <set>
 
 #include "core/graph/yen_kshortest.h"
 #include "io/graph_builder.h"
@@ -77,6 +78,63 @@ TEST_CASE("Yen on unreachable goal returns empty", "[yen]") {
   std::vector<bf::ShortestPath> paths =
       bf::FindKShortestPaths(builder.graph(), a, b, 3, bf::SearchOptions{});
   CHECK(paths.empty());
+}
+
+// A network with two distinct entry fixes (S1, S2) that both lead to the same
+// goal G through a shared midpoint M. Each entry sits one degree out on either
+// side, so a route can join through either one at nearly equal cost.
+//
+//   S1 --Q1--\
+//             M --Q3--> G
+//   S2 --Q2--/
+//
+bf::NavData MakeTwoEntryData() {
+  bf::NavData d;
+  auto wp = [](const char* id, double lat, double lon) {
+    return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{lat, lon}, bf::WaypointKind::kFix};
+  };
+  d.waypoints = {wp("S1", 0.5, 0.0), wp("S2", -0.5, 0.0), wp("MMM", 0.0, 1.0), wp("GGG", 0.0, 2.0)};
+  auto seg = [](const char* name) {
+    bf::AirwaySegment s;
+    s.name = name;
+    s.direction = bf::AirwayDirection::kBoth;
+    return s;
+  };
+  d.airways = {
+      {bf::Ident("S1", "ZZ"), bf::Ident("MMM", "ZZ"), seg("Q1")},
+      {bf::Ident("S2", "ZZ"), bf::Ident("MMM", "ZZ"), seg("Q2")},
+      {bf::Ident("MMM", "ZZ"), bf::Ident("GGG", "ZZ"), seg("Q3")},
+  };
+  return d;
+}
+
+TEST_CASE("multi-endpoint Yen yields candidates through different entry fixes", "[yen]") {
+  bf::GraphBuilder builder(MakeTwoEntryData());
+  const int s1 = builder.VertexByIdent("S1");
+  const int s2 = builder.VertexByIdent("S2");
+  const int g = builder.VertexByIdent("GGG");
+  REQUIRE(s1 >= 0);
+  REQUIRE(s2 >= 0);
+  REQUIRE(g >= 0);
+
+  // Two seeded source fixes (the two procedure entry fixes), one goal. The seeds
+  // are equal, so the only difference between the two cheapest routes is which
+  // entry fix they join through -- exactly the cross-fix alternative the earlier
+  // single-fix scheme could not produce.
+  const std::vector<bf::SeededEndpoint> sources = {{s1, 10.0}, {s2, 10.0}};
+  const std::vector<bf::SeededEndpoint> goals = {{g, 0.0}};
+
+  std::vector<bf::ShortestPath> paths =
+      bf::FindKShortestPathsMulti(builder.graph(), sources, goals, 3, bf::SearchOptions{});
+
+  REQUIRE(paths.size() == 2);
+  CHECK(paths[0].cost <= paths[1].cost);
+  // The two candidates start at different entry fixes.
+  CHECK(paths[0].vertices.front() != paths[1].vertices.front());
+  std::set<int> entries = {paths[0].vertices.front(), paths[1].vertices.front()};
+  CHECK(entries == std::set<int>{s1, s2});
+  // Both include the shared source seed in their reported distance.
+  CHECK(paths[0].distance_nm >= 10.0);
 }
 
 }  // namespace

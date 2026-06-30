@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cstdlib>
 #include <fstream>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -131,6 +132,42 @@ TEST_CASE("real data: an arrival joins the STAR at a near fix, not a far entry",
   // leg should be a short hop, well under the ~260 NM that the far entry implied.
   CHECK(last.from != "PGS");
   CHECK(last.distance_nm < 60.0);
+}
+
+TEST_CASE("real data: K candidates can use different procedures", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  if (!HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("KLAX CIFP not present in '" << NavDataDir() << "'");
+  }
+
+  // The multi-endpoint K-shortest lets candidates join the network through
+  // different connection fixes, so the alternatives can use genuinely different
+  // SID/STAR procedures rather than sharing one fixed pair. KSEA -> KLAX has
+  // several competitive arrival options (KIMMO3, WAYVE1), so among enough
+  // candidates more than one distinct STAR should appear.
+  bf::RouteRequest req = MakeRequest("KSEA", "KLAX");
+  req.k = 5;
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
+  REQUIRE(routes);
+  const std::vector<bf::Route>& rs = routes.value();
+  REQUIRE(rs.size() >= 2);
+
+  // Ordering and distinctness still hold across the candidate set.
+  for (size_t i = 1; i < rs.size(); ++i) {
+    CHECK(rs[i].total_distance_nm >= rs[i - 1].total_distance_nm - 1e-6);
+    CHECK(rs[i].route_string != rs[i - 1].route_string);
+  }
+
+  // At least two candidates differ in their STAR, proving alternatives can cross
+  // connection fixes / procedures rather than sharing a single fixed pair.
+  std::set<std::string> stars;
+  for (const bf::Route& r : rs) {
+    stars.insert(r.star);
+  }
+  CHECK(stars.size() >= 2);
 }
 
 TEST_CASE("real data: high cruise altitude still finds a route", "[integration]") {
