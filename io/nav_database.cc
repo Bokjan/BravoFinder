@@ -43,26 +43,40 @@ std::string FormatRef(const ProcedureRef& ref) {
   return ref.name + "." + ref.transition;
 }
 
-// Build a Route (points, legs, route string) from a path of vertex indices. The
-// path runs connection-fix to connection-fix; `dep_label`/`arr_label` are the
-// airport ICAOs to show as the true endpoints (empty for waypoint endpoints).
+// Build a Route from a path of connection-fix vertices. `dep_label`/`arr_label`
+// are the airport ICAOs to show as the true endpoints (empty for waypoint
+// endpoints). When an airport endpoint connects through a procedure, `sid`/
+// `star` name it and `dep_seed`/`arr_seed` are the estimated procedure
+// distances; these become explicit first/last legs (airport <-> connection fix)
+// and are embedded in the route string like a filed flight plan.
 Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const ShortestPath& path,
-                const std::string& dep_label, const std::string& arr_label) {
+                const std::string& dep_label, const std::string& arr_label, const std::string& sid,
+                const std::string& star, double dep_seed, double arr_seed) {
   Route route;
   route.total_distance_nm = path.distance_nm;
+  if (path.vertices.empty()) {
+    return route;
+  }
+  const std::string dep_fix_id = builder.IdentOf(path.vertices.front()).ident;
+  const std::string arr_fix_id = builder.IdentOf(path.vertices.back()).ident;
 
-  // The first/last route points are the airports when procedures were used;
-  // otherwise the connection fixes themselves are the endpoints.
-  if (!dep_label.empty() && !path.vertices.empty()) {
+  // Points: optional departure airport, the connection fixes along the path,
+  // then the optional arrival airport.
+  if (!dep_label.empty()) {
     route.points.push_back(RoutePoint{dep_label, graph.CoordOf(path.vertices.front())});
   }
   for (int v : path.vertices) {
     route.points.push_back(RoutePoint{builder.IdentOf(v).ident, graph.CoordOf(v)});
   }
-  if (!arr_label.empty() && !path.vertices.empty()) {
+  if (!arr_label.empty()) {
     route.points.push_back(RoutePoint{arr_label, graph.CoordOf(path.vertices.back())});
   }
 
+  // Leading procedure leg: airport -> first connection fix via the SID (or DCT
+  // when the airport fell back to a direct link).
+  if (!dep_label.empty()) {
+    route.legs.push_back(RouteLeg{dep_label, dep_fix_id, sid.empty() ? "DCT" : sid, dep_seed});
+  }
   // Enroute legs between consecutive on-network fixes.
   for (size_t i = 0; i + 1 < path.vertices.size(); ++i) {
     const int u = path.vertices[i];
@@ -78,14 +92,14 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
     }
     route.legs.push_back(RouteLeg{builder.IdentOf(u).ident, builder.IdentOf(w).ident, via, dist});
   }
+  // Trailing procedure leg: last connection fix -> airport via the STAR.
+  if (!arr_label.empty()) {
+    route.legs.push_back(RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : star, arr_seed});
+  }
 
+  // Route string in filed-flight-plan style: DEP SID FIX <airways> FIX STAR ARR.
   std::string rs = route.points.empty() ? "" : route.points.front().ident;
   std::string last_via;
-  // When an airport label leads, the first hop into the network is via the SID
-  // (or DCT); represent it explicitly so the string reads DEP SID FIX ...
-  if (!dep_label.empty() && !path.vertices.empty()) {
-    rs += " " + builder.IdentOf(path.vertices.front()).ident;
-  }
   for (const RouteLeg& leg : route.legs) {
     if (leg.via != last_via) {
       rs += " " + leg.via;
@@ -93,40 +107,27 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
     }
     rs += " " + leg.to;
   }
-  if (!arr_label.empty()) {
-    rs += " " + arr_label;
-  }
   route.route_string = rs;
   return route;
 }
 
-// Find the connection whose fix is `fix_vertex` and record its procedures on
-// the route (SID for departure, STAR for arrival).
-void AnnotateProcedures(Route& route, const EndpointPlan& dep, int dep_fix, const EndpointPlan& arr,
-                        int arr_fix) {
-  for (const Connection& c : dep.connections) {
-    if (c.fix_vertex == dep_fix) {
-      for (const ProcedureRef& ref : c.procedures) {
-        route.sid_options.push_back(FormatRef(ref));
-        if (route.sid.empty()) {
-          route.sid = ref.name;
-          route.dep_runway = ref.runway;
-        }
-      }
-      break;
+// Pick the primary procedure (name + runway) and all interchangeable options
+// for the connection fix `fix_vertex` within `plan`. Returns the chosen name in
+// `name`/`runway` and every "NAME.TRANSITION" sharing the fix in `options`.
+void SelectProcedures(const EndpointPlan& plan, int fix_vertex, std::string& name,
+                      std::string& runway, std::vector<std::string>& options) {
+  for (const Connection& c : plan.connections) {
+    if (c.fix_vertex != fix_vertex) {
+      continue;
     }
-  }
-  for (const Connection& c : arr.connections) {
-    if (c.fix_vertex == arr_fix) {
-      for (const ProcedureRef& ref : c.procedures) {
-        route.star_options.push_back(FormatRef(ref));
-        if (route.star.empty()) {
-          route.star = ref.name;
-          route.arr_runway = ref.runway;
-        }
+    for (const ProcedureRef& ref : c.procedures) {
+      options.push_back(FormatRef(ref));
+      if (name.empty()) {
+        name = ref.name;
+        runway = ref.runway;
       }
-      break;
     }
+    break;
   }
 }
 
@@ -278,6 +279,17 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     }
   }
 
+  // Procedure selection is identical across the k candidates (the connection
+  // fix pair is fixed), so resolve it once.
+  std::string sid_name;
+  std::string dep_rwy;
+  std::vector<std::string> sid_options;
+  SelectProcedures(dep, dep_fix, sid_name, dep_rwy, sid_options);
+  std::string star_name;
+  std::string arr_rwy;
+  std::vector<std::string> star_options;
+  SelectProcedures(arr, arr_fix, star_name, arr_rwy, star_options);
+
   Routes routes;
   routes.reserve(paths.size());
   for (const ShortestPath& p : paths) {
@@ -286,8 +298,14 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     if (!(k == 1 || dep_fix == arr_fix)) {
       adjusted.distance_nm += dep_seed + arr_seed;
     }
-    Route route = MakeRoute(*builder_, graph, adjusted, dep.airport_icao, arr.airport_icao);
-    AnnotateProcedures(route, dep, dep_fix, arr, arr_fix);
+    Route route = MakeRoute(*builder_, graph, adjusted, dep.airport_icao, arr.airport_icao,
+                            sid_name, star_name, dep_seed, arr_seed);
+    route.sid = sid_name;
+    route.dep_runway = dep_rwy;
+    route.sid_options = sid_options;
+    route.star = star_name;
+    route.arr_runway = arr_rwy;
+    route.star_options = star_options;
     routes.push_back(std::move(route));
   }
   return Result<Routes>::Ok(std::move(routes));

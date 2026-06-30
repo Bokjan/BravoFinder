@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cstdlib>
@@ -153,6 +154,22 @@ TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integra
   // -line procedure estimate keeps the total at or above the great circle).
   CHECK(r.total_distance_nm > 2144.0);
   CHECK(r.total_distance_nm < 2144.0 * 1.2);
+
+  // The procedures appear as explicit first/last legs (airport <-> connection
+  // fix) labeled by the SID/STAR, and the route string reads like a filed plan.
+  REQUIRE(r.legs.size() >= 2);
+  CHECK(r.legs.front().from == "KJFK");
+  CHECK(r.legs.front().via == r.sid);
+  CHECK(r.legs.back().to == "KLAX");
+  CHECK(r.legs.back().via == r.star);
+  CHECK(r.route_string.rfind("KJFK " + r.sid + " ", 0) == 0);  // starts with "KJFK <SID> "
+  CHECK(r.route_string.find(" " + r.star + " KLAX") != std::string::npos);
+  // Leg distances should sum to the reported total (procedures included).
+  double leg_sum = 0.0;
+  for (const bf::RouteLeg& leg : r.legs) {
+    leg_sum += leg.distance_nm;
+  }
+  CHECK(leg_sum == Catch::Approx(r.total_distance_nm).margin(1.0));
 }
 
 TEST_CASE("real data: a departure runway filter still yields a route", "[integration]") {
