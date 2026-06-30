@@ -22,14 +22,20 @@ std::string NavDataDir() {
   return "navdata";
 }
 
-bool HasData(const std::string& dir) {
-  std::ifstream f(dir + "/earth_fix.dat");
-  return f.is_open();
-}
-
 bool HasCifp(const std::string& dir, const std::string& icao) {
   std::ifstream f(dir + "/CIFP/" + icao + ".dat");
   return f.is_open();
+}
+
+// Open the navigation database once and share it across all integration cases.
+// NavDatabase is read-only after Open and FindRoutes is const, so a single
+// instance is safe to reuse; this avoids re-parsing ~20 MB of data (and
+// rebuilding the graph) per case, which dominated the suite's run time.
+// Returns nullptr when the data directory has no usable data, so callers SKIP.
+const bf::NavDatabase* SharedDb() {
+  static const std::string dir = NavDataDir();
+  static bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  return db ? &db.value() : nullptr;
 }
 
 bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
@@ -40,15 +46,12 @@ bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
 }
 
 TEST_CASE("real data: KJFK to KLAX route is plausible", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "' (set BRAVOFINDER_NAVDATA)");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
   }
 
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
-
-  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KLAX"));
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
 
@@ -62,38 +65,32 @@ TEST_CASE("real data: KJFK to KLAX route is plausible", "[integration]") {
 }
 
 TEST_CASE("real data: case-insensitive endpoints", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
-  CHECK(db.value().FindRoutes(MakeRequest("kjfk", "klax")));
+  CHECK(db->FindRoutes(MakeRequest("kjfk", "klax")));
 }
 
 TEST_CASE("real data: unknown airport reports an error", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
-  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("ZZZZ", "KLAX"));
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("ZZZZ", "KLAX"));
   REQUIRE_FALSE(routes);
   CHECK(routes.error().code == bf::ErrorCode::kAirportNotFound);
 }
 
 TEST_CASE("real data: K-shortest returns distinct ordered routes", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
 
   bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
   req.k = 3;
-  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(req);
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
   REQUIRE(routes);
   const std::vector<bf::Route>& rs = routes.value();
   REQUIRE(rs.size() >= 2);
@@ -105,16 +102,14 @@ TEST_CASE("real data: K-shortest returns distinct ordered routes", "[integration
 }
 
 TEST_CASE("real data: high cruise altitude still finds a route", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
 
   bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
   req.cruise_fl = 350;  // FL350: enables altitude-band and MORA filtering
-  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(req);
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
   // The altitude-constrained route should still be a sane length.
@@ -122,19 +117,17 @@ TEST_CASE("real data: high cruise altitude still finds a route", "[integration]"
 }
 
 TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   // This assertion needs the CIFP procedure files, extracted separately from
   // the enroute data; skip if KJFK's/KLAX's procedures are not present.
-  if (!HasCifp(dir, "KJFK") || !HasCifp(dir, "KLAX")) {
-    SKIP("CIFP procedures not present in '" << dir << "'");
+  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
   }
 
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
-  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KLAX"));
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
 
@@ -173,41 +166,37 @@ TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integra
 }
 
 TEST_CASE("real data: a departure runway filter still yields a route", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  if (!HasCifp(dir, "KJFK") || !HasCifp(dir, "KLAX")) {
-    SKIP("CIFP procedures not present in '" << dir << "'");
+  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
 
   bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
   req.departure_runway = "RW31L";  // a real KJFK runway served by DEEZZ5
-  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(req);
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
   CHECK_FALSE(routes.value().front().sid.empty());
 }
 
 TEST_CASE("real data: an airport without procedures stays the endpoint via DCT", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   // Exercises the DCT fallback: KJFK has a SID, KSFO (when its CIFP is not
   // extracted) connects by a direct link. The airport must remain the route
   // endpoint rather than being replaced by its connection fix.
-  if (!HasCifp(dir, "KJFK")) {
-    SKIP("KJFK CIFP not present in '" << dir << "'");
+  if (!HasCifp(NavDataDir(), "KJFK")) {
+    SKIP("KJFK CIFP not present in '" << NavDataDir() << "'");
   }
-  if (HasCifp(dir, "KSFO")) {
+  if (HasCifp(NavDataDir(), "KSFO")) {
     SKIP("KSFO CIFP is present; this case tests the no-procedure fallback");
   }
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
-  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KSFO"));
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KSFO"));
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
 
@@ -224,16 +213,14 @@ TEST_CASE("real data: an airport without procedures stays the endpoint via DCT",
 }
 
 TEST_CASE("real data: a route does not transit through an intermediate airport", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  if (!HasCifp(dir, "KJFK") || !HasCifp(dir, "KLAX")) {
-    SKIP("CIFP procedures not present in '" << dir << "'");
+  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
-  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KLAX"));
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
   REQUIRE(routes);
   const bf::Route& r = routes.value().front();
   REQUIRE(r.points.size() >= 2);
@@ -248,18 +235,16 @@ TEST_CASE("real data: a route does not transit through an intermediate airport",
 }
 
 TEST_CASE("real data: KJFK publishes terminal-area MSA sectors", "[integration]") {
-  const std::string dir = NavDataDir();
-  if (!HasData(dir)) {
-    SKIP("navigation data not found in '" << dir << "'");
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
-  REQUIRE(db);
 
   // MSA requires earth_msa.dat, which is extracted separately from the enroute
   // files; skip if it was not provided alongside them.
-  const std::vector<bf::MsaSector> msa = db.value().MsaForAirport("KJFK");
+  const std::vector<bf::MsaSector> msa = db->MsaForAirport("KJFK");
   if (msa.empty()) {
-    SKIP("earth_msa.dat not present in '" << dir << "'");
+    SKIP("earth_msa.dat not present in '" << NavDataDir() << "'");
   }
 
   // Every returned sector belongs to KJFK and carries at least one arc with a
