@@ -18,30 +18,44 @@ procedures.
 
 v3 is being rewritten from scratch and is under active development.
 
-**Working today (milestone M1):** routing over the enroute airway network. The tool
-loads X-Plane 12 navigation data, builds a directed graph honoring airway
-directionality, and finds the shortest path between two airports (or waypoints) with
-A*. For example, `KJFK KLAX` resolves to a plausible ~2161 NM airway route.
+**Working today (through milestone M3):** the tool loads X-Plane 12 navigation
+data, builds a directed graph honoring airway directionality and high/low levels,
+and finds routes between two airports (or waypoints) with A* and Yen K-shortest.
+Airports connect to the enroute network through their real SID/STAR procedures
+(parsed from ARINC 424 / CIFP), falling back to a direct link where no procedure
+data exists. For example, `KJFK KLAX` resolves to a filed-flight-plan-style route
+such as `KJFK DEEZZ5 TOWIN ... PGS BASET5 KLAX` of ~2160 NM.
+
+A single loaded database is safe to query concurrently from multiple threads.
 
 ### Roadmap
 
 - **M1 (done)** — enroute airway network, A* search, `bf route` CLI.
 - **M2 (done)** — pluggable constraints: altitude bands, MORA safety floor,
   high/low level preference; Yen K-shortest for multiple candidate routes.
-- **M3** — SID/STAR/approach procedures (ARINC 424 / CIFP), MSA.
-- **M4** — procedure leg refinement and a compact `.bfdb` cache for instant startup.
+- **M3 (done)** — SID/STAR/approach procedures (ARINC 424 / CIFP, all 23 path
+  terminators), terminal-area MSA, procedure-based airport connection, procedures
+  surfaced in the route and CLI output.
+- **M4** — procedure leg refinement (heading/arc/altitude legs), fuller
+  multi-procedure K-shortest, and a compact `.bfdb` cache for instant startup.
 
 Not planned for the first phase: Web API, map visualization.
 
 ## Building
 
-Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11) are fetched
-automatically via FetchContent.
+Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11, RapidJSON)
+are fetched automatically via FetchContent.
 
 ```bash
-cmake --preset debug      # or: release
-cmake --build --preset debug
-ctest --preset debug      # runs unit tests; integration tests need data (see below)
+cmake --preset debug              # or: release
+cmake --build --preset debug      # parallel build (use --preset, not the path form)
+ctest --preset debug              # unit tests run always; integration tests need data
+```
+
+A `tsan` preset (ThreadSanitizer) is available to verify concurrency safety:
+
+```bash
+cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 ```
 
 ## Usage
@@ -57,9 +71,14 @@ bf route KJFK KLAX --alt 350
 
 # Prefer high (Jet) or low (Victor) airways; ask for several candidates
 bf route KJFK KLAX --level high -k 3
+
+# Restrict the departure/arrival runway used for SID/STAR selection
+bf route KJFK KLAX --rwy-dep RW31L
 ```
 
-Endpoints are airport ICAO codes or waypoint idents, case-insensitive.
+Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an
+airport has procedure data, the route and its legs name the SID and STAR used (and
+the interchangeable procedures that share the same connection fix).
 
 ## Navigation Data
 
