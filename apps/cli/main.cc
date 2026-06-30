@@ -1,3 +1,6 @@
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+
 #include <CLI/CLI.hpp>
 #include <cstdlib>
 #include <iomanip>
@@ -56,49 +59,67 @@ void PrintText(const bf::Route& route) {
   }
 }
 
-// Print a JSON array of strings on one line: ["A","B"].
-void PrintJsonStringArray(const std::vector<std::string>& items) {
-  std::cout << "[";
-  for (size_t i = 0; i < items.size(); ++i) {
-    std::cout << "\"" << items[i] << "\"" << (i + 1 < items.size() ? ", " : "");
+// Serialize one route into a rapidjson Writer. The Writer streams directly to
+// the buffer (no intermediate DOM) and escapes strings correctly.
+template <class Writer>
+void WriteRouteJson(Writer& writer, const bf::Route& route) {
+  auto string_array = [&](const std::vector<std::string>& items) {
+    writer.StartArray();
+    for (const std::string& s : items) {
+      writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.size()));
+    }
+    writer.EndArray();
+  };
+
+  writer.StartObject();
+  writer.Key("route");
+  writer.String(route.route_string.c_str(),
+                static_cast<rapidjson::SizeType>(route.route_string.size()));
+  writer.Key("total_distance_nm");
+  writer.Double(route.total_distance_nm);
+  writer.Key("sid");
+  writer.String(route.sid.c_str(), static_cast<rapidjson::SizeType>(route.sid.size()));
+  writer.Key("dep_runway");
+  writer.String(route.dep_runway.c_str(),
+                static_cast<rapidjson::SizeType>(route.dep_runway.size()));
+  writer.Key("sid_options");
+  string_array(route.sid_options);
+  writer.Key("star");
+  writer.String(route.star.c_str(), static_cast<rapidjson::SizeType>(route.star.size()));
+  writer.Key("arr_runway");
+  writer.String(route.arr_runway.c_str(),
+                static_cast<rapidjson::SizeType>(route.arr_runway.size()));
+  writer.Key("star_options");
+  string_array(route.star_options);
+  writer.Key("legs");
+  writer.StartArray();
+  for (const bf::RouteLeg& leg : route.legs) {
+    writer.StartObject();
+    writer.Key("from");
+    writer.String(leg.from.c_str(), static_cast<rapidjson::SizeType>(leg.from.size()));
+    writer.Key("to");
+    writer.String(leg.to.c_str(), static_cast<rapidjson::SizeType>(leg.to.size()));
+    writer.Key("via");
+    writer.String(leg.via.c_str(), static_cast<rapidjson::SizeType>(leg.via.size()));
+    writer.Key("distance_nm");
+    writer.Double(leg.distance_nm);
+    writer.EndObject();
   }
-  std::cout << "]";
+  writer.EndArray();
+  writer.EndObject();
 }
 
-// Print one route as a JSON object (hand-rolled to avoid a JSON dependency).
-void PrintRouteJson(const bf::Route& route, const std::string& indent) {
-  std::cout << std::fixed << std::setprecision(2);
-  std::cout << indent << "{\n";
-  std::cout << indent << "  \"route\": \"" << route.route_string << "\",\n";
-  std::cout << indent << "  \"total_distance_nm\": " << route.total_distance_nm << ",\n";
-  std::cout << indent << "  \"sid\": \"" << route.sid << "\",\n";
-  std::cout << indent << "  \"dep_runway\": \"" << route.dep_runway << "\",\n";
-  std::cout << indent << "  \"sid_options\": ";
-  PrintJsonStringArray(route.sid_options);
-  std::cout << ",\n";
-  std::cout << indent << "  \"star\": \"" << route.star << "\",\n";
-  std::cout << indent << "  \"arr_runway\": \"" << route.arr_runway << "\",\n";
-  std::cout << indent << "  \"star_options\": ";
-  PrintJsonStringArray(route.star_options);
-  std::cout << ",\n";
-  std::cout << indent << "  \"legs\": [\n";
-  for (size_t i = 0; i < route.legs.size(); ++i) {
-    const bf::RouteLeg& leg = route.legs[i];
-    std::cout << indent << "    {\"from\": \"" << leg.from << "\", \"to\": \"" << leg.to
-              << "\", \"via\": \"" << leg.via << "\", \"distance_nm\": " << leg.distance_nm << "}"
-              << (i + 1 < route.legs.size() ? "," : "") << "\n";
-  }
-  std::cout << indent << "  ]\n";
-  std::cout << indent << "}";
-}
-
+// Print the candidate routes as a JSON array.
 void PrintRoutesJson(const std::vector<bf::Route>& routes) {
-  std::cout << "[\n";
-  for (size_t i = 0; i < routes.size(); ++i) {
-    PrintRouteJson(routes[i], "  ");
-    std::cout << (i + 1 < routes.size() ? "," : "") << "\n";
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.SetMaxDecimalPlaces(2);
+  writer.StartArray();
+  for (const bf::Route& route : routes) {
+    WriteRouteJson(writer, route);
   }
-  std::cout << "]\n";
+  writer.EndArray();
+  std::cout << buffer.GetString() << "\n";
 }
 
 }  // namespace

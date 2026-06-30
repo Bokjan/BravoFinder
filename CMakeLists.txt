@@ -33,6 +33,24 @@ FetchContent_Declare(
   GIT_TAG v2.4.2)
 FetchContent_MakeAvailable(CLI11)
 
+# rapidjson is header-only; we use only its SAX-style Writer for JSON output.
+# Disable its tests/examples/doc and expose the headers via an INTERFACE target,
+# since upstream's own CMake config is dated.
+FetchContent_Declare(
+  rapidjson
+  GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
+  GIT_TAG v1.1.0)
+set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
+FetchContent_GetProperties(rapidjson)
+if(NOT rapidjson_POPULATED)
+  FetchContent_Populate(rapidjson)
+endif()
+add_library(rapidjson INTERFACE)
+target_include_directories(rapidjson INTERFACE ${rapidjson_SOURCE_DIR}/include)
+add_library(rapidjson::rapidjson ALIAS rapidjson)
+
 if(BRAVOFINDER_BUILD_TESTS)
   FetchContent_Declare(
     Catch2

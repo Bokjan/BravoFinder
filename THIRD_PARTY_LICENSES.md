@@ -10,6 +10,7 @@ permissive licenses compatible with MIT.
 |---|---|---|---|
 | [Catch2](https://github.com/catchorg/Catch2) v3 | Unit testing framework | Boost Software License 1.0 | https://www.boost.org/LICENSE_1_0.txt |
 | [CLI11](https://github.com/CLIUtils/CLI11) | Command-line parsing | BSD-3-Clause | https://github.com/CLIUtils/CLI11/blob/main/LICENSE |
+| [RapidJSON](https://github.com/Tencent/rapidjson) | JSON output (`route --format json`) | MIT | https://github.com/Tencent/rapidjson/blob/master/license.txt |
 
 ## Obligations
 
@@ -18,6 +19,10 @@ permissive licenses compatible with MIT.
 - **BSD-3-Clause** (CLI11): requires the copyright notice and license text to be
   retained. This file, together with the upstream license bundled by FetchContent,
   satisfies that obligation.
+- **MIT** (RapidJSON): requires the copyright notice and permission notice to be
+  retained. RapidJSON also bundles a copy of the MIT-licensed msinttypes; both notices
+  ship with the headers fetched by FetchContent. (Only the header-only Writer is used,
+  for JSON serialization; the parser is not used.)
 
 ## Navigation Data (not a code dependency)
 
