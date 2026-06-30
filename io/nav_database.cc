@@ -192,10 +192,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         plan.used_procedures = !plan.connections.empty();
       }
       if (plan.connections.empty()) {
-        // No usable procedures: fall back to DCT, and clear the airport label
-        // so the airport itself is not shown as a procedure endpoint.
+        // No usable procedures: fall back to DCT links to the nearest
+        // on-network waypoints. The airport stays the route endpoint; the
+        // connecting leg shows "DCT" since no procedure was selected.
         plan.connections = ProcedureConnector::BuildDctFallback(apt, *builder_, 5);
-        plan.airport_icao.clear();
       }
       return plan;
     }

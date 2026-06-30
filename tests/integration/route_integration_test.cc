@@ -191,6 +191,38 @@ TEST_CASE("real data: a departure runway filter still yields a route", "[integra
   CHECK_FALSE(routes.value().front().sid.empty());
 }
 
+TEST_CASE("real data: an airport without procedures stays the endpoint via DCT", "[integration]") {
+  const std::string dir = NavDataDir();
+  if (!HasData(dir)) {
+    SKIP("navigation data not found in '" << dir << "'");
+  }
+  // Exercises the DCT fallback: KJFK has a SID, KSFO (when its CIFP is not
+  // extracted) connects by a direct link. The airport must remain the route
+  // endpoint rather than being replaced by its connection fix.
+  if (!HasCifp(dir, "KJFK")) {
+    SKIP("KJFK CIFP not present in '" << dir << "'");
+  }
+  if (HasCifp(dir, "KSFO")) {
+    SKIP("KSFO CIFP is present; this case tests the no-procedure fallback");
+  }
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  REQUIRE(db);
+  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KSFO"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+
+  const bf::Route& r = routes.value().front();
+  REQUIRE(r.points.size() >= 2);
+  REQUIRE(r.legs.size() >= 2);
+  // Both airports are the true endpoints; the arrival has no STAR, so its final
+  // leg is a DCT link into the airport.
+  CHECK(r.points.front().ident == "KJFK");
+  CHECK(r.points.back().ident == "KSFO");
+  CHECK(r.legs.back().to == "KSFO");
+  CHECK(r.star.empty());
+  CHECK(r.legs.back().via == "DCT");
+}
+
 TEST_CASE("real data: a route does not transit through an intermediate airport", "[integration]") {
   const std::string dir = NavDataDir();
   if (!HasData(dir)) {
