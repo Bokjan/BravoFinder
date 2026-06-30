@@ -103,6 +103,36 @@ TEST_CASE("real data: K-shortest returns distinct ordered routes", "[integration
   }
 }
 
+TEST_CASE("real data: an arrival joins the STAR at a near fix, not a far entry", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  if (!HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("KLAX CIFP not present in '" << NavDataDir() << "'");
+  }
+
+  // A STAR exposes every on-network fix it passes as a candidate connection, not
+  // just its published entry fix. KLAX BASET5, for instance, enters from PGS
+  // (~260 NM out) but its common segment runs through DOWNE close to the field.
+  // An arrival from the northeast should join at a near fix, so the final STAR
+  // leg (last connection fix -> airport) stays short rather than spanning the
+  // whole procedure from a far entry.
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KDEN", "KLAX"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+
+  const bf::Route& r = routes.value().front();
+  REQUIRE_FALSE(r.legs.empty());
+  const bf::RouteLeg& last = r.legs.back();
+  CHECK(last.to == "KLAX");
+  CHECK_FALSE(r.star.empty());
+  // The chosen entry must not be the far BASET5 entry fix; the final procedure
+  // leg should be a short hop, well under the ~260 NM that the far entry implied.
+  CHECK(last.from != "PGS");
+  CHECK(last.distance_nm < 60.0);
+}
+
 TEST_CASE("real data: high cruise altitude still finds a route", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

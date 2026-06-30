@@ -77,15 +77,29 @@ void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, dou
   }
 }
 
-// Walk a procedure's legs accumulating distance, recording each on-network
-// definite-fix it passes as (vertex, cumulative distance from the runway end).
+// One on-network fix a procedure record passes, with the polyline distance from
+// the record's start accumulated up to it.
 struct FixHit {
   int vertex;
   double cumulative_nm;
 };
 
-std::vector<FixHit> WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder) {
+// The result of walking one procedure record's legs: every on-network fix it
+// reaches, the total polyline length of the record, and the first/last resolved
+// fix coordinates (used to bridge the record's endpoints to the airport with a
+// straight line, since the runway-to-first-fix and last-fix-to-runway portions
+// are not measured here).
+struct WalkResult {
   std::vector<FixHit> hits;
+  double total_nm = 0.0;
+  Coordinate first_coord{};
+  Coordinate last_coord{};
+  bool have_first = false;
+  bool have_last = false;
+};
+
+WalkResult WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder) {
+  WalkResult result;
   double cumulative = 0.0;
   bool have_prev = false;
   Coordinate prev_coord{};
@@ -100,14 +114,21 @@ std::vector<FixHit> WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& b
     cumulative +=
         LegDistance(leg, have_prev ? &prev_coord : nullptr, have_this ? &this_coord : nullptr);
     if (v >= 0 && builder.OnNetwork(v)) {
-      hits.push_back(FixHit{v, cumulative});
+      result.hits.push_back(FixHit{v, cumulative});
     }
     if (have_this) {
+      if (!result.have_first) {
+        result.first_coord = this_coord;
+        result.have_first = true;
+      }
+      result.last_coord = this_coord;
+      result.have_last = true;
       prev_coord = this_coord;
       have_prev = true;
     }
   }
-  return hits;
+  result.total_nm = cumulative;
+  return result;
 }
 
 std::vector<Connection> Finalize(std::unordered_map<int, Connection>& by_fix) {
@@ -132,25 +153,31 @@ std::vector<Connection> ProcedureConnector::BuildDeparture(const CifpData& cifp,
                                                            const Coordinate& airport_coord,
                                                            const GraphBuilder& builder,
                                                            const std::string& runway_filter) {
-  // A SID delivers the aircraft to the network at the LAST on-network fix it
-  // reaches. The seed is the straight-line distance from the airport to that
-  // fix: an M3 estimate that never undercounts the true track (precise
-  // procedure geometry is a later milestone), so total route distances stay
-  // physically plausible. WalkOnNetworkFixes is used only to pick the handoff
-  // fix, not to measure it, since a published SID spans several CIFP records
-  // (runway transition + common segment + enroute transition).
+  // A SID can hand the aircraft to the network at ANY on-network fix it passes,
+  // not just its last one: filing "join the airway at <fix>" is routine. Every
+  // such fix is exposed as a candidate connection and the multi-source search
+  // picks whichever minimizes seed + enroute cost.
+  //
+  // The seed is the estimated distance flown from the runway to that fix: the
+  // straight line from the airport to the record's first resolved fix (the
+  // unmeasured runway-to-first-fix portion) plus the record's own polyline up to
+  // the candidate. The polyline follows the published track, so a fix reached
+  // only after a long detour gets a larger (more honest) seed than its straight
+  // -line distance would suggest, steering the search toward closer fixes.
   std::unordered_map<int, Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
     if (p.type != ProcedureType::kSid || !RunwayMatches(p, runway_filter)) {
       continue;
     }
-    const std::vector<FixHit> hits = WalkOnNetworkFixes(p, builder);
-    if (hits.empty()) {
+    const WalkResult walk = WalkOnNetworkFixes(p, builder);
+    if (walk.hits.empty()) {
       continue;
     }
-    const int fix = hits.back().vertex;
-    const double seed = airport_coord.DistanceTo(builder.graph().CoordOf(fix));
-    Accumulate(by_fix, fix, seed, MakeRef(p));
+    const double runway_bridge = walk.have_first ? airport_coord.DistanceTo(walk.first_coord) : 0.0;
+    for (const FixHit& hit : walk.hits) {
+      const double seed = runway_bridge + hit.cumulative_nm;
+      Accumulate(by_fix, hit.vertex, seed, MakeRef(p));
+    }
   }
   return Finalize(by_fix);
 }
@@ -159,22 +186,28 @@ std::vector<Connection> ProcedureConnector::BuildArrival(const CifpData& cifp,
                                                          const Coordinate& airport_coord,
                                                          const GraphBuilder& builder,
                                                          const std::string& runway_filter) {
-  // A STAR picks the aircraft up at the FIRST on-network fix. As for departures,
-  // the seed is the straight-line distance from that fix to the airport (an
-  // estimate that never undercounts), since a published STAR also spans several
-  // CIFP records.
+  // A STAR can pick the aircraft up at ANY on-network fix it passes, not just
+  // its first one. Every such fix is exposed as a candidate; the multi-source
+  // search picks the cheapest entry. The seed is the estimated distance from
+  // that fix to the runway: the record's polyline from the candidate to the last
+  // resolved fix, plus the straight line from there to the airport (the
+  // unmeasured last-fix-to-runway portion). Following the published track makes
+  // a far entry fix (e.g. KLAX BASET5 via PGS, ~260 NM out) cost more than a
+  // nearer one on the same STAR (e.g. CIVET), so the search prefers the latter.
   std::unordered_map<int, Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
     if (p.type != ProcedureType::kStar || !RunwayMatches(p, runway_filter)) {
       continue;
     }
-    const std::vector<FixHit> hits = WalkOnNetworkFixes(p, builder);
-    if (hits.empty()) {
+    const WalkResult walk = WalkOnNetworkFixes(p, builder);
+    if (walk.hits.empty()) {
       continue;
     }
-    const int fix = hits.front().vertex;
-    const double seed = airport_coord.DistanceTo(builder.graph().CoordOf(fix));
-    Accumulate(by_fix, fix, seed, MakeRef(p));
+    const double runway_bridge = walk.have_last ? walk.last_coord.DistanceTo(airport_coord) : 0.0;
+    for (const FixHit& hit : walk.hits) {
+      const double seed = (walk.total_nm - hit.cumulative_nm) + runway_bridge;
+      Accumulate(by_fix, hit.vertex, seed, MakeRef(p));
+    }
   }
   return Finalize(by_fix);
 }
