@@ -187,6 +187,37 @@ Result<NavData> XPlaneLoader::Load(const std::string& data_dir) {
     }
   });
 
+  // --- earth_msa.dat: rowcode center region airport M (bearing alt radius)... ---
+  // Each row is one minimum-sector-altitude record: a center fix, its airport,
+  // then a sequence of (bearing, altitude in hundreds of feet, radius) triplets
+  // ending at a "000 000 0" sentinel. MSA is optional; a missing file simply
+  // leaves no sectors.
+  ForEachDataRow(data_dir + "/earth_msa.dat", [&](std::istringstream& row) {
+    int row_code = 0;
+    std::string center;
+    std::string region;
+    std::string airport;
+    std::string magnetic;  // 'M' or 'T' marker preceding the triplets
+    if (!(row >> row_code >> center >> region >> airport >> magnetic)) {
+      return;
+    }
+    MsaSector sector;
+    sector.center = Ident(center, region);
+    sector.airport_icao = airport;
+    int bearing = 0;
+    int alt = 0;
+    int radius = 0;
+    while (row >> bearing >> alt >> radius) {
+      if (bearing == 0 && alt == 0 && radius == 0) {
+        break;  // sentinel terminates the triplet list
+      }
+      sector.arcs.push_back(MsaArc{bearing, alt, radius});
+    }
+    if (!sector.arcs.empty()) {
+      data.msa.push_back(std::move(sector));
+    }
+  });
+
   return Result<NavData>::Ok(std::move(data));
 }
 

@@ -71,6 +71,7 @@ Result<NavDatabase> NavDatabase::Open(const std::string& data_dir) {
   }
   NavDatabase db;
   db.mora_ = std::move(data.value().mora);
+  db.msa_ = std::move(data.value().msa);
   db.builder_ = std::make_unique<GraphBuilder>(data.value());
   return Result<NavDatabase>::Ok(std::move(db));
 }
@@ -128,6 +129,17 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     routes.push_back(MakeRoute(*builder_, graph, p));
   }
   return Result<Routes>::Ok(std::move(routes));
+}
+
+std::vector<MsaSector> NavDatabase::MsaForAirport(const std::string& icao) const {
+  const std::string up = ToUpper(icao);
+  std::vector<MsaSector> out;
+  for (const MsaSector& s : msa_) {
+    if (s.airport_icao == up) {
+      out.push_back(s);
+    }
+  }
+  return out;
 }
 
 }  // namespace bf

@@ -115,4 +115,34 @@ TEST_CASE("real data: high cruise altitude still finds a route", "[integration]"
   CHECK(routes.value().front().total_distance_nm > 2144.0);
 }
 
+TEST_CASE("real data: KJFK publishes terminal-area MSA sectors", "[integration]") {
+  const std::string dir = NavDataDir();
+  if (!HasData(dir)) {
+    SKIP("navigation data not found in '" << dir << "'");
+  }
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  REQUIRE(db);
+
+  // MSA requires earth_msa.dat, which is extracted separately from the enroute
+  // files; skip if it was not provided alongside them.
+  const std::vector<bf::MsaSector> msa = db.value().MsaForAirport("KJFK");
+  if (msa.empty()) {
+    SKIP("earth_msa.dat not present in '" << dir << "'");
+  }
+
+  // Every returned sector belongs to KJFK and carries at least one arc with a
+  // positive minimum altitude.
+  for (const bf::MsaSector& s : msa) {
+    CHECK(s.airport_icao == "KJFK");
+    REQUIRE_FALSE(s.arcs.empty());
+    bool any_alt = false;
+    for (const bf::MsaArc& a : s.arcs) {
+      if (a.alt_100ft > 0) {
+        any_alt = true;
+      }
+    }
+    CHECK(any_alt);
+  }
+}
+
 }  // namespace

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/domain/mora_grid.h"
+#include "core/domain/msa.h"
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
@@ -33,9 +34,14 @@ class NavDatabase {
   // endpoint is unknown or no route exists.
   Result<std::vector<Route>> FindRoutes(const RouteRequest& request) const;
 
+  // The minimum sector altitudes published for `icao` (terminal-area MSA), or
+  // an empty span if none. Case-insensitive on the ICAO code.
+  std::vector<MsaSector> MsaForAirport(const std::string& icao) const;
+
  private:
   std::unique_ptr<GraphBuilder> builder_;
   MoraGrid mora_;
+  std::vector<MsaSector> msa_;
 };
 
 }  // namespace bf

@@ -6,6 +6,7 @@
 #include "core/domain/airway.h"
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
+#include "core/domain/msa.h"
 #include "core/domain/waypoint.h"
 
 namespace bf {
@@ -27,6 +28,7 @@ struct NavData {
   std::vector<AirwayConnection> airways;
   std::vector<Airport> airports;
   MoraGrid mora;
+  std::vector<MsaSector> msa;  // terminal-area minimum sector altitudes
 };
 
 }  // namespace bf
