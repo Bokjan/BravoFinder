@@ -17,11 +17,52 @@ namespace {
 void PrintText(const bf::Route& route) {
   std::cout << route.route_string << "\n\n";
   std::cout << std::fixed << std::setprecision(1);
-  std::cout << "Total distance: " << route.total_distance_nm << " NM\n\n";
-  std::cout << "From\tTo\tVia\tDist(NM)\n";
+  std::cout << "Total distance: " << route.total_distance_nm << " NM\n";
+
+  // Surface the terminal procedures, if any, and the interchangeable choices
+  // that share the same connection fix.
+  if (!route.sid.empty()) {
+    std::cout << "SID: " << route.sid;
+    if (!route.dep_runway.empty()) {
+      std::cout << " (rwy " << route.dep_runway << ")";
+    }
+    if (route.sid_options.size() > 1) {
+      std::cout << " [options: ";
+      for (size_t i = 0; i < route.sid_options.size(); ++i) {
+        std::cout << route.sid_options[i] << (i + 1 < route.sid_options.size() ? ", " : "");
+      }
+      std::cout << "]";
+    }
+    std::cout << "\n";
+  }
+  if (!route.star.empty()) {
+    std::cout << "STAR: " << route.star;
+    if (!route.arr_runway.empty()) {
+      std::cout << " (rwy " << route.arr_runway << ")";
+    }
+    if (route.star_options.size() > 1) {
+      std::cout << " [options: ";
+      for (size_t i = 0; i < route.star_options.size(); ++i) {
+        std::cout << route.star_options[i] << (i + 1 < route.star_options.size() ? ", " : "");
+      }
+      std::cout << "]";
+    }
+    std::cout << "\n";
+  }
+
+  std::cout << "\nFrom\tTo\tVia\tDist(NM)\n";
   for (const bf::RouteLeg& leg : route.legs) {
     std::cout << leg.from << '\t' << leg.to << '\t' << leg.via << '\t' << leg.distance_nm << '\n';
   }
+}
+
+// Print a JSON array of strings on one line: ["A","B"].
+void PrintJsonStringArray(const std::vector<std::string>& items) {
+  std::cout << "[";
+  for (size_t i = 0; i < items.size(); ++i) {
+    std::cout << "\"" << items[i] << "\"" << (i + 1 < items.size() ? ", " : "");
+  }
+  std::cout << "]";
 }
 
 // Print one route as a JSON object (hand-rolled to avoid a JSON dependency).
@@ -30,6 +71,16 @@ void PrintRouteJson(const bf::Route& route, const std::string& indent) {
   std::cout << indent << "{\n";
   std::cout << indent << "  \"route\": \"" << route.route_string << "\",\n";
   std::cout << indent << "  \"total_distance_nm\": " << route.total_distance_nm << ",\n";
+  std::cout << indent << "  \"sid\": \"" << route.sid << "\",\n";
+  std::cout << indent << "  \"dep_runway\": \"" << route.dep_runway << "\",\n";
+  std::cout << indent << "  \"sid_options\": ";
+  PrintJsonStringArray(route.sid_options);
+  std::cout << ",\n";
+  std::cout << indent << "  \"star\": \"" << route.star << "\",\n";
+  std::cout << indent << "  \"arr_runway\": \"" << route.arr_runway << "\",\n";
+  std::cout << indent << "  \"star_options\": ";
+  PrintJsonStringArray(route.star_options);
+  std::cout << ",\n";
   std::cout << indent << "  \"legs\": [\n";
   for (size_t i = 0; i < route.legs.size(); ++i) {
     const bf::RouteLeg& leg = route.legs[i];
@@ -63,6 +114,8 @@ int main(int argc, char** argv) {
   std::string format = "text";
   std::string level = "none";
   std::optional<int> cruise_fl;
+  std::string rwy_dep;
+  std::string rwy_arr;
   int k = 1;
   route->add_option("departure", departure, "Departure ICAO or waypoint ident")->required();
   route->add_option("arrival", arrival, "Arrival ICAO or waypoint ident")->required();
@@ -79,6 +132,10 @@ int main(int argc, char** argv) {
   route->add_option("-k", k, "Number of candidate routes to return")
       ->capture_default_str()
       ->check(CLI::PositiveNumber);
+  route->add_option("--rwy-dep", rwy_dep,
+                    "Departure runway to restrict the SID, e.g. RW31L (default: any)");
+  route->add_option("--rwy-arr", rwy_arr,
+                    "Arrival runway to restrict the STAR, e.g. RW25L (default: any)");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -94,6 +151,8 @@ int main(int argc, char** argv) {
     request.arrival = arrival;
     request.cruise_fl = cruise_fl;
     request.k = k;
+    request.departure_runway = rwy_dep;
+    request.arrival_runway = rwy_arr;
     if (level == "low") {
       request.level = bf::LevelPreference::kLow;
     } else if (level == "high") {

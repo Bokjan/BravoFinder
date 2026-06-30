@@ -26,6 +26,11 @@ bool HasData(const std::string& dir) {
   return f.is_open();
 }
 
+bool HasCifp(const std::string& dir, const std::string& icao) {
+  std::ifstream f(dir + "/CIFP/" + icao + ".dat");
+  return f.is_open();
+}
+
 bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
   bf::RouteRequest r;
   r.departure = dep;
@@ -113,6 +118,60 @@ TEST_CASE("real data: high cruise altitude still finds a route", "[integration]"
   REQUIRE_FALSE(routes.value().empty());
   // The altitude-constrained route should still be a sane length.
   CHECK(routes.value().front().total_distance_nm > 2144.0);
+}
+
+TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {
+  const std::string dir = NavDataDir();
+  if (!HasData(dir)) {
+    SKIP("navigation data not found in '" << dir << "'");
+  }
+  // This assertion needs the CIFP procedure files, extracted separately from
+  // the enroute data; skip if KJFK's/KLAX's procedures are not present.
+  if (!HasCifp(dir, "KJFK") || !HasCifp(dir, "KLAX")) {
+    SKIP("CIFP procedures not present in '" << dir << "'");
+  }
+
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  REQUIRE(db);
+  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+
+  const bf::Route& r = routes.value().front();
+  // The route connects via real procedures: a SID out of KJFK and a STAR into
+  // KLAX, each named, rather than a synthetic DCT hop.
+  CHECK_FALSE(r.sid.empty());
+  CHECK_FALSE(r.star.empty());
+  CHECK_FALSE(r.sid_options.empty());
+  CHECK_FALSE(r.star_options.empty());
+  // The airports remain the true endpoints; the second / second-to-last points
+  // are the procedure connection fixes on the enroute network.
+  CHECK(r.points.front().ident == "KJFK");
+  CHECK(r.points.back().ident == "KLAX");
+  CHECK(r.points.size() >= 4);
+  // A procedure-connected route is still geographically plausible (the straight
+  // -line procedure estimate keeps the total at or above the great circle).
+  CHECK(r.total_distance_nm > 2144.0);
+  CHECK(r.total_distance_nm < 2144.0 * 1.2);
+}
+
+TEST_CASE("real data: a departure runway filter still yields a route", "[integration]") {
+  const std::string dir = NavDataDir();
+  if (!HasData(dir)) {
+    SKIP("navigation data not found in '" << dir << "'");
+  }
+  if (!HasCifp(dir, "KJFK") || !HasCifp(dir, "KLAX")) {
+    SKIP("CIFP procedures not present in '" << dir << "'");
+  }
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  REQUIRE(db);
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.departure_runway = "RW31L";  // a real KJFK runway served by DEEZZ5
+  bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(req);
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  CHECK_FALSE(routes.value().front().sid.empty());
 }
 
 TEST_CASE("real data: KJFK publishes terminal-area MSA sectors", "[integration]") {
