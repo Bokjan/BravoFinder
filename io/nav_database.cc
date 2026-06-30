@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -133,7 +134,7 @@ void SelectProcedures(const EndpointPlan& plan, int fix_vertex, std::string& nam
 
 }  // namespace
 
-NavDatabase::NavDatabase() = default;
+NavDatabase::NavDatabase() : cache_mutex_(std::make_unique<std::mutex>()) {}
 NavDatabase::~NavDatabase() = default;
 NavDatabase::NavDatabase(NavDatabase&&) noexcept = default;
 NavDatabase& NavDatabase::operator=(NavDatabase&&) noexcept = default;
@@ -152,18 +153,30 @@ Result<NavDatabase> NavDatabase::Open(const std::string& data_dir) {
 }
 
 const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
-  auto it = procedure_cache_.find(icao);
-  if (it != procedure_cache_.end()) {
-    return it->second.get();  // may be nullptr: a cached "no procedures" result
+  // Fast path: return a cached result (including a cached "no procedures"
+  // nullptr) under a brief lock.
+  {
+    std::lock_guard<std::mutex> guard(*cache_mutex_);
+    auto it = procedure_cache_.find(icao);
+    if (it != procedure_cache_.end()) {
+      return it->second.get();
+    }
   }
+  // Parse outside the lock so concurrent queries for different airports do not
+  // serialize on disk I/O. Two threads racing on the same airport will both
+  // parse (harmless, redundant work).
   Result<CifpData> parsed = CifpParser::Parse(data_dir_ + "/CIFP/" + icao + ".dat");
   std::unique_ptr<CifpData> stored;
   if (parsed) {
     stored = std::make_unique<CifpData>(std::move(parsed).value());
   }
-  const CifpData* ptr = stored.get();
-  procedure_cache_.emplace(icao, std::move(stored));
-  return ptr;
+  // Re-lock and insert. try_emplace keeps the first inserted value if another
+  // thread won the race, so a previously returned pointer is never invalidated;
+  // the losing thread's parsed copy is simply discarded. Return the value that
+  // actually lives in the cache.
+  std::lock_guard<std::mutex> guard(*cache_mutex_);
+  auto it = procedure_cache_.try_emplace(icao, std::move(stored)).first;
+  return it->second.get();
 }
 
 Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) const {

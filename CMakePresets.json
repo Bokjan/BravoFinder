@@ -32,6 +32,16 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_CXX_FLAGS": "-O2 -Wall -Wextra"
       }
+    },
+    {
+      "name": "tsan",
+      "displayName": "ThreadSanitizer (data-race detection)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_FLAGS": "-O1 -g -Wall -Wextra -fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"
+      }
     }
   ],
   "buildPresets": [
@@ -42,6 +52,10 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
     }
   ],
   "testPresets": [
@@ -63,6 +77,13 @@
       },
       "execution": {
         "jobs": 0
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
       }
     }
   ]

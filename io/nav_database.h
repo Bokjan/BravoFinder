@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -19,6 +20,13 @@ class GraphBuilder;
 // The top-level navigation database: owns the loaded data and the route graph,
 // and answers route queries. Self-contained with no global/static state, so
 // multiple instances (e.g. different AIRAC cycles) can coexist safely.
+//
+// Thread-safety contract: after Open() succeeds, an instance is read-only except
+// for an internally synchronized procedure cache. FindRoutes() and
+// MsaForAirport() are const and may be called concurrently from multiple threads
+// on the SAME instance. The only shared mutable state is procedure_cache_, which
+// is guarded by cache_mutex_; everything else (graph, MORA, MSA) is immutable
+// after Open().
 class NavDatabase {
  public:
   NavDatabase();
@@ -44,14 +52,24 @@ class NavDatabase {
   // Load (and cache) an airport's CIFP procedures on demand. Returns nullptr if
   // the airport has no CIFP file. The cache accumulates across queries so a
   // session of related queries pays each airport's parse cost only once.
+  //
+  // Thread-safe: cache_mutex_ guards only the map lookup/insert, never the disk
+  // parse, so concurrent queries for different airports parse in parallel. The
+  // returned pointer stays valid for the database's lifetime: the cache is
+  // append-only (no erase) and stores unique_ptr values, so a CifpData's heap
+  // address is stable even when a concurrent insert rehashes the map.
   const CifpData* ProceduresFor(const std::string& icao) const;
 
   std::unique_ptr<GraphBuilder> builder_;
   MoraGrid mora_;
   std::vector<MsaSector> msa_;
   std::string data_dir_;
-  // Mutable: FindRoutes is logically const but lazily fills this cache.
+  // Procedure cache, lazily filled by FindRoutes (logically const). Guarded by
+  // cache_mutex_. The mutex is held in a unique_ptr so NavDatabase stays movable
+  // (std::mutex is not movable; the defaulted move operations need a movable
+  // member).
   mutable std::unordered_map<std::string, std::unique_ptr<CifpData>> procedure_cache_;
+  mutable std::unique_ptr<std::mutex> cache_mutex_;
 };
 
 }  // namespace bf

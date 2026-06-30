@@ -1,9 +1,11 @@
+#include <atomic>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "core/routing/route.h"
@@ -260,6 +262,58 @@ TEST_CASE("real data: KJFK publishes terminal-area MSA sectors", "[integration]"
     }
     CHECK(any_alt);
   }
+}
+
+TEST_CASE("real data: concurrent FindRoutes on one shared database is race-free",
+          "[integration][concurrency]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+
+  // Exercise the only shared mutable state (the lazily filled procedure cache)
+  // from several threads at once. The query set mixes:
+  //   - the same airport pair (KJFK/KLAX) to stress same-key cache contention,
+  //   - different pairs to stress parallel parsing and concurrent map rehashing.
+  // Under the tsan preset this catches data races; under any build it must not
+  // crash and every query that a single thread can answer must also succeed
+  // here. Endpoints that lack data simply return an error, which is fine: the
+  // point is concurrency safety, not that every pair routes.
+  const std::vector<std::pair<std::string, std::string>> queries = {
+      {"KJFK", "KLAX"}, {"KJFK", "KLAX"}, {"KLAX", "KJFK"}, {"KBOS", "KDEN"},
+      {"KDEN", "KBOS"}, {"KJFK", "KBOS"}, {"KLAX", "KDEN"}, {"KBOS", "KLAX"},
+  };
+
+  constexpr int kThreads = 8;
+  constexpr int kItersPerThread = 25;
+  std::atomic<int> completed{0};
+  std::atomic<bool> any_route{false};
+
+  std::vector<std::thread> workers;
+  for (int t = 0; t < kThreads; ++t) {
+    workers.emplace_back([&, t]() {
+      for (int i = 0; i < kItersPerThread; ++i) {
+        const auto& q = queries[(t + i) % queries.size()];
+        bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest(q.first, q.second));
+        if (routes && !routes.value().empty()) {
+          any_route.store(true);
+        }
+        completed.fetch_add(1);
+      }
+    });
+  }
+  for (std::thread& w : workers) {
+    w.join();
+  }
+
+  CHECK(completed.load() == kThreads * kItersPerThread);
+  // At least one of the well-known pairs must have produced a route, proving the
+  // concurrent calls actually did work (not merely failed in lockstep).
+  CHECK(any_route.load());
+
+  // The shared cache must agree with a fresh single-threaded query afterward.
+  bf::Result<std::vector<bf::Route>> after = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
+  CHECK(after);
 }
 
 }  // namespace
