@@ -52,6 +52,29 @@ struct SeededEndpoint {
   double cost = 0.0;  // SID distance (source) or STAR distance (goal), in NM
 };
 
+// A memoized admissible heuristic for the multi-source/multi-goal search: for a
+// vertex it returns the least (great-circle distance to a goal fix + that goal's
+// seed cost). The goal set is fixed across a whole Yen run, so h(v) is constant
+// per vertex; caching it lets the many spur searches share one table instead of
+// recomputing an O(goals) haversine sweep on every pop. Construct once, reuse
+// across searches over the SAME graph and goals.
+//
+// State is function-local to the search (no shared mutable global), so a cache
+// owned by a single search or a single Yen invocation stays within the
+// concurrency contract: distinct queries build their own instances.
+class MultiGoalHeuristic {
+ public:
+  MultiGoalHeuristic(const NavGraph& graph, const std::vector<SeededEndpoint>& goals);
+
+  // Least remaining cost to finish from `vertex` (memoized).
+  double operator()(int vertex) const;
+
+ private:
+  const NavGraph& graph_;
+  const std::vector<SeededEndpoint>& goals_;
+  mutable std::vector<double> cache_;  // -1 = not yet computed
+};
+
 // Multi-source, multi-goal A*: find the cheapest path that starts at any of
 // `sources` (paying its seed cost) and ends at any of `goals` (paying its seed
 // cost), over the enroute graph. The returned path's first vertex is the chosen
@@ -64,5 +87,14 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& sources,
                                    const std::vector<SeededEndpoint>& goals,
                                    const SearchOptions& options);
+
+// Overload taking a caller-owned, memoized heuristic so repeated searches with
+// the same graph and goals (Yen's spur searches) share one cache. `heuristic`
+// must have been built for the same `graph` and `goals`.
+ShortestPath FindShortestPathMulti(const NavGraph& graph,
+                                   const std::vector<SeededEndpoint>& sources,
+                                   const std::vector<SeededEndpoint>& goals,
+                                   const SearchOptions& options,
+                                   const MultiGoalHeuristic& heuristic);
 
 }  // namespace bf

@@ -117,10 +117,39 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal) {
   return FindShortestPath(graph, start, goal, SearchOptions{});
 }
 
-ShortestPath FindShortestPathMulti(const NavGraph& graph,
-                                   const std::vector<SeededEndpoint>& sources,
-                                   const std::vector<SeededEndpoint>& goals,
-                                   const SearchOptions& options) {
+MultiGoalHeuristic::MultiGoalHeuristic(const NavGraph& graph,
+                                       const std::vector<SeededEndpoint>& goals)
+    : graph_(graph), goals_(goals), cache_(graph.VertexCount(), -1.0) {}
+
+double MultiGoalHeuristic::operator()(int vertex) const {
+  double& slot = cache_[vertex];
+  if (slot >= 0.0) {
+    return slot;
+  }
+  const Coordinate c = graph_.CoordOf(vertex);
+  double best = kInfinity;
+  const int n = static_cast<int>(cache_.size());
+  for (const SeededEndpoint& gp : goals_) {
+    if (gp.vertex < 0 || gp.vertex >= n) {
+      continue;
+    }
+    const double h = c.DistanceTo(graph_.CoordOf(gp.vertex)) + gp.cost;
+    if (h < best) {
+      best = h;
+    }
+  }
+  slot = best;
+  return best;
+}
+
+namespace {
+
+// Core multi-source/multi-goal A*, parameterized on the heuristic so callers can
+// supply a shared memoized one (Yen) or a throwaway inline one (single search).
+template <class Heuristic>
+ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpoint>& sources,
+                            const std::vector<SeededEndpoint>& goals, const SearchOptions& options,
+                            Heuristic&& heuristic) {
   ShortestPath result;
   const int n = graph.VertexCount();
   if (sources.empty() || goals.empty()) {
@@ -138,24 +167,6 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
       goal_seed[gp.vertex] = gp.cost;
     }
   }
-
-  // Admissible, consistent heuristic: the least possible remaining cost to
-  // finish is the straight-line distance to some goal fix plus that goal's
-  // (non-negative) seed cost. Goal seeds are few, so this loop is cheap.
-  auto heuristic = [&](int v) {
-    const Coordinate c = graph.CoordOf(v);
-    double best = kInfinity;
-    for (const SeededEndpoint& gp : goals) {
-      if (gp.vertex < 0 || gp.vertex >= n) {
-        continue;
-      }
-      const double h = c.DistanceTo(graph.CoordOf(gp.vertex)) + gp.cost;
-      if (h < best) {
-        best = h;
-      }
-    }
-    return best;
-  };
 
   std::vector<double> g(n, kInfinity);  // best known effective cost from a source
   std::vector<double> geo(n, 0.0);      // geographic distance along best path
@@ -243,6 +254,24 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
   result.cost = best_total;
   result.found = true;
   return result;
+}
+
+}  // namespace
+
+ShortestPath FindShortestPathMulti(const NavGraph& graph,
+                                   const std::vector<SeededEndpoint>& sources,
+                                   const std::vector<SeededEndpoint>& goals,
+                                   const SearchOptions& options) {
+  const MultiGoalHeuristic heuristic(graph, goals);
+  return RunMultiSearch(graph, sources, goals, options, heuristic);
+}
+
+ShortestPath FindShortestPathMulti(const NavGraph& graph,
+                                   const std::vector<SeededEndpoint>& sources,
+                                   const std::vector<SeededEndpoint>& goals,
+                                   const SearchOptions& options,
+                                   const MultiGoalHeuristic& heuristic) {
+  return RunMultiSearch(graph, sources, goals, options, heuristic);
 }
 
 }  // namespace bf
