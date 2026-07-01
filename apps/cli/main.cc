@@ -3,6 +3,7 @@
 
 #include <CLI/CLI.hpp>
 #include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <optional>
@@ -12,6 +13,7 @@
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
+#include "core/version.h"
 #include "io/nav_database.h"
 
 namespace {
@@ -149,20 +151,29 @@ void PrintRoutesJson(const std::vector<bf::Route>& routes) {
 int main(int argc, char** argv) {
   CLI::App app{"BravoFinder - a flight route finder"};
   app.require_subcommand(1);
+  app.set_version_flag("--version", bf::kBravoFinderVersion);
 
   // --- build: parse X-Plane data, build the graph, write a .bfdb cache. ---
   CLI::App* build = app.add_subcommand("build", "Build a .bfdb cache from X-Plane data");
   std::string build_data_dir;
   std::string build_output;
+  std::string build_loader = "xplane";
+  bool build_without_cifp = false;
   build->add_option("data_dir", build_data_dir, "Directory of X-Plane navigation data")->required();
   build->add_option("-o,--output", build_output,
                     "Output .bfdb path (default: <data_dir>/nav.bfdb)");
+  build->add_option("--loader", build_loader, "Data source loader")
+      ->capture_default_str()
+      ->check(CLI::IsMember({"xplane"}));
+  build->add_flag("--without-cifp", build_without_cifp,
+                  "Skip building the CIFP procedure cache (<stem>_cifp.bfdb)");
 
   CLI::App* route = app.add_subcommand("route", "Find a route between two points");
   std::string departure;
   std::string arrival;
   std::string data_dir = "navdata";
   std::string db_path;
+  std::string cifp_db_path;
   std::string format = "text";
   std::string level = "none";
   std::optional<int> cruise_fl;
@@ -176,6 +187,9 @@ int main(int argc, char** argv) {
   route->add_option("--db", db_path,
                     "Prebuilt .bfdb cache to load (skips parsing; --data still "
                     "locates CIFP files for procedures)");
+  route->add_option("--cifp-db", cifp_db_path,
+                    "CIFP procedure cache to load (default: <db-stem>_cifp.bfdb "
+                    "next to --db, if present)");
   route->add_option("--format", format, "Output format: text or json")
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
@@ -207,16 +221,30 @@ int main(int argc, char** argv) {
       return EXIT_FAILURE;
     }
     std::cout << "wrote " << out << "\n";
+
+    // Also build the CIFP procedure cache unless opted out, so deployment needs
+    // only the cache files. Its path mirrors the graph cache: <stem>_cifp.bfdb.
+    if (!build_without_cifp) {
+      const std::filesystem::path p(out);
+      const std::string cifp_out = (p.parent_path() / (p.stem().string() + "_cifp.bfdb")).string();
+      bf::Result<uint32_t> n = db.value().WriteCifpCache(cifp_out, build_loader);
+      if (!n) {
+        std::cerr << "error: " << n.error().message << "\n";
+        return EXIT_FAILURE;
+      }
+      std::cout << "wrote " << cifp_out << " (" << n.value() << " airports)\n";
+    }
     return EXIT_SUCCESS;
   }
 
   if (*route) {
     // With --db, load the prebuilt cache (milliseconds); otherwise parse and
     // build from the data directory (M1 path). --data still locates CIFP files
-    // for on-demand procedure parsing in both cases.
-    bf::Result<bf::NavDatabase> db = db_path.empty()
-                                         ? bf::NavDatabase::Open(data_dir)
-                                         : bf::NavDatabase::OpenCached(db_path, data_dir);
+    // for on-demand procedure parsing in both cases; --cifp-db (or a sibling
+    // <stem>_cifp.bfdb) supplies procedures from a cache instead.
+    bf::Result<bf::NavDatabase> db =
+        db_path.empty() ? bf::NavDatabase::Open(data_dir)
+                        : bf::NavDatabase::OpenCached(db_path, data_dir, cifp_db_path);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
       return EXIT_FAILURE;

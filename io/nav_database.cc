@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -11,7 +12,9 @@
 #include "core/constraints/altitude_constraints.h"
 #include "core/constraints/mora_constraint.h"
 #include "core/graph/yen_kshortest.h"
+#include "core/version.h"
 #include "io/cache/bfdb_cache.h"
+#include "io/cache/cifp_cache.h"
 #include "io/graph_builder.h"
 #include "io/loaders/xplane/cifp/cifp_parser.h"
 #include "io/loaders/xplane/cifp/procedure_connector.h"
@@ -160,7 +163,8 @@ Result<NavDatabase> NavDatabase::Open(const std::string& data_dir) {
 }
 
 Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path,
-                                            const std::string& data_dir) {
+                                            const std::string& data_dir,
+                                            const std::string& cifp_db_path) {
   Result<BfdbImage> image = BfdbCache::Read(bfdb_path);
   if (!image) {
     return Result<NavDatabase>::Err(std::move(image).error());
@@ -174,6 +178,27 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path,
   db.mora_ = std::move(img.mora);
   db.msa_ = std::move(img.msa);
   db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromImage(std::move(img)));
+
+  // Resolve the CIFP procedure cache: an explicit path wins; otherwise look for
+  // a sibling "<stem>_cifp.bfdb" next to the graph cache. Either being absent is
+  // fine -- ProceduresFor then falls back to CIFP/<ICAO>.dat files.
+  std::string cifp_path = cifp_db_path;
+  if (cifp_path.empty()) {
+    std::filesystem::path p(bfdb_path);
+    const std::string stem = p.stem().string();
+    cifp_path = (p.parent_path() / (stem + "_cifp.bfdb")).string();
+    if (!std::filesystem::exists(cifp_path)) {
+      cifp_path.clear();
+    }
+  }
+  if (!cifp_path.empty()) {
+    Result<CifpArchive> archive = CifpCache::Open(cifp_path);
+    if (archive) {
+      db.cifp_archive_ = std::move(archive).value();
+    } else {
+      return Result<NavDatabase>::Err(std::move(archive).error());
+    }
+  }
   return Result<NavDatabase>::Ok(std::move(db));
 }
 
@@ -182,9 +207,16 @@ Result<void> NavDatabase::WriteCache(const std::string& out_path) const {
     return Result<void>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
   BfdbImage image = builder_->ToImage(data_dir_, cycle_, build_);
+  image.program_semver = kBravoFinderVersion;
+  image.source_loader = "xplane";  // the only loader today; recorded as provenance
   image.mora = mora_;
   image.msa = msa_;
   return BfdbCache::Write(out_path, image);
+}
+
+Result<uint32_t> NavDatabase::WriteCifpCache(const std::string& out_path,
+                                             const std::string& source_loader) const {
+  return CifpCache::Build(data_dir_, out_path, source_loader, cycle_, build_, kBravoFinderVersion);
 }
 
 const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
@@ -199,11 +231,20 @@ const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
   }
   // Parse outside the lock so concurrent queries for different airports do not
   // serialize on disk I/O. Two threads racing on the same airport will both
-  // parse (harmless, redundant work).
-  Result<CifpData> parsed = CifpParser::Parse(data_dir_ + "/CIFP/" + icao + ".dat");
+  // parse (harmless, redundant work). Source: the CIFP cache archive if one is
+  // loaded (an independent ifstream per fetch, contract-B safe), else the
+  // CIFP/<ICAO>.dat file.
   std::unique_ptr<CifpData> stored;
-  if (parsed) {
-    stored = std::make_unique<CifpData>(std::move(parsed).value());
+  if (cifp_archive_.has_value()) {
+    std::optional<CifpData> fetched = cifp_archive_->Fetch(icao);
+    if (fetched.has_value()) {
+      stored = std::make_unique<CifpData>(std::move(fetched).value());
+    }
+  } else {
+    Result<CifpData> parsed = CifpParser::Parse(data_dir_ + "/CIFP/" + icao + ".dat");
+    if (parsed) {
+      stored = std::make_unique<CifpData>(std::move(parsed).value());
+    }
   }
   // Re-lock and insert. try_emplace keeps the first inserted value if another
   // thread won the race, so a previously returned pointer is never invalidated;

@@ -4,156 +4,13 @@
 #include <fstream>
 #include <unordered_map>
 
+#include "io/cache/byte_io.h"
+
 namespace bf {
 
 namespace {
 
 constexpr char kMagic[4] = {'B', 'F', 'D', 'B'};
-
-// --- Little-endian writer over an in-memory byte buffer. ---
-//
-// Integers are emitted byte-by-byte (least significant first), so the output is
-// identical regardless of host endianness. Floating-point values are written by
-// copying their IEEE-754 bit pattern into an unsigned integer of the same width
-// and emitting that little-endian; every current platform uses IEEE-754, so the
-// bit pattern round-trips exactly.
-class ByteWriter {
- public:
-  explicit ByteWriter(std::string& out) : out_(out) {}
-
-  void U8(uint8_t v) { out_.push_back(static_cast<char>(v)); }
-
-  void U16(uint16_t v) {
-    U8(static_cast<uint8_t>(v));
-    U8(static_cast<uint8_t>(v >> 8));
-  }
-
-  void U32(uint32_t v) {
-    for (int i = 0; i < 4; ++i) {
-      U8(static_cast<uint8_t>(v >> (8 * i)));
-    }
-  }
-
-  void U64(uint64_t v) {
-    for (int i = 0; i < 8; ++i) {
-      U8(static_cast<uint8_t>(v >> (8 * i)));
-    }
-  }
-
-  void I16(int16_t v) { U16(static_cast<uint16_t>(v)); }
-  void I32(int32_t v) { U32(static_cast<uint32_t>(v)); }
-
-  void F32(float v) {
-    uint32_t bits = 0;
-    std::memcpy(&bits, &v, sizeof(bits));
-    U32(bits);
-  }
-
-  void F64(double v) {
-    uint64_t bits = 0;
-    std::memcpy(&bits, &v, sizeof(bits));
-    U64(bits);
-  }
-
- private:
-  std::string& out_;
-};
-
-// --- Little-endian reader over a byte span, with bounds checking. ---
-//
-// Every read advances a cursor and sets an error flag if it would run past the
-// end of the buffer; callers check ok() once at the end rather than per field.
-// After an error, further reads return zero, so parsing degrades safely.
-class ByteReader {
- public:
-  ByteReader(const char* data, size_t size) : data_(data), size_(size) {}
-
-  bool ok() const { return ok_; }
-  size_t remaining() const { return ok_ ? size_ - pos_ : 0; }
-
-  uint8_t U8() {
-    if (pos_ + 1 > size_) {
-      ok_ = false;
-      return 0;
-    }
-    return static_cast<uint8_t>(data_[pos_++]);
-  }
-
-  uint16_t U16() {
-    uint16_t lo = U8();
-    uint16_t hi = U8();
-    return static_cast<uint16_t>(lo | (hi << 8));
-  }
-
-  uint32_t U32() {
-    uint32_t v = 0;
-    for (int i = 0; i < 4; ++i) {
-      v |= static_cast<uint32_t>(U8()) << (8 * i);
-    }
-    return v;
-  }
-
-  uint64_t U64() {
-    uint64_t v = 0;
-    for (int i = 0; i < 8; ++i) {
-      v |= static_cast<uint64_t>(U8()) << (8 * i);
-    }
-    return v;
-  }
-
-  int16_t I16() { return static_cast<int16_t>(U16()); }
-  int32_t I32() { return static_cast<int32_t>(U32()); }
-
-  float F32() {
-    uint32_t bits = U32();
-    float v = 0;
-    std::memcpy(&v, &bits, sizeof(v));
-    return v;
-  }
-
-  double F64() {
-    uint64_t bits = U64();
-    double v = 0;
-    std::memcpy(&v, &bits, sizeof(v));
-    return v;
-  }
-
- private:
-  const char* data_;
-  size_t size_;
-  size_t pos_ = 0;
-  bool ok_ = true;
-};
-
-// A string pool: deduplicates nothing (first version), just appends each string
-// and returns a (offset, length) reference into a single blob. References are
-// written inline in their sections; the blob is a trailing section.
-class StringPool {
- public:
-  // Append `s` and return its reference. Not deduplicated: repeated strings get
-  // separate slots. Kept simple deliberately; the pool is only a few MB.
-  std::pair<uint32_t, uint32_t> Add(const std::string& s) {
-    const uint32_t offset = static_cast<uint32_t>(blob_.size());
-    blob_.append(s);
-    return {offset, static_cast<uint32_t>(s.size())};
-  }
-
-  const std::string& blob() const { return blob_; }
-
- private:
-  std::string blob_;
-};
-
-// A helper to resolve a (offset, len) reference against a loaded pool blob.
-// Returns an empty string if the reference is out of range (treated as an
-// error by the caller via the reader's ok flag, but bounded here for safety).
-std::string ResolveRef(const std::string& blob, uint32_t offset, uint32_t len, bool& ok) {
-  if (static_cast<size_t>(offset) + len > blob.size()) {
-    ok = false;
-    return {};
-  }
-  return blob.substr(offset, len);
-}
 
 }  // namespace
 
@@ -252,9 +109,15 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
   hw.U32(static_cast<uint32_t>(image.airway_names.size()));
   hw.U32(static_cast<uint32_t>(image.msa.size()));
   hw.U32(static_cast<uint32_t>(image.first_airport_vertex));
-  const auto dr = std::pair<uint32_t, uint32_t>{0, static_cast<uint32_t>(image.data_dir.size())};
-  hw.U32(dr.second);
-  out.append(image.data_dir);
+  // Header strings are stored inline (length-prefixed) rather than in the pool,
+  // since the pool is a trailing section but these are read from the header.
+  auto write_inline = [&](const std::string& s) {
+    hw.U32(static_cast<uint32_t>(s.size()));
+    out.append(s);
+  };
+  write_inline(image.program_semver);
+  write_inline(image.source_loader);
+  write_inline(image.data_dir);
   hw.U32(static_cast<uint32_t>(pool.blob().size()));
 
   out.append(sections);
@@ -310,13 +173,22 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
   const uint32_t airway_count = r.U32();
   const uint32_t msa_count = r.U32();
   img.first_airport_vertex = static_cast<int>(r.U32());
-  const uint32_t data_dir_len = r.U32();
-  if (!r.ok() || data_dir_len > r.remaining()) {
+  // Inline header strings (length-prefixed), in write order.
+  auto read_inline = [&](std::string& s) {
+    const uint32_t len = r.U32();
+    if (!r.ok() || len > r.remaining()) {
+      s.clear();
+      return false;
+    }
+    s.resize(len);
+    for (uint32_t i = 0; i < len; ++i) {
+      s[i] = static_cast<char>(r.U8());
+    }
+    return true;
+  };
+  if (!read_inline(img.program_semver) || !read_inline(img.source_loader) ||
+      !read_inline(img.data_dir)) {
     return bad("corrupt .bfdb header");
-  }
-  img.data_dir.resize(data_dir_len);
-  for (uint32_t i = 0; i < data_dir_len; ++i) {
-    img.data_dir[i] = static_cast<char>(r.U8());
   }
   const uint32_t pool_len = r.U32();
 

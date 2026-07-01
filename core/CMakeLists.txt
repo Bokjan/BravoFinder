@@ -5,8 +5,13 @@ add_library(bf_core
             graph/astar.cc
             graph/yen_kshortest.cc)
 
+# Generate version.h from the project version (single source of truth). It lands
+# in the binary dir; expose that dir so "core/version.h" resolves.
+configure_file(version.h.in ${CMAKE_CURRENT_BINARY_DIR}/core/version.h @ONLY)
+
 # Headers are included as "core/..." so the include root is the project root.
-target_include_directories(bf_core PUBLIC ${PROJECT_SOURCE_DIR})
+target_include_directories(bf_core PUBLIC ${PROJECT_SOURCE_DIR}
+                                          ${CMAKE_CURRENT_BINARY_DIR})
 
 target_compile_features(bf_core PUBLIC cxx_std_20)
 

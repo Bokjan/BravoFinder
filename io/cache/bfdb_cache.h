@@ -21,6 +21,8 @@ namespace bf {
 struct BfdbImage {
   uint32_t cycle = 0;
   uint32_t build = 0;
+  std::string program_semver;  // bf version that built this cache
+  std::string source_loader;   // loader that produced the data, e.g. "xplane"
   int first_airport_vertex = 0;
   std::string data_dir;  // the data dir used at build time (route default)
 
@@ -46,7 +48,9 @@ class BfdbCache {
  public:
   // The current on-disk format version. Bump whenever the layout changes; older
   // files are then rejected and the user re-runs `bf build`.
-  static constexpr uint32_t kFormatVersion = 1;
+  //
+  // v2 (M4): added program_semver and source_loader to the header.
+  static constexpr uint32_t kFormatVersion = 2;
 
   // Serialize `image` to `path`. Returns an error if the file cannot be written
   // or the image exceeds format limits (e.g. > 65535 airway names).

@@ -69,18 +69,23 @@ cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 ## Usage
 
 ```bash
-# Build a binary cache once per AIRAC cycle for fast startup (~1.5s -> ~50ms)
-bf build navdata                    # writes navdata/nav.bfdb
-bf build /path/to/xplane -o my.bfdb
+# Build binary caches once per AIRAC cycle for fast startup (~1.5s -> ~50ms).
+# By default this writes both nav.bfdb (graph) and nav_cifp.bfdb (procedures),
+# so deployment needs only the two cache files, not the CIFP/ directory.
+bf build navdata                    # writes navdata/nav.bfdb + navdata/nav_cifp.bfdb
+bf build /path/to/xplane -o my.bfdb # writes my.bfdb + my_cifp.bfdb
+bf build navdata --without-cifp     # graph cache only
 
 # Find a route (reads navigation data from ./navdata by default)
 bf route KJFK KLAX
 bf route EGLL LFPG --format json
 bf route KSEA KBOS --data /path/to/xplane/data
 
-# Load the prebuilt cache to skip parsing (--data still locates CIFP files
-# for on-demand procedure parsing)
+# Load the prebuilt caches to skip parsing. The sibling nav_cifp.bfdb is
+# auto-discovered next to --db; --cifp-db overrides it. With both caches, the
+# CIFP/ directory is not needed at all.
 bf route KJFK KLAX --db navdata/nav.bfdb
+bf route KJFK KLAX --db navdata/nav.bfdb --cifp-db other_cifp.bfdb
 
 # Constrain by cruise altitude (enables altitude-band and MORA filtering)
 bf route KJFK KLAX --alt 350
@@ -90,15 +95,19 @@ bf route KJFK KLAX --level high -k 3
 
 # Restrict the departure/arrival runway used for SID/STAR selection
 bf route KJFK KLAX --rwy-dep RW31L
+
+# Print the program version
+bf --version
 ```
 
 Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an
 airport has procedure data, the route and its legs name the SID and STAR used (and
 the interchangeable procedures that share the same connection fix).
 
-The `.bfdb` cache is a portable, little-endian binary snapshot of the built
-graph. It is derived from Navigraph/Jeppesen data and, like the source data, must
-not be redistributed (it is git-ignored).
+The `.bfdb` caches are portable, little-endian binary snapshots (`nav.bfdb` holds
+the graph; `nav_cifp.bfdb` holds per-airport procedures, loaded on demand). They
+are derived from Navigraph/Jeppesen data and, like the source data, must not be
+redistributed (they are git-ignored).
 
 ## Navigation Data
 

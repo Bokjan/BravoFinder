@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
+#include "io/cache/cifp_cache.h"
 #include "io/loaders/xplane/cifp/cifp_parser.h"
 
 namespace bf {
@@ -42,14 +44,25 @@ class NavDatabase {
   // Load a prebuilt graph from a `.bfdb` cache file, skipping all parsing and
   // graph construction (seconds -> milliseconds). `data_dir` locates the CIFP
   // files that ProceduresFor still reads on demand; if empty, the data_dir
-  // recorded at build time is used. Returns an Error if the cache is missing,
-  // corrupt, or of an incompatible format.
+  // recorded at build time is used. `cifp_db_path` points to a `nav_cifp.bfdb`
+  // procedure cache; if empty, a sibling `<stem>_cifp.bfdb` next to `bfdb_path`
+  // is used when present, else procedures fall back to CIFP files under
+  // data_dir. Returns an Error if the graph cache is missing, corrupt, or of an
+  // incompatible format.
   static Result<NavDatabase> OpenCached(const std::string& bfdb_path,
-                                        const std::string& data_dir = "");
+                                        const std::string& data_dir = "",
+                                        const std::string& cifp_db_path = "");
 
   // Serialize the built graph and metadata to a `.bfdb` cache file. Called by
   // `bf build` after Open(). Returns an Error if the file cannot be written.
   Result<void> WriteCache(const std::string& out_path) const;
+
+  // Serialize every airport's CIFP procedures to a segmented `nav_cifp.bfdb`
+  // procedure cache, so deployment needs only the cache files (not the CIFP
+  // directory). `source_loader` is recorded as provenance. Returns the number
+  // of airports written, or an Error. Reads from data_dir_/CIFP.
+  Result<uint32_t> WriteCifpCache(const std::string& out_path,
+                                  const std::string& source_loader) const;
 
   // Find up to request.k candidate routes, ordered best-first, honoring the
   // request's altitude/level constraints. Endpoints resolve as airport ICAO
@@ -79,6 +92,10 @@ class NavDatabase {
   std::string data_dir_;
   uint32_t cycle_ = 0;  // AIRAC provenance, carried into the .bfdb cache header
   uint32_t build_ = 0;
+  // Optional CIFP procedure cache. When present, ProceduresFor fetches segments
+  // from it instead of parsing CIFP/<ICAO>.dat files. Immutable after Open, so
+  // it needs no lock (its Fetch opens an independent ifstream per call).
+  std::optional<CifpArchive> cifp_archive_;
   // Procedure cache, lazily filled by FindRoutes (logically const). Guarded by
   // cache_mutex_. The mutex is held in a unique_ptr so NavDatabase stays movable
   // (std::mutex is not movable; the defaulted move operations need a movable
