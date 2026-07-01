@@ -7,6 +7,15 @@
 
 namespace bf {
 
+// How one endpoint of a route attaches to the enroute network.
+enum class ConnectionKind {
+  kProcedure,     // via a named SID/STAR (the sid/star field holds its name)
+  kDirect,        // DCT fallback: the airport has no procedure data for this side
+  kRadarVectors,  // procedures exist but none reach an on-network fix (a radar-
+                  // vectored departure/arrival); the search fell back to a DCT
+                  // link, but this is a real procedure situation, not missing data
+};
+
 // A single leg of a computed route: a segment from one point to the next via a
 // named airway (or "DCT" for a direct leg).
 struct RouteLeg {
@@ -35,6 +44,14 @@ struct Route {
   std::string star;        // arrival STAR name, e.g. "CAMRN5"
   std::string dep_runway;  // departure runway if known, e.g. "RW31L"
   std::string arr_runway;  // arrival runway if known
+
+  // How each endpoint attaches to the network. kProcedure when a SID/STAR was
+  // selected (sid/star names it); kRadarVectors when procedures exist but none
+  // reach an on-network fix (radar vectors, fell back to DCT); kDirect when the
+  // airport has no procedure data. Symmetric across departure/arrival even
+  // though today only departures see kRadarVectors in practice.
+  ConnectionKind dep_connection = ConnectionKind::kDirect;
+  ConnectionKind arr_connection = ConnectionKind::kDirect;
 
   // All SID/STAR(+runway) combinations that share the chosen connection fix and
   // are therefore interchangeable for this route, formatted "NAME.TRANSITION".

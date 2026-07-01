@@ -28,11 +28,15 @@ std::string ToUpper(std::string s) {
 // How one endpoint of a query attaches to the enroute graph. An airport with
 // procedures contributes several seeded connection fixes; a plain waypoint or a
 // DCT-fallback airport contributes one or a few. `airport_icao` is empty for a
-// bare waypoint endpoint.
+// bare waypoint endpoint. `has_procedures` records whether the airport actually
+// publishes procedures for this side (SID for departure, STAR for arrival), so a
+// DCT fallback can be told apart from missing data: procedures that exist but
+// reach no on-network fix (radar vectors) still fall back to DCT.
 struct EndpointPlan {
   std::vector<Connection> connections;
   std::string airport_icao;  // empty if the endpoint is a plain waypoint
   bool used_procedures = false;
+  bool has_procedures = false;
 };
 
 // Format a procedure reference as "NAME.TRANSITION" (or just "NAME" when the
@@ -198,6 +202,13 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
       const Coordinate apt = builder_->graph().CoordOf(airport);
       const CifpData* cifp = ProceduresFor(up);
       if (cifp != nullptr) {
+        const ProcedureType want = departure ? ProcedureType::kSid : ProcedureType::kStar;
+        for (const Procedure& p : cifp->procedures) {
+          if (p.type == want) {
+            plan.has_procedures = true;
+            break;
+          }
+        }
         const std::string& rwy = departure ? request.departure_runway : request.arrival_runway;
         plan.connections = departure
                                ? ProcedureConnector::BuildDeparture(*cifp, apt, *builder_, rwy)
@@ -283,6 +294,22 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     return 0.0;
   };
 
+  // Classify how an endpoint attached to the network. A plan's connections are
+  // homogeneous (all from a procedure build, or all DCT fallback), so this is a
+  // per-endpoint verdict: a procedure was used; else procedures exist but none
+  // reached the network (radar vectors); else no procedure data at all.
+  auto connection_kind = [](const EndpointPlan& plan) {
+    if (plan.used_procedures) {
+      return ConnectionKind::kProcedure;
+    }
+    if (plan.has_procedures) {
+      return ConnectionKind::kRadarVectors;
+    }
+    return ConnectionKind::kDirect;
+  };
+  const ConnectionKind dep_kind = connection_kind(dep);
+  const ConnectionKind arr_kind = connection_kind(arr);
+
   Routes routes;
   routes.reserve(paths.size());
   for (const ShortestPath& p : paths) {
@@ -313,6 +340,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     route.star = star_name;
     route.arr_runway = arr_rwy;
     route.star_options = star_options;
+    route.dep_connection = dep_kind;
+    route.arr_connection = arr_kind;
     routes.push_back(std::move(route));
   }
   return Result<Routes>::Ok(std::move(routes));

@@ -16,6 +16,19 @@
 
 namespace {
 
+// The JSON/token form of a connection kind.
+const char* ConnectionKindStr(bf::ConnectionKind k) {
+  switch (k) {
+    case bf::ConnectionKind::kProcedure:
+      return "procedure";
+    case bf::ConnectionKind::kDirect:
+      return "direct";
+    case bf::ConnectionKind::kRadarVectors:
+      return "radar_vectors";
+  }
+  return "direct";
+}
+
 // Print a route in human-readable text form.
 void PrintText(const bf::Route& route) {
   std::cout << route.route_string << "\n\n";
@@ -23,8 +36,11 @@ void PrintText(const bf::Route& route) {
   std::cout << "Total distance: " << route.total_distance_nm << " NM\n";
 
   // Surface the terminal procedures, if any, and the interchangeable choices
-  // that share the same connection fix.
-  if (!route.sid.empty()) {
+  // that share the same connection fix. A radar-vectored departure/arrival has
+  // no named procedure but is called out so it does not look like missing data.
+  if (route.dep_connection == bf::ConnectionKind::kRadarVectors) {
+    std::cout << "SID: RADAR VECTORS\n";
+  } else if (!route.sid.empty()) {
     std::cout << "SID: " << route.sid;
     if (!route.dep_runway.empty()) {
       std::cout << " (rwy " << route.dep_runway << ")";
@@ -38,7 +54,9 @@ void PrintText(const bf::Route& route) {
     }
     std::cout << "\n";
   }
-  if (!route.star.empty()) {
+  if (route.arr_connection == bf::ConnectionKind::kRadarVectors) {
+    std::cout << "STAR: RADAR VECTORS\n";
+  } else if (!route.star.empty()) {
     std::cout << "STAR: " << route.star;
     if (!route.arr_runway.empty()) {
       std::cout << " (rwy " << route.arr_runway << ")";
@@ -91,6 +109,10 @@ void WriteRouteJson(Writer& writer, const bf::Route& route) {
                 static_cast<rapidjson::SizeType>(route.arr_runway.size()));
   writer.Key("star_options");
   string_array(route.star_options);
+  writer.Key("dep_connection");
+  writer.String(ConnectionKindStr(route.dep_connection));
+  writer.Key("arr_connection");
+  writer.String(ConnectionKindStr(route.arr_connection));
   writer.Key("legs");
   writer.StartArray();
   for (const bf::RouteLeg& leg : route.legs) {

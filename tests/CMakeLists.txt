@@ -12,5 +12,9 @@ add_executable(bf_tests
 target_link_libraries(bf_tests PRIVATE bf::io Catch2::Catch2WithMain)
 
 # Register each Catch2 TEST_CASE with CTest. Run from the project root so the
-# integration tests find the default navdata/ directory.
-catch_discover_tests(bf_tests WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+# integration tests find the default navdata/ directory. Catch2 returns exit
+# code 4 when a test SKIPs (e.g. real data absent); map it to CTest's skip so a
+# skip is not reported as a failure.
+catch_discover_tests(bf_tests
+                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                     PROPERTIES SKIP_RETURN_CODE 4)

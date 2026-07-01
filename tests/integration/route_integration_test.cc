@@ -146,10 +146,10 @@ TEST_CASE("real data: K candidates can use different procedures", "[integration]
   // The multi-endpoint K-shortest lets candidates join the network through
   // different connection fixes, so the alternatives can use genuinely different
   // SID/STAR procedures rather than sharing one fixed pair. KSEA -> KLAX has
-  // several competitive arrival options (KIMMO3, WAYVE1), so among enough
-  // candidates more than one distinct STAR should appear.
+  // several competitive arrival options (KIMMO3, WAYVE1); with enough candidates
+  // more than one distinct STAR appears (WAYVE1 shows up beyond the first few).
   bf::RouteRequest req = MakeRequest("KSEA", "KLAX");
-  req.k = 5;
+  req.k = 8;
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
   REQUIRE(routes);
   const std::vector<bf::Route>& rs = routes.value();
@@ -256,29 +256,31 @@ TEST_CASE("real data: an airport without procedures stays the endpoint via DCT",
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  // Exercises the DCT fallback: KJFK has a SID, KSFO (when its CIFP is not
-  // extracted) connects by a direct link. The airport must remain the route
-  // endpoint rather than being replaced by its connection fix.
+  // Exercises the kDirect fallback: KJFK has a SID, while KIKR has no CIFP file
+  // at all, so its arrival connects by a direct link. The airport must remain
+  // the route endpoint rather than being replaced by its connection fix, and the
+  // connection is classified kDirect (no data) rather than radar vectors.
   if (!HasCifp(NavDataDir(), "KJFK")) {
     SKIP("KJFK CIFP not present in '" << NavDataDir() << "'");
   }
-  if (HasCifp(NavDataDir(), "KSFO")) {
-    SKIP("KSFO CIFP is present; this case tests the no-procedure fallback");
+  if (HasCifp(NavDataDir(), "KIKR")) {
+    SKIP("KIKR CIFP is present; this case tests the no-procedure fallback");
   }
-  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KSFO"));
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KIKR"));
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
 
   const bf::Route& r = routes.value().front();
   REQUIRE(r.points.size() >= 2);
   REQUIRE(r.legs.size() >= 2);
-  // Both airports are the true endpoints; the arrival has no STAR, so its final
-  // leg is a DCT link into the airport.
+  // Both airports are the true endpoints; the arrival has no procedure data, so
+  // its final leg is a DCT link into the airport, classified kDirect.
   CHECK(r.points.front().ident == "KJFK");
-  CHECK(r.points.back().ident == "KSFO");
-  CHECK(r.legs.back().to == "KSFO");
+  CHECK(r.points.back().ident == "KIKR");
+  CHECK(r.legs.back().to == "KIKR");
   CHECK(r.star.empty());
   CHECK(r.legs.back().via == "DCT");
+  CHECK(r.arr_connection == bf::ConnectionKind::kDirect);
 }
 
 TEST_CASE("real data: a route does not transit through an intermediate airport", "[integration]") {
@@ -301,6 +303,36 @@ TEST_CASE("real data: a route does not transit through an intermediate airport",
     const bool looks_like_us_airport = id.size() == 4 && id.front() == 'K';
     CHECK_FALSE(looks_like_us_airport);
   }
+}
+
+TEST_CASE("real data: a radar-vectored departure is flagged, not shown as missing",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  // KPHL publishes only radar-vector SIDs (PHL4: VA -> VM, no fix), so no SID
+  // reaches an on-network fix and the departure falls back to a DCT link. That
+  // fallback must be reported as radar vectors (procedures exist) rather than
+  // kDirect (no data), so a user can tell the two apart.
+  if (!HasCifp(NavDataDir(), "KPHL") || !HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("KPHL/KLAX CIFP not present in '" << NavDataDir() << "'");
+  }
+
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KPHL", "KLAX"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+
+  const bf::Route& r = routes.value().front();
+  CHECK(r.dep_connection == bf::ConnectionKind::kRadarVectors);
+  CHECK(r.sid.empty());  // no named SID for a radar-vectored departure
+  // The airport is still the endpoint and the first leg is the DCT hop out.
+  CHECK(r.points.front().ident == "KPHL");
+  CHECK(r.legs.front().from == "KPHL");
+  CHECK(r.legs.front().via == "DCT");
+  // The arrival side still connects through a real STAR.
+  CHECK(r.arr_connection == bf::ConnectionKind::kProcedure);
+  CHECK_FALSE(r.star.empty());
 }
 
 TEST_CASE("real data: KJFK publishes terminal-area MSA sectors", "[integration]") {
