@@ -1,0 +1,33 @@
+# BravoFinder 文档
+
+> 面向使用者的介绍与 CLI 用法在仓库根的 [README.md](../README.md)。这里是**面向读者的
+> 技术文档**：讲清 BravoFinder 有什么特色、内部怎么工作。文章用中文（`*.zh-CN.md`）。
+
+## 从这里开始
+
+不熟悉图算法？先读这篇入门，其余专题都建立在它的概念上：
+
+- **[航路查找的基础算法](routing-basics.zh-CN.md)** — 图 / 最短路 / A\*（大圆距离启发）/
+  Yen K-shortest，从零讲清 BravoFinder 怎么找出一条航路。
+
+## 设计特色
+
+按"是什么 → 怎么建模 → 怎么快 → 怎么并发 → 实测多快"的顺序：
+
+- **[合规航路引擎](compliant-routing.zh-CN.md)** — 为什么不是地理最短：航路方向性、高低空
+  分层、高度带、MORA、可插拔约束框架、Yen 多候选择优。
+- **[程序建模与航路网衔接](procedure-modeling.zh-CN.md)** — ARINC 424 / CIFP 全 23 种 path
+  terminator、机场靠真实 SID/STAR 接入、衔接 fix 选点、多源 K-shortest、雷达引导的语义诚实。
+- **[Yen 的 Lawler 优化](yen-lawler-optimization.zh-CN.md)** — heuristic 记忆化 + Lawler，
+  把 K-shortest 提速约 2.5× 且结果一字不差；含非标准多源变体的正确性论证与差分对拍验证。
+- **[跨平台二进制缓存](binary-cache.zh-CN.md)** — `.bfdb` / `nav_cifp.bfdb`：为何显式定宽
+  小端而非 mmap、字符串池、三层版本体系、on-demand / eager 加载、损坏优雅报错。
+- **[线程安全契约 B](thread-safety.zh-CN.md)** — 一个只读实例多线程并发查询：双检锁、指针
+  跨 rehash 稳定、eager 冻结无锁读、tsan 验证。
+- **[性能测试](performance.zh-CN.md)** — 测试机配置、方法、启动 ~23×、优化分解表、内存与
+  缓存大小、可复现步骤。
+
+## 贡献
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — 提交规范（Conventional Commits）、语言规则、
+  代码风格、版本纪律、测试要求。

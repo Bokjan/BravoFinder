@@ -1,0 +1,124 @@
+# 跨平台二进制缓存：.bfdb / nav_cifp.bfdb
+
+> 把 ~1.5s 的"解析 + 建图"变成 ~50ms 的"读文件"，且文件在 x86/ARM 之间可移植、单文件
+> 部署。面向想理解缓存格式取舍的读者。相关代码：`io/cache/`（`byte_io.h`、`bfdb_cache.*`、
+> `cifp_cache.*`）、`io/graph_builder.cc`（`FromImage`/`ToImage`）。
+
+## 1. 问题：每次启动都要重新解析建图
+
+X-Plane 数据全量解析 + 建图有成本（解析 ARINC 424 尤甚）。冷启动 release 实测 ~1.56s、
+debug ~7.7s。对一个"快速出结果"的 CLI，这个启动开销不可接受——尤其你只想查一条航路。
+
+方案：`bf build` 把建好的图 + 元数据序列化成紧凑二进制 `.bfdb`，`bf route --db` 直接反序列化
+跳过全部解析。实测 **release 1.56s → 0.059s（~26×）**，debug 7.7s → 0.91s，两条路径产出逐字节
+相同。文件 ~17MB。
+
+## 2. 核心取舍：显式定宽小端，而不是 mmap
+
+早期设想过 mmap（零拷贝、直接把文件映射成内存结构）。**M4 推翻了这个方向**，原因是它与
+"跨平台可移植"直接冲突：
+
+- mmap 零拷贝要求**磁盘布局 = 内存布局**，会把 struct padding、字节序、`sizeof` 焊死进文件；
+- x86 和 ARM 的布局/对齐可能不同，一个平台产出的文件另一个平台读不了；
+- 而单进程 CLI 场景，mmap 省下的那点 memcpy（~10ms）相对建图成本可忽略。
+
+用户明确"可移植优先、mmap 不重要"，所以改为**显式逐字段序列化**：
+
+- 整数一律**定宽小端**（LSB first），与主机字节序无关；
+- 浮点写 **IEEE-754 位模式**（`memcpy` 到同宽无符号整数），当前所有平台共享，精确往返；
+- 读时逐字段解析重建进 `std::vector`，**不 dump struct**。
+
+任何平台（x86/ARM）产出与读取一致。工具是 `byte_io.h` 的 `ByteWriter`/`ByteReader`
+（带边界检查，读越界置错误标志、优雅降级）。
+
+## 3. 与 protobuf 的异同
+
+同样是"逐字段、不 dump struct、浮点 IEEE754 小端"。但我们刻意不同：
+
+- **定宽而非 varint**：我们的 offsets/顶点索引普遍是大整数，定宽更快、且能配合扩容前置分配；
+- **无 per-field tag**：`.bfdb` 是单一生产者 + 单一消费者的本地私有缓存，格式演进靠文件头的
+  `format_version` 整体版本号，不需要字段级前后兼容；
+- **不引入 protobuf 依赖**（违反项目极简依赖原则）。
+
+## 4. 哪些不落盘：三个 lookup map
+
+图里有三个 `unordered_map`（`ident_index_`/`ident_first_`/`airport_index_`）做名字→顶点查找。
+它们**不序列化**，加载后从 `idents_` 重建（`GraphBuilder::RebuildIndices`）：
+
+- `unordered_map`（哈希桶 + 堆节点指针）结构上不可移植序列化；
+- 实测它们运行时占 ~30MB > `.bfdb` 文件本身（~17MB），落盘是纯亏；
+- 重建成本 reserve(V) 后 ~50–100ms，一次性、冻结只读。
+
+`FromImage`/`ToImage`（`io/graph_builder.cc`）是图与缓存镜像 `BfdbImage` 之间的转换点。
+
+## 5. 字符串：文件层用池引用，运行时保持拥有型
+
+曾考虑把 idents/airway 名全改成 `string_view` + 集中字符串池省内存。**实测否决**：cycle 2601
+数据里 ident 最长 5 字符、region 1–2、airway 名 99%+ ≤10 字符，**全部落在 libc++ SSO（22B）
+阈值内 → 本就零堆分配**。view 化的主收益（消堆分配）不存在，代价却是贯穿全 API 的 lifetime
+契约，还逆了"领域类型是不可变值类型"的设计宪法。
+
+结论：**运行时保持拥有型 `Ident`（全 SSO，无碎片）；只在序列化文件层**用 `{u32 offset, u32 len}`
+引用字符串池令文件紧凑，加载后重建回拥有型。鱼与熊掌部分兼得、零 lifetime 风险、零 API 改动。
+`StringPool` 第一版**不去重**（池只有几 MB，简单优先）。
+
+## 6. GraphEdge 瘦身到 16B
+
+边数组是图里最大的结构、A* 热路径逐边遍历。`GraphEdge` 从实现期偏离的 32B 回归设计意图的
+**16B**：
+
+```
+int32  to           // 目标顶点
+float  distance_nm  // 存 float；A* 的 g 值/路径长用 double 累加，精度无损
+uint16 airway_id    // 唯一 airway 名 ~12k << 65535，建表加 >65535 保险丝
+int16  base_fl, top_fl
+uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
+```
+
+边数组体积腰斩，A* 遍历时一条 cache 行能装的边数翻倍。注意磁盘上 GraphEdge 是 **15B**
+（4+4+2+2+2+1，无内存对齐 padding），比内存 16B 更紧。
+
+## 7. CIFP 分段缓存：单文件部署 + 按需加载
+
+图缓存不含程序数据（CIFP 按需从 `CIFP/*.dat` 解析）。为让部署只需缓存文件、无需带 14838 个
+CIFP 散文件，另有一个**分段索引**缓存 `nav_cifp.bfdb`（magic "BFCP"）：
+
+- 结构：header + `ICAO→(段偏移, 段长)` 目录 + 每机场一段自包含的 `CifpData`（含段局部字符串池，
+  可独立反序列化）；
+- **按需加载**（默认 `on-demand`）：`Open` 只读 header + 目录进内存（~1.5MB），`Fetch(icao)` 才
+  seek 读该段——启动仍毫秒级，不常驻全部程序；
+- **eager 模式**：`Open` 时 `FetchAll` 全量反序列化进内存并冻结（~102MB），之后无锁读，面向
+  Web/批量并发。
+
+实测 CIFP 缓存 ~44MB / 14838 机场（结构化后远小于 105MB 原始文本），`--data` 指空目录仍能
+从缓存出全 SID/STAR、与文件路径逐字节一致。
+
+> Fetch 每次开独立 `ifstream`、无共享可变态 → 并发查异机场天然安全，见
+> [thread-safety.zh-CN.md](thread-safety.zh-CN.md)。
+
+## 8. 三层版本体系
+
+缓存格式会演进，必须能干净拒绝不兼容的旧文件而非崩溃。三层版本：
+
+1. **程序 semver**（CMake `project VERSION` → `core/version.h` 的 `kBravoFinderVersion` →
+   `bf --version`）；
+2. **每类缓存 `format_version`**（图 "BFDB"、CIFP "BFCP"），机器校验，不符走
+   `Result::Err(kDataMissing)`，提示重跑 `bf build`；
+3. **provenance**：程序 semver + source_loader + AIRAC cycle/build 写进缓存 header。
+
+纪律：**改缓存磁盘布局 → bump 对应 `format_version`**；仅读取侧/内部函数改动不动布局，不 bump。
+
+## 9. 健壮性：损坏文件优雅报错，不崩溃
+
+反序列化面对的是可能损坏/截断/伪造的文件。所有从文件头读出的**计数字段**（顶点/边/airway/
+段数、串长）在 `resize` 之前都用"剩余字节 ÷ 每元素最小磁盘字节数"设上界，越界即走
+`Result::Err(kDataMissing)`，绝不因 `bad_alloc`/`length_error` 崩溃。段偏移/段长在打开目录时
+与文件大小交叉校验。这条"损坏走 Result 而非崩溃"是格式的正确性契约。
+
+## 10. 小结
+
+- **可移植 > 零拷贝**：放弃 mmap，改显式定宽小端 + IEEE754 位模式，x86/ARM 通用；
+- **不落盘 lookup map**（重建更省）、**文件层字符串池**（运行时仍拥有型全 SSO）；
+- **图缓存 + CIFP 分段缓存**两文件，按需加载单机场段，单文件部署；
+- **三层版本 + 计数上界校验**，格式演进可控、损坏优雅报错；
+- 净效果：启动 ~26×，17MB 图 + 44MB 程序，跨平台一致。
