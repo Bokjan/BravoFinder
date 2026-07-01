@@ -3,7 +3,8 @@ add_library(bf_core
             domain/coordinate.cc
             domain/procedure.cc
             graph/astar.cc
-            graph/yen_kshortest.cc)
+            graph/yen_kshortest.cc
+            routing/route_string.cc)
 
 # Generate version.h from the project version (single source of truth). It lands
 # in the binary dir; expose that dir so "core/version.h" resolves.

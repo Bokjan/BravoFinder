@@ -12,6 +12,7 @@
 #include "core/constraints/altitude_constraints.h"
 #include "core/constraints/mora_constraint.h"
 #include "core/graph/yen_kshortest.h"
+#include "core/routing/route_string.h"
 #include "core/version.h"
 #include "io/cache/bfdb_cache.h"
 #include "io/cache/cifp_cache.h"
@@ -84,7 +85,7 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   // Leading procedure leg: airport -> first connection fix via the SID (or DCT
   // when the airport fell back to a direct link).
   if (!dep_label.empty()) {
-    route.legs.push_back(RouteLeg{dep_label, dep_fix_id, sid.empty() ? "DCT" : sid, dep_seed});
+    route.legs.push_back(RouteLeg{dep_label, dep_fix_id, sid.empty() ? "DCT" : sid, dep_seed, {}});
   }
   // Enroute legs between consecutive on-network fixes.
   for (size_t i = 0; i + 1 < path.vertices.size(); ++i) {
@@ -99,24 +100,21 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
         break;
       }
     }
-    route.legs.push_back(RouteLeg{builder.IdentOf(u).ident, builder.IdentOf(w).ident, via, dist});
+    route.legs.push_back(
+        RouteLeg{builder.IdentOf(u).ident, builder.IdentOf(w).ident, via, dist, {}});
   }
   // Trailing procedure leg: last connection fix -> airport via the STAR.
   if (!arr_label.empty()) {
-    route.legs.push_back(RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : star, arr_seed});
+    route.legs.push_back(RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : star, arr_seed, {}});
   }
 
   // Route string in filed-flight-plan style: DEP SID FIX <airways> FIX STAR ARR.
-  std::string rs = route.points.empty() ? "" : route.points.front().ident;
-  std::string last_via;
-  for (const RouteLeg& leg : route.legs) {
-    if (leg.via != last_via) {
-      rs += " " + leg.via;
-      last_via = leg.via;
-    }
-    rs += " " + leg.to;
-  }
-  route.route_string = rs;
+  // BuildRouteString folds consecutive legs on a shared airway (listing it only
+  // at the join/leave fixes) and, as a side effect, rewrites each leg's `via` to
+  // the single chosen designator and records any concurrency in
+  // `concurrent_airways`.
+  const std::string first_point = route.points.empty() ? "" : route.points.front().ident;
+  route.route_string = BuildRouteString(first_point, route.legs);
   return route;
 }
 

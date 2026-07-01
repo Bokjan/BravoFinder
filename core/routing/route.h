@@ -21,8 +21,14 @@ enum class ConnectionKind {
 struct RouteLeg {
   std::string from;
   std::string to;
-  std::string via;  // airway name, or "DCT"
+  std::string via;  // the single filed ATS route designator, or "DCT"
   double distance_nm = 0.0;
+
+  // When the underlying airway segment is a concurrency (two or more named
+  // airways sharing this physical leg, encoded "A593-Y592" in the source data),
+  // this holds every designator on the leg. `via` then carries just the one
+  // chosen for the filed route. Empty for an ordinary single-airway or DCT leg.
+  std::vector<std::string> concurrent_airways;
 };
 
 // A point along a computed route, for display / export.
@@ -36,7 +42,7 @@ struct Route {
   std::vector<RoutePoint> points;
   std::vector<RouteLeg> legs;
   double total_distance_nm = 0.0;
-  std::string route_string;  // compact "DEP DCT WPT AWY ... ARR" form
+  std::string route_string;  // filed-flight-plan form "DEP SID FIX AWY FIX STAR ARR"
 
   // Terminal procedures used to connect the airports to the enroute network.
   // Empty when an endpoint is a plain waypoint or fell back to a DCT link.

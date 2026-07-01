@@ -75,7 +75,17 @@ void PrintText(const bf::Route& route) {
 
   std::cout << "\nFrom\tTo\tVia\tDist(NM)\n";
   for (const bf::RouteLeg& leg : route.legs) {
-    std::cout << leg.from << '\t' << leg.to << '\t' << leg.via << '\t' << leg.distance_nm << '\n';
+    // On a concurrency leg, note the other airways sharing it after the chosen
+    // one, e.g. "Y592 (concurrent: A593, Y592)".
+    std::string via = leg.via;
+    if (!leg.concurrent_airways.empty()) {
+      via += " (concurrent: ";
+      for (size_t i = 0; i < leg.concurrent_airways.size(); ++i) {
+        via += leg.concurrent_airways[i];
+        via += (i + 1 < leg.concurrent_airways.size() ? ", " : ")");
+      }
+    }
+    std::cout << leg.from << '\t' << leg.to << '\t' << via << '\t' << leg.distance_nm << '\n';
   }
 }
 
@@ -125,6 +135,12 @@ void WriteRouteJson(Writer& writer, const bf::Route& route) {
     writer.String(leg.to.c_str(), static_cast<rapidjson::SizeType>(leg.to.size()));
     writer.Key("via");
     writer.String(leg.via.c_str(), static_cast<rapidjson::SizeType>(leg.via.size()));
+    // Only concurrency legs carry the full designator list; omit the key for
+    // ordinary single-airway or DCT legs to keep the output lean.
+    if (!leg.concurrent_airways.empty()) {
+      writer.Key("concurrent_airways");
+      string_array(leg.concurrent_airways);
+    }
     writer.Key("distance_nm");
     writer.Double(leg.distance_nm);
     writer.EndObject();
