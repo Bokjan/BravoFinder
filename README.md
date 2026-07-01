@@ -87,6 +87,11 @@ bf route KSEA KBOS --data /path/to/xplane/data
 bf route KJFK KLAX --db navdata/nav.bfdb
 bf route KJFK KLAX --db navdata/nav.bfdb --cifp-db other_cifp.bfdb
 
+# Procedure cache load mode: on-demand (default, ~1.5 MB, best for one-shot
+# queries) or eager (loads all procedures up front, ~100 MB then lock-free,
+# best for servers / batch routing)
+bf route KJFK KLAX --db navdata/nav.bfdb --cifp-load eager
+
 # Constrain by cruise altitude (enables altitude-band and MORA filtering)
 bf route KJFK KLAX --alt 350
 

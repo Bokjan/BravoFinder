@@ -174,6 +174,7 @@ int main(int argc, char** argv) {
   std::string data_dir = "navdata";
   std::string db_path;
   std::string cifp_db_path;
+  std::string cifp_load = "on-demand";
   std::string format = "text";
   std::string level = "none";
   std::optional<int> cruise_fl;
@@ -190,6 +191,9 @@ int main(int argc, char** argv) {
   route->add_option("--cifp-db", cifp_db_path,
                     "CIFP procedure cache to load (default: <db-stem>_cifp.bfdb "
                     "next to --db, if present)");
+  route->add_option("--cifp-load", cifp_load, "CIFP cache load mode: on-demand (default) or eager")
+      ->capture_default_str()
+      ->check(CLI::IsMember({"on-demand", "eager"}));
   route->add_option("--format", format, "Output format: text or json")
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
@@ -243,8 +247,11 @@ int main(int argc, char** argv) {
     // for on-demand procedure parsing in both cases; --cifp-db (or a sibling
     // <stem>_cifp.bfdb) supplies procedures from a cache instead.
     bf::Result<bf::NavDatabase> db =
-        db_path.empty() ? bf::NavDatabase::Open(data_dir)
-                        : bf::NavDatabase::OpenCached(db_path, data_dir, cifp_db_path);
+        db_path.empty()
+            ? bf::NavDatabase::Open(data_dir)
+            : bf::NavDatabase::OpenCached(
+                  db_path, data_dir, cifp_db_path,
+                  cifp_load == "eager" ? bf::CifpLoad::kEager : bf::CifpLoad::kOnDemand);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
       return EXIT_FAILURE;

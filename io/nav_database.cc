@@ -164,7 +164,7 @@ Result<NavDatabase> NavDatabase::Open(const std::string& data_dir) {
 
 Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path,
                                             const std::string& data_dir,
-                                            const std::string& cifp_db_path) {
+                                            const std::string& cifp_db_path, CifpLoad cifp_load) {
   Result<BfdbImage> image = BfdbCache::Read(bfdb_path);
   if (!image) {
     return Result<NavDatabase>::Err(std::move(image).error());
@@ -193,10 +193,23 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path,
   }
   if (!cifp_path.empty()) {
     Result<CifpArchive> archive = CifpCache::Open(cifp_path);
-    if (archive) {
-      db.cifp_archive_ = std::move(archive).value();
-    } else {
+    if (!archive) {
       return Result<NavDatabase>::Err(std::move(archive).error());
+    }
+    if (cifp_load == CifpLoad::kEager) {
+      // Deserialize every airport up front into the procedure cache, then freeze
+      // it: subsequent ProceduresFor calls only read existing entries, so they
+      // need no lock (contract B holds with no shared mutable state).
+      std::unordered_map<std::string, CifpData> all = archive.value().FetchAll();
+      db.procedure_cache_.reserve(all.size());
+      for (auto& entry : all) {
+        db.procedure_cache_.emplace(entry.first,
+                                    std::make_unique<CifpData>(std::move(entry.second)));
+      }
+      db.cifp_eager_ = true;
+      // The archive is not retained: everything is already in the cache.
+    } else {
+      db.cifp_archive_ = std::move(archive).value();
     }
   }
   return Result<NavDatabase>::Ok(std::move(db));
@@ -220,6 +233,13 @@ Result<uint32_t> NavDatabase::WriteCifpCache(const std::string& out_path,
 }
 
 const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
+  // Eager mode: the cache was fully populated at Open and is now frozen, so a
+  // plain read needs no lock (no concurrent insert can rehash it). A miss means
+  // the airport simply has no procedures.
+  if (cifp_eager_) {
+    auto it = procedure_cache_.find(icao);
+    return it != procedure_cache_.end() ? it->second.get() : nullptr;
+  }
   // Fast path: return a cached result (including a cached "no procedures"
   // nullptr) under a brief lock.
   {

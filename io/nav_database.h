@@ -20,6 +20,14 @@ namespace bf {
 
 class GraphBuilder;
 
+// How a CIFP procedure cache is loaded by OpenCached.
+enum class CifpLoad {
+  kOnDemand,  // read only the header+directory; fetch each airport's segment on
+              // first use (~1.5 MB resident; best for one-shot CLI queries)
+  kEager,     // deserialize every airport's procedures at Open (~100 MB resident,
+              // then lock-free; best for servers / batch routing)
+};
+
 // The top-level navigation database: owns the loaded data and the route graph,
 // and answers route queries. Self-contained with no global/static state, so
 // multiple instances (e.g. different AIRAC cycles) can coexist safely.
@@ -47,11 +55,13 @@ class NavDatabase {
   // recorded at build time is used. `cifp_db_path` points to a `nav_cifp.bfdb`
   // procedure cache; if empty, a sibling `<stem>_cifp.bfdb` next to `bfdb_path`
   // is used when present, else procedures fall back to CIFP files under
-  // data_dir. Returns an Error if the graph cache is missing, corrupt, or of an
-  // incompatible format.
+  // data_dir. `cifp_load` selects on-demand (default) or eager loading of the
+  // procedure cache (see CifpLoad). Returns an Error if the graph cache is
+  // missing, corrupt, or of an incompatible format.
   static Result<NavDatabase> OpenCached(const std::string& bfdb_path,
                                         const std::string& data_dir = "",
-                                        const std::string& cifp_db_path = "");
+                                        const std::string& cifp_db_path = "",
+                                        CifpLoad cifp_load = CifpLoad::kOnDemand);
 
   // Serialize the built graph and metadata to a `.bfdb` cache file. Called by
   // `bf build` after Open(). Returns an Error if the file cannot be written.
@@ -86,20 +96,27 @@ class NavDatabase {
   // address is stable even when a concurrent insert rehashes the map.
   const CifpData* ProceduresFor(const std::string& icao) const;
 
+  // AIRAC provenance, carried into the .bfdb cache header.
+  uint32_t cycle_ = 0;
+  uint32_t build_ = 0;
   std::unique_ptr<GraphBuilder> builder_;
   MoraGrid mora_;
   std::vector<MsaSector> msa_;
   std::string data_dir_;
-  uint32_t cycle_ = 0;  // AIRAC provenance, carried into the .bfdb cache header
-  uint32_t build_ = 0;
   // Optional CIFP procedure cache. When present, ProceduresFor fetches segments
   // from it instead of parsing CIFP/<ICAO>.dat files. Immutable after Open, so
   // it needs no lock (its Fetch opens an independent ifstream per call).
   std::optional<CifpArchive> cifp_archive_;
-  // Procedure cache, lazily filled by FindRoutes (logically const). Guarded by
-  // cache_mutex_. The mutex is held in a unique_ptr so NavDatabase stays movable
-  // (std::mutex is not movable; the defaulted move operations need a movable
-  // member).
+  // When true, procedure_cache_ was fully populated at Open and is frozen: reads
+  // hit existing entries only, so ProceduresFor skips the lock entirely (no
+  // insert => no rehash => no data race). When false (on-demand), the cache is
+  // filled lazily under cache_mutex_.
+  bool cifp_eager_ = false;
+  // Procedure cache. In on-demand mode it is lazily filled by FindRoutes
+  // (logically const) under cache_mutex_; in eager mode it is filled once at
+  // Open, then read lock-free. The mutex is held in a unique_ptr so NavDatabase
+  // stays movable (std::mutex is not movable; the defaulted move operations need
+  // a movable member).
   mutable std::unordered_map<std::string, std::unique_ptr<CifpData>> procedure_cache_;
   mutable std::unique_ptr<std::mutex> cache_mutex_;
 };

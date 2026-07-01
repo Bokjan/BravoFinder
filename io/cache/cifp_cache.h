@@ -29,6 +29,11 @@ class CifpArchive {
   // corrupt. Each call performs independent file I/O.
   std::optional<CifpData> Fetch(const std::string& icao) const;
 
+  // Deserialize every airport's segment in one pass, returning an ICAO -> data
+  // map. Used for eager loading; reads the whole file once. Segments that fail
+  // to deserialize are skipped.
+  std::unordered_map<std::string, CifpData> FetchAll() const;
+
   // Whether the archive contains a segment for `icao`.
   bool Has(const std::string& icao) const { return index_.count(icao) != 0; }
 

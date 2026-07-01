@@ -344,6 +344,38 @@ Result<CifpArchive> CifpCache::Open(const std::string& path) {
   return Result<CifpArchive>::Ok(std::move(archive));
 }
 
+std::unordered_map<std::string, CifpData> CifpArchive::FetchAll() const {
+  std::unordered_map<std::string, CifpData> out;
+  // Read the whole file once, then slice each segment from memory.
+  std::ifstream f(path_, std::ios::binary | std::ios::ate);
+  if (!f.is_open()) {
+    return out;
+  }
+  const std::streamsize size = f.tellg();
+  if (size <= 0) {
+    return out;
+  }
+  std::string buf(static_cast<size_t>(size), '\0');
+  f.seekg(0);
+  f.read(buf.data(), size);
+  if (!f) {
+    return out;
+  }
+  out.reserve(index_.size());
+  for (const auto& entry : index_) {
+    const uint64_t offset = entry.second.first;
+    const uint32_t length = entry.second.second;
+    if (offset + length > buf.size()) {
+      continue;
+    }
+    std::optional<CifpData> data = DeserializeSegment(buf.substr(offset, length));
+    if (data.has_value()) {
+      out.emplace(entry.first, std::move(*data));
+    }
+  }
+  return out;
+}
+
 std::optional<CifpData> CifpArchive::Fetch(const std::string& icao) const {
   auto it = index_.find(icao);
   if (it == index_.end()) {

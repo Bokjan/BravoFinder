@@ -182,6 +182,72 @@ TEST_CASE("cifp cache: a corrupt or missing cache is rejected cleanly", "[unit][
   }
 }
 
+TEST_CASE("cifp cache: eager loading yields the same route as on-demand", "[integration][cifp]") {
+  const std::string graph_path = BuildBothCaches("eager");
+  if (graph_path.empty()) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  const std::string cifp_path = TempPath("eager_nav_cifp.bfdb");
+
+  bf::Result<bf::NavDatabase> on_demand = bf::NavDatabase::OpenCached(
+      graph_path, "/tmp/bravofinder_no_such_dir", cifp_path, bf::CifpLoad::kOnDemand);
+  bf::Result<bf::NavDatabase> eager = bf::NavDatabase::OpenCached(
+      graph_path, "/tmp/bravofinder_no_such_dir", cifp_path, bf::CifpLoad::kEager);
+  REQUIRE(on_demand);
+  REQUIRE(eager);
+
+  const bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  bf::Result<std::vector<bf::Route>> a = on_demand.value().FindRoutes(req);
+  bf::Result<std::vector<bf::Route>> b = eager.value().FindRoutes(req);
+  REQUIRE(a);
+  REQUIRE(b);
+  REQUIRE_FALSE(a.value().empty());
+  REQUIRE_FALSE(b.value().empty());
+  CHECK(a.value().front().route_string == b.value().front().route_string);
+  CHECK(a.value().front().sid == b.value().front().sid);
+  CHECK(a.value().front().star == b.value().front().star);
+
+  std::remove(graph_path.c_str());
+  std::remove(cifp_path.c_str());
+}
+
+TEST_CASE("cifp cache: concurrent routing on an eager database is race-free",
+          "[integration][cifp]") {
+  const std::string graph_path = BuildBothCaches("eager_concurrent");
+  if (graph_path.empty()) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  const std::string cifp_path = TempPath("eager_concurrent_nav_cifp.bfdb");
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::OpenCached(
+      graph_path, "/tmp/bravofinder_no_such_dir", cifp_path, bf::CifpLoad::kEager);
+  REQUIRE(db);
+
+  // In eager mode ProceduresFor reads the frozen cache without a lock; hammer it
+  // from many threads to prove the lock-free read path has no data race (tsan).
+  const std::vector<std::pair<std::string, std::string>> pairs = {
+      {"KJFK", "KLAX"}, {"KSEA", "KBOS"}, {"KDEN", "KSFO"}, {"KORD", "KDFW"}};
+  std::atomic<int> ok{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 8; ++t) {
+    threads.emplace_back([&, t]() {
+      for (int rep = 0; rep < 10; ++rep) {
+        const auto& pr = pairs[(t + rep) % pairs.size()];
+        bf::Result<std::vector<bf::Route>> r =
+            db.value().FindRoutes(MakeRequest(pr.first, pr.second));
+        if (r && !r.value().empty()) {
+          ok.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    });
+  }
+  for (std::thread& th : threads) {
+    th.join();
+  }
+  CHECK(ok.load() > 0);
+  std::remove(graph_path.c_str());
+  std::remove(cifp_path.c_str());
+}
+
 TEST_CASE("cifp cache: concurrent fetches on one archive are race-free", "[integration][cifp]") {
   if (!HasNavData()) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
