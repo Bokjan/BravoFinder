@@ -66,6 +66,59 @@ cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 
 ## Usage
 
+### MCP server (`bf-mcp-stdio`)
+
+BravoFinder also ships a local MCP server that exposes `bf route` and `bf query`
+as MCP tools over stdio, so an LLM client can ask for routes and look up
+navigation data directly. It is a thin, zero-dependency (beyond the project's
+own library) stdio JSON-RPC server: it loads the `.bfdb` cache once at startup
+and serves queries from it.
+
+Build it alongside the CLI:
+
+```bash
+cmake --preset release && cmake --build --preset release   # or: debug
+# binary: build/release/apps/mcp_stdio/bf-mcp-stdio
+```
+
+Point it at a cache and run it (it fails fast at startup if the cache is
+missing or corrupt):
+
+```bash
+# Defaults: BRAVOFINDER_NAVDATA locates navdata/, which must contain nav.bfdb
+# (and optionally nav_cifp.bfdb). Command-line flags override the environment.
+BRAVOFINDER_NAVDATA=navdata bf-mcp-stdio
+bf-mcp-stdio --db navdata/nav.bfdb --cifp-db navdata/nav_cifp.bfdb
+```
+
+Tools exposed (each maps 1:1 to a CLI subcommand):
+
+| Tool | Description |
+|------|-------------|
+| `find_routes` | Route between two endpoints; same options as `bf route` (`level`, `k`, `cruise_fl`, runways, SID/STAR). |
+| `lookup_waypoints` | Batch-look-up waypoints by ident. |
+| `lookup_airports` | Batch-look-up airports by ICAO. |
+| `lookup_procedures` | Batch-look-up SID/STAR/approach by airport ICAO. |
+| `lookup_airways` | Batch-look-up airways by designator. |
+
+Example MCP client configuration (Claude Desktop / similar):
+
+```json
+{
+  "mcpServers": {
+    "bravofinder": {
+      "command": "/abs/path/to/bf-mcp-stdio",
+      "args": ["--db", "navdata/nav.bfdb"]
+    }
+  }
+}
+```
+
+The server speaks MCP over stdio as JSON-RPC 2.0. It only reads the cache
+(`NavDatabase` is immutable after `OpenCached`), so it is safe for an MCP client
+to hold one long-lived instance. `bf build` (cache creation) remains a CLI
+concern and is not exposed as a tool.
+
 ```bash
 # Build binary caches once per AIRAC cycle for fast startup (~1.5s -> ~50ms).
 # By default this writes both nav.bfdb (graph) and nav_cifp.bfdb (procedures),

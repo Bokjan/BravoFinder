@@ -67,6 +67,7 @@ endif()
 add_subdirectory(core)
 add_subdirectory(io)
 add_subdirectory(apps/cli)
+add_subdirectory(apps/mcp_stdio)
 
 if(BRAVOFINDER_BUILD_TESTS)
   enable_testing()
