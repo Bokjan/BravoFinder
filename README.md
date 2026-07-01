@@ -1,34 +1,32 @@
 # BravoFinder
 
-> **English** | [简体中文](README.zh-CN.md)
-
-A flight route finder written in modern C++. **This is version 3 — a complete rewrite,
-currently under active development.**
+A flight route finder written in modern C++, **version 3.0.0 — a complete rewrite**.
 
 ## About
 
 BravoFinder builds a graph from navigation data (waypoints, navaids, airways, and
 SID/STAR/approach procedures) and finds routes between two airports. Unlike earlier
-versions, which computed a purely geographic shortest path, v3 aims to be a
-**realistic / compliant route engine**: routes respect real-world constraints such as
-airway directionality, high/low airway levels, segment altitude bands, and terminal
+versions, which computed a purely geographic shortest path, v3 is a **realistic /
+compliant route engine**: routes respect real-world constraints such as airway
+directionality, high/low airway levels, segment altitude bands, and terminal
 procedures.
 
 ## Status
 
-v3 is being rewritten from scratch and is under active development.
+v3.0.0 is the first release. Everything below is implemented and tested; the CLI
+(`bf build` / `bf route`) is usable end to end against real X-Plane 12 data.
 
-**Working today (through milestone M3):** the tool loads X-Plane 12 navigation
-data, builds a directed graph honoring airway directionality and high/low levels,
-and finds routes between two airports (or waypoints) with A* and Yen K-shortest.
-Airports connect to the enroute network through their real SID/STAR procedures
-(parsed from ARINC 424 / CIFP), falling back to a direct link where no procedure
-data exists. For example, `KJFK KLAX` resolves to a filed-flight-plan-style route
-such as `KJFK DEEZZ5 TOWIN ... PGS BASET5 KLAX` of ~2160 NM.
+The tool loads X-Plane 12 navigation data, builds a directed graph honoring airway
+directionality and high/low levels, and finds routes between two airports (or
+waypoints) with A* and Yen K-shortest. Airports connect to the enroute network
+through their real SID/STAR procedures (parsed from ARINC 424 / CIFP), falling back
+to a direct link where no procedure data exists. For example, `KJFK KLAX` resolves
+to a filed-flight-plan-style route such as `KJFK DEEZZ5 TOWIN ... PGS BASET5 KLAX`
+of ~2160 NM.
 
 A single loaded database is safe to query concurrently from multiple threads.
 
-### Roadmap
+### What each milestone delivered
 
 - **M1 (done)** — enroute airway network, A* search, `bf route` CLI.
 - **M2 (done)** — pluggable constraints: altitude bands, MORA safety floor,
@@ -119,6 +117,18 @@ redistributed (they are git-ignored).
 Navigation data is **not** included and must be supplied by the user. It is
 copyrighted (Navigraph / Jeppesen), licensed for recreational simulation use only,
 and must not be redistributed. Place your local data under `navdata/` (git-ignored).
+
+## Documentation
+
+In-depth technical articles live under [docs/](docs/) (in Chinese). Start with
+[the routing-algorithm primer](docs/routing-basics.zh-CN.md), then explore the
+design highlights: [compliant routing](docs/compliant-routing.zh-CN.md),
+[procedure modeling](docs/procedure-modeling.zh-CN.md), the
+[Yen / Lawler optimization](docs/yen-lawler-optimization.zh-CN.md), the
+[portable binary cache](docs/binary-cache.zh-CN.md),
+[thread-safety contract B](docs/thread-safety.zh-CN.md), and
+[performance](docs/performance.zh-CN.md). See [docs/README.md](docs/README.md) for
+the full index.
 
 ## License
 

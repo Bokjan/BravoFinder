@@ -1,13 +1,12 @@
 # Contributing Guide / Project Conventions
 
-> **English** | [简体中文](CONTRIBUTING.zh-CN.md)
-
 This document defines the development conventions for BravoFinder v3. All commits
 should follow them.
 
-> Note: project documentation is written in English by default (with a Chinese
-> translation); however, **code comments and commit messages must be in English**
-> (see §2).
+> Note on language: the project front matter (README, this file, THIRD_PARTY_LICENSES)
+> is maintained in **English**; in-depth technical articles under `docs/` are written
+> in **Chinese** (`*.zh-CN.md`). **Code comments and commit messages must be in
+> English** (see §2).
 
 ---
 
@@ -90,7 +89,8 @@ build: wire up Catch2 and CLI11 via FetchContent
 
 | Content type | Language |
 |---|---|
-| Documentation (docs/, README, this file, etc.) | **English (default) + Chinese translation** |
+| Project front matter (README, this file, THIRD_PARTY_LICENSES) | **English** |
+| In-depth technical articles under `docs/` | **Chinese** (`*.zh-CN.md`) |
 | Code comments (all comments in `.h`/`.cc`: file header, class/function docs, inline) | **English (required)** |
 | git commit message (subject + body) | **English** |
 | Identifiers (types, functions, variable names) | English (C++ convention) |
@@ -132,8 +132,8 @@ build: wire up Catch2 and CLI11 via FetchContent
   keeping a linear history; no feature branches.
   (The old version is preserved on the `v2` branch.)
 - **Versioning**: follows [SemVer](https://semver.org/) (MAJOR.MINOR.PATCH).
-  The current development version is `3.0.0-dev`; milestones are tagged with git
-  tags (e.g. `v3.0.0`).
+  The current version is `3.0.0` (first release); subsequent releases are tagged
+  with git tags (e.g. `v3.0.0`).
 - **CHANGELOG**: not maintained separately for now; relies on commit history;
   generated at formal release time.
 
