@@ -12,9 +12,9 @@ namespace bf {
 // ARINC 424 path-and-termination code: how a procedure leg is flown and what
 // ends it. The full corpus (all 14838 cycle-2601 airports) uses 23 distinct
 // codes; the first four (TF/IF/DF/CF) terminate at a definite fix and dominate
-// (~80% of legs), while the rest fly a heading/course/arc/distance/altitude/
-// hold and have no fixed end point, so they are collapsed to an equivalent edge
-// when wiring the graph.
+// (the large majority of legs), while the rest fly a heading/course/arc/distance/
+// altitude/hold and have no fixed end point, so they are collapsed to an
+// equivalent edge when wiring the graph.
 enum class PathTerminator {
   kTF,       // Track to Fix
   kIF,       // Initial Fix

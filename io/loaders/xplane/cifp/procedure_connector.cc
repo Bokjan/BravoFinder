@@ -11,9 +11,9 @@ namespace bf {
 namespace {
 
 // Accumulate an estimated leg distance. Definite-fix legs use the great-circle
-// distance between consecutive resolved fixes; heading/altitude/arc legs fall
-// back to the CIFP-provided leg distance (or a small default when absent), per
-// the M3 "collapse to an equivalent edge" approach.
+// distance between consecutive resolved fixes; heading/altitude/arc legs, which
+// have no resolvable end fix, fall back to the CIFP-provided leg distance (or a
+// small default when absent).
 double LegDistance(const ProcedureLeg& leg, const Coordinate* prev_coord,
                    const Coordinate* this_coord) {
   if (prev_coord != nullptr && this_coord != nullptr) {
