@@ -256,6 +256,12 @@ int main(int argc, char** argv) {
                     "Departure runway to restrict the SID, e.g. RW31L (default: any)");
   route->add_option("--rwy-arr", rwy_arr,
                     "Arrival runway to restrict the STAR, e.g. RW25L (default: any)");
+  std::string sid;
+  std::string star;
+  route->add_option("--sid", sid,
+                    "Select a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN (default: auto)");
+  route->add_option("--star", star,
+                    "Select a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS (default: auto)");
 
   // --- query: look up waypoints / airports / procedures / airways. ---
   CLI::App* query =
@@ -333,6 +339,8 @@ int main(int argc, char** argv) {
     request.k = k;
     request.departure_runway = rwy_dep;
     request.arrival_runway = rwy_arr;
+    request.departure_sid = sid;
+    request.arrival_star = star;
     if (level == "low") {
       request.level = bf::LevelPreference::kLow;
     } else if (level == "high") {

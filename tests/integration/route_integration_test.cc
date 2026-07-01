@@ -251,6 +251,65 @@ TEST_CASE("real data: a departure runway filter still yields a route", "[integra
   CHECK_FALSE(routes.value().front().sid.empty());
 }
 
+TEST_CASE("real data: a named SID is used when requested", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
+  }
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.departure_sid = "DEEZZ5";  // a real KJFK SID
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  // Every candidate must depart via the requested SID.
+  for (const bf::Route& r : routes.value()) {
+    CHECK(r.sid == "DEEZZ5");
+  }
+}
+
+TEST_CASE("real data: a bare SID name pins the procedure but leaves transitions open",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
+  }
+
+  // "DEEZZ5.TOWIN" pins the transition; the offered options should all be that
+  // transition, unlike the bare-name case which leaves several.
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.departure_sid = "DEEZZ5.TOWIN";
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  CHECK(routes.value().front().sid == "DEEZZ5");
+  for (const std::string& opt : routes.value().front().sid_options) {
+    CHECK(opt.rfind("DEEZZ5.TOWIN", 0) == 0);
+  }
+}
+
+TEST_CASE("real data: an unknown SID name is an error, not a silent fallback",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
+  }
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.departure_sid = "NOSUCH9";
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
+  CHECK_FALSE(routes);  // no DCT fallback, no other SID -- a clean error
+}
+
 TEST_CASE("real data: an airport without procedures stays the endpoint via DCT", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

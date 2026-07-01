@@ -42,6 +42,10 @@ struct EndpointPlan {
   std::string airport_icao;  // empty if the endpoint is a plain waypoint
   bool used_procedures = false;
   bool has_procedures = false;
+  // Set when the request named a SID/STAR that the airport does not publish (or
+  // whose fixes reach no on-network vertex): the caller reports an Error instead
+  // of silently falling back to DCT or another procedure.
+  bool named_procedure_unmatched = false;
 };
 
 // Format a procedure reference as "NAME.TRANSITION" (or just "NAME" when the
@@ -51,6 +55,53 @@ std::string FormatRef(const ProcedureRef& ref) {
     return ref.name;
   }
   return ref.name + "." + ref.transition;
+}
+
+// Whether a procedure ref matches a requested selector. The selector is either
+// a bare name ("DEEZZ5", matches any transition) or "NAME.TRANSITION"
+// ("DEEZZ5.TOWIN", matches that transition exactly). Comparison is
+// case-sensitive (CIFP names are already upper-case).
+bool RefMatchesSelector(const ProcedureRef& ref, const std::string& selector) {
+  const size_t dot = selector.find('.');
+  if (dot == std::string::npos) {
+    return ref.name == selector;
+  }
+  return ref.name == selector.substr(0, dot) && ref.transition == selector.substr(dot + 1);
+}
+
+// Filter connections in place to only those procedures matching `selector`,
+// dropping any connection left with no matching procedure. Returns true if at
+// least one procedure survived. A no-op returning true when the selector is
+// empty (no name requested).
+bool FilterConnectionsByName(std::vector<Connection>& connections, const std::string& selector) {
+  if (selector.empty()) {
+    return true;
+  }
+  bool any = false;
+  for (Connection& c : connections) {
+    std::vector<ProcedureRef> kept;
+    for (const ProcedureRef& ref : c.procedures) {
+      if (RefMatchesSelector(ref, selector)) {
+        kept.push_back(ref);
+      }
+    }
+    c.procedures = std::move(kept);
+    if (!c.procedures.empty()) {
+      any = true;
+    }
+  }
+  if (any) {
+    // Drop connections that no longer carry any matching procedure so the search
+    // only seeds fixes reachable by the requested procedure.
+    std::vector<Connection> filtered;
+    for (Connection& c : connections) {
+      if (!c.procedures.empty()) {
+        filtered.push_back(std::move(c));
+      }
+    }
+    connections = std::move(filtered);
+  }
+  return any;
 }
 
 // Build a Route from a path of connection-fix vertices. `dep_label`/`arr_label`
@@ -305,7 +356,19 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         plan.connections = departure
                                ? ProcedureConnector::BuildDeparture(*cifp, apt, *builder_, rwy)
                                : ProcedureConnector::BuildArrival(*cifp, apt, *builder_, rwy);
+        // Optional SID/STAR selection by name: keep only the requested procedure.
+        // If none matches, mark it so the caller errors instead of falling back.
+        const std::string& sel = departure ? request.departure_sid : request.arrival_star;
+        if (!sel.empty() && !FilterConnectionsByName(plan.connections, sel)) {
+          plan.connections.clear();
+          plan.named_procedure_unmatched = true;
+          return plan;
+        }
         plan.used_procedures = !plan.connections.empty();
+      } else if (!(departure ? request.departure_sid : request.arrival_star).empty()) {
+        // A procedure was named but the airport has no CIFP data at all.
+        plan.named_procedure_unmatched = true;
+        return plan;
       }
       if (plan.connections.empty()) {
         // No usable procedures: fall back to DCT links to the nearest
@@ -323,11 +386,21 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   };
 
   EndpointPlan dep = plan_endpoint(request.departure, /*departure=*/true);
+  if (dep.named_procedure_unmatched) {
+    return Result<Routes>::Err(Error(ErrorCode::kNoRoute, "departure airport " + request.departure +
+                                                              " has no SID matching '" +
+                                                              request.departure_sid + "'"));
+  }
   if (dep.connections.empty()) {
     return Result<Routes>::Err(
         Error(ErrorCode::kAirportNotFound, "unknown departure: " + request.departure));
   }
   EndpointPlan arr = plan_endpoint(request.arrival, /*departure=*/false);
+  if (arr.named_procedure_unmatched) {
+    return Result<Routes>::Err(Error(ErrorCode::kNoRoute, "arrival airport " + request.arrival +
+                                                              " has no STAR matching '" +
+                                                              request.arrival_star + "'"));
+  }
   if (arr.connections.empty()) {
     return Result<Routes>::Err(
         Error(ErrorCode::kAirportNotFound, "unknown arrival: " + request.arrival));
