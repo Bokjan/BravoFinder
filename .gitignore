@@ -1,8 +1,8 @@
 # ── 本地工作文档（不入库）────────────────────────────────────
 # .notes/ = Claude 与本地工作稿（DESIGN.md 等）；公开文档将放 docs/（入库）
+# CLAUDE.md（项目协作规范）现已入库，不再忽略
 .notes/
 .claude/
-CLAUDE.md
 
 # ── 导航数据合规（Jeppesen 版权，禁止再分发）──────────────────
 # 真实 X-Plane / Navigraph 数据与其衍生缓存绝不入库
