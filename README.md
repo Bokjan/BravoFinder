@@ -99,6 +99,19 @@ bf route KJFK KLAX --level high -k 3
 # Restrict the departure/arrival runway used for SID/STAR selection
 bf route KJFK KLAX --rwy-dep RW31L
 
+# Select a specific SID/STAR by name (bare name matches any transition;
+# NAME.TRANSITION pins the transition). An unknown name is a clean error.
+bf route KJFK KLAX --sid DEEZZ5
+bf route KJFK KLAX --star LENDY6.HAAYS
+
+# Look up navigation data: waypoints, airports, procedures, or airways. Each
+# accepts one or more ids (a batch), and --format json emits an array parallel
+# to the input (a not-found id becomes null).
+bf query waypoint --db navdata/nav.bfdb NINOX DGC
+bf query airport  --db navdata/nav.bfdb KJFK KLAX
+bf query procedure --db navdata/nav.bfdb KJFK
+bf query airway   --db navdata/nav.bfdb Y28 --format json
+
 # Print the program version
 bf --version
 ```
