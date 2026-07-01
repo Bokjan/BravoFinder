@@ -21,8 +21,14 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
     return Result<void>::Err(
         Error(ErrorCode::kParseError, "too many airway names to serialize (> 65535)"));
   }
-  if (image.offsets.size() != v + 1 || image.idents.size() != v || image.on_network.size() != v) {
+  if (image.offsets.size() != v + 1 || image.idents.size() != v || image.on_network.size() != v ||
+      image.kinds.size() != v) {
     return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent image array sizes"));
+  }
+  const size_t airport_count = v - static_cast<size_t>(image.first_airport_vertex);
+  if (image.first_airport_vertex < 0 || static_cast<size_t>(image.first_airport_vertex) > v ||
+      image.airport_elevations_ft.size() != airport_count) {
+    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent airport array size"));
   }
 
   // Sections are serialized into their own buffers first; string references are
@@ -31,11 +37,43 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
   std::string sections;
   ByteWriter w(sections);
 
-  // coords: V * (lat, lon)
-  for (const Coordinate& c : image.coords) {
+  // Vertex records: one self-contained record per vertex, gathering all
+  // per-vertex attributes (position, ident, a flags byte, and the point kind).
+  // Adding a new per-vertex field means one more field in this record -- no new
+  // parallel array, no separate section. Airports (vertices
+  // [first_airport_vertex, V)) carry their airport-only attributes in a separate
+  // record section below.
+  //   coord      : F64 lat, F64 lon
+  //   ident      : U32 ident_off, U32 ident_len, U32 region_off, U32 region_len
+  //   flags      : U8  (bit 0 = on_network)
+  //   kind       : U8  (WaypointKind)
+  for (size_t i = 0; i < v; ++i) {
+    const Coordinate& c = image.coords[i];
     w.F64(c.latitude);
     w.F64(c.longitude);
+    const Ident& id = image.idents[i];
+    const auto ir = pool.Add(id.ident);
+    const auto rr = pool.Add(id.region);
+    w.U32(ir.first);
+    w.U32(ir.second);
+    w.U32(rr.first);
+    w.U32(rr.second);
+    uint8_t flags = 0;
+    if (image.on_network[i]) {
+      flags |= 0x01;
+    }
+    w.U8(flags);
+    w.U8(static_cast<uint8_t>(image.kinds[i]));
   }
+
+  // Airport records: one per airport vertex, in vertex order. Airport-only
+  // attributes live here so they do not bloat the V vertex records.
+  //   elevation_ft : I32
+  for (int elev : image.airport_elevations_ft) {
+    w.I32(elev);
+  }
+
+  // CSR graph structure (not per-vertex attributes, kept as flat arrays):
   // offsets: (V + 1) * int32
   for (int off : image.offsets) {
     w.I32(off);
@@ -48,25 +86,6 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
     w.I16(ed.base_fl);
     w.I16(ed.top_fl);
     w.U8(ed.flags);
-  }
-  // on_network: bit-packed, ceil(V / 8) bytes
-  for (size_t i = 0; i < v; i += 8) {
-    uint8_t byte = 0;
-    for (size_t b = 0; b < 8 && i + b < v; ++b) {
-      if (image.on_network[i + b]) {
-        byte |= static_cast<uint8_t>(1u << b);
-      }
-    }
-    w.U8(byte);
-  }
-  // idents: V * (ident_ref, region_ref)
-  for (const Ident& id : image.idents) {
-    const auto ir = pool.Add(id.ident);
-    const auto rr = pool.Add(id.region);
-    w.U32(ir.first);
-    w.U32(ir.second);
-    w.U32(rr.first);
-    w.U32(rr.second);
   }
   // airways: count * name_ref
   for (const std::string& name : image.airway_names) {
@@ -178,15 +197,15 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
   // resize, so a corrupt or forged header cannot trigger a huge allocation (and
   // a bad_alloc/length_error that would bypass Result). Each count must fit in
   // the remaining bytes at its minimum on-disk element size; this is a necessary
-  // condition, not an exact one -- a fuse, not a full validator. On-disk element
-  // sizes: coords 16 B (2xF64), offsets 4 B, GraphEdge 15 B (4+4+2+2+2+1, tighter
-  // than the 16 B in-memory struct), ident ref 16 B (4xU32), airway ref 8 B,
-  // MSA sector at least 28 B (6xU32 refs + a U32 arc count).
+  // condition, not an exact one -- a fuse, not a full validator. On-disk sizes:
+  // vertex record 34 B (coord 16 + ident refs 16 + flags 1 + kind 1), offsets
+  // 4 B, GraphEdge 15 B (4+4+2+2+2+1, tighter than the 16 B in-memory struct),
+  // airway ref 8 B, MSA sector at least 28 B (6xU32 refs + a U32 arc count).
   const size_t avail = r.remaining();
   auto count_fits = [&](uint32_t count, size_t per_elem) {
     return static_cast<size_t>(count) <= avail / per_elem;
   };
-  if (!r.ok() || !count_fits(v, 16) || !count_fits(e, 15) || !count_fits(airway_count, 8) ||
+  if (!r.ok() || !count_fits(v, 34) || !count_fits(e, 15) || !count_fits(airway_count, 8) ||
       !count_fits(msa_count, 28)) {
     return bad("corrupt .bfdb: header counts exceed file size");
   }
@@ -209,11 +228,34 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
   }
   const uint32_t pool_len = r.U32();
 
-  // coords
+  // Vertex records: coord + ident refs + flags + kind, one per vertex. Ident
+  // refs are resolved against the string pool after it is read (below).
+  struct IdentRef {
+    uint32_t io, il, ro, rl;
+  };
   img.coords.resize(v);
+  img.on_network.assign(v, false);
+  img.kinds.resize(v);
+  std::vector<IdentRef> ident_refs(v);
   for (uint32_t i = 0; i < v; ++i) {
     img.coords[i].latitude = r.F64();
     img.coords[i].longitude = r.F64();
+    ident_refs[i].io = r.U32();
+    ident_refs[i].il = r.U32();
+    ident_refs[i].ro = r.U32();
+    ident_refs[i].rl = r.U32();
+    const uint8_t flags = r.U8();
+    img.on_network[i] = (flags & 0x01) != 0;
+    img.kinds[i] = static_cast<WaypointKind>(r.U8());
+  }
+  // Airport records: elevation per airport vertex, in vertex order.
+  const size_t airport_count =
+      v >= static_cast<uint32_t>(img.first_airport_vertex) && img.first_airport_vertex >= 0
+          ? v - static_cast<size_t>(img.first_airport_vertex)
+          : 0;
+  img.airport_elevations_ft.resize(airport_count);
+  for (size_t i = 0; i < airport_count; ++i) {
+    img.airport_elevations_ft[i] = r.I32();
   }
   // offsets
   img.offsets.resize(static_cast<size_t>(v) + 1);
@@ -231,27 +273,6 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
     ed.top_fl = r.I16();
     ed.flags = r.U8();
     img.edges[i] = ed;
-  }
-  // on_network: bit-packed
-  img.on_network.assign(v, false);
-  for (uint32_t i = 0; i < v; i += 8) {
-    const uint8_t byte = r.U8();
-    for (uint32_t b = 0; b < 8 && i + b < v; ++b) {
-      if (byte & (1u << b)) {
-        img.on_network[i + b] = true;
-      }
-    }
-  }
-  // idents (references into the pool, resolved after the pool is read)
-  struct IdentRef {
-    uint32_t io, il, ro, rl;
-  };
-  std::vector<IdentRef> ident_refs(v);
-  for (uint32_t i = 0; i < v; ++i) {
-    ident_refs[i].io = r.U32();
-    ident_refs[i].il = r.U32();
-    ident_refs[i].ro = r.U32();
-    ident_refs[i].rl = r.U32();
   }
   // airways
   struct NameRef {

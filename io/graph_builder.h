@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "core/domain/waypoint.h"
 #include "core/graph/nav_graph.h"
 #include "io/cache/bfdb_cache.h"
 #include "io/nav_data.h"
@@ -70,6 +71,13 @@ class GraphBuilder {
   // Vertex metadata for result construction.
   const Ident& IdentOf(int vertex) const { return idents_[vertex]; }
 
+  // The point kind (fix/VOR/NDB/DME) of `vertex`. Airport vertices report kFix.
+  WaypointKind KindOf(int vertex) const { return kinds_[vertex]; }
+
+  // The field elevation (ft MSL) of an airport `vertex`, or 0 if `vertex` is not
+  // an airport.
+  int ElevationOf(int vertex) const;
+
  private:
   // For FromImage: constructs an empty builder to be populated from an image.
   GraphBuilder() = default;
@@ -79,9 +87,11 @@ class GraphBuilder {
   void RebuildIndices();
 
   NavGraph graph_;
-  std::vector<Ident> idents_;     // per-vertex ident, size = V
-  std::vector<bool> on_network_;  // per-vertex: participates in an airway, size = V
-  int first_airport_vertex_ = 0;  // vertices [this, V) are airports
+  std::vector<Ident> idents_;         // per-vertex ident, size = V
+  std::vector<bool> on_network_;      // per-vertex: participates in an airway, size = V
+  std::vector<WaypointKind> kinds_;   // per-vertex point kind, size = V
+  int first_airport_vertex_ = 0;      // vertices [this, V) are airports
+  std::vector<int> airport_elevations_ft_;  // per-airport elevation, size = V - first_airport_vertex_
   std::vector<std::string> airway_names_;
   std::unordered_map<Ident, int> ident_index_;          // (ident,region) -> vertex
   std::unordered_map<std::string, int> ident_first_;    // ident -> first vertex

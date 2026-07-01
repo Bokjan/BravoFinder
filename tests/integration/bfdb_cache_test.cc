@@ -106,6 +106,46 @@ TEST_CASE("bfdb: the cache header preserves AIRAC provenance", "[integration][bf
   std::remove(path.c_str());
 }
 
+TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
+          "[integration][bfdb]") {
+  const std::string path = BuildCache("fields");
+  if (path.empty()) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  bf::Result<bf::BfdbImage> img = bf::BfdbCache::Read(path);
+  REQUIRE(img);
+  const bf::BfdbImage& im = img.value();
+
+  // Per-vertex kinds are present for every vertex.
+  REQUIRE(im.kinds.size() == im.coords.size());
+  // Real AIRAC data has a mix of fixes and navaids, so at least one vertex must
+  // be a navaid kind -- proving the field is populated, not defaulted to kFix.
+  bool has_navaid = false;
+  for (bf::WaypointKind k : im.kinds) {
+    if (k == bf::WaypointKind::kVor || k == bf::WaypointKind::kNdb ||
+        k == bf::WaypointKind::kDme) {
+      has_navaid = true;
+      break;
+    }
+  }
+  CHECK(has_navaid);
+
+  // Airport elevations: one per airport vertex, and at least one non-zero (most
+  // airports sit above sea level), proving elevation survived the round-trip.
+  const size_t airport_count = im.coords.size() - static_cast<size_t>(im.first_airport_vertex);
+  REQUIRE(im.airport_elevations_ft.size() == airport_count);
+  bool has_nonzero_elev = false;
+  for (int e : im.airport_elevations_ft) {
+    if (e != 0) {
+      has_nonzero_elev = true;
+      break;
+    }
+  }
+  CHECK(has_nonzero_elev);
+
+  std::remove(path.c_str());
+}
+
 TEST_CASE("bfdb: an airport without procedures still routes via the cache", "[integration][bfdb]") {
   const std::string dir = NavDataDir();
   const std::string path = BuildCache("nocifp");

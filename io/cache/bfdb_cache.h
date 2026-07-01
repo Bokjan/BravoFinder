@@ -7,6 +7,7 @@
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
+#include "core/domain/waypoint.h"
 #include "core/graph/nav_graph.h"
 #include "core/result.h"
 
@@ -31,9 +32,14 @@ struct BfdbImage {
   std::vector<GraphEdge> edges;    // CSR edge array, size E
   std::vector<bool> on_network;    // per-vertex airway membership, size V
   std::vector<Ident> idents;       // per-vertex (ident, region), size V
+  std::vector<WaypointKind> kinds; // per-vertex kind (fix/VOR/NDB/DME), size V
   std::vector<std::string> airway_names;
   MoraGrid mora;
   std::vector<MsaSector> msa;
+
+  // Airport-only attributes, indexed by airport ordinal (vertex index minus
+  // first_airport_vertex). Size = V - first_airport_vertex.
+  std::vector<int> airport_elevations_ft;
 };
 
 // Binary serialization of a BfdbImage to and from a `.bfdb` file.
@@ -50,7 +56,11 @@ class BfdbCache {
   // files are then rejected and the user re-runs `bf build`.
   //
   // v2 (M4): added program_semver and source_loader to the header.
-  static constexpr uint32_t kFormatVersion = 2;
+  // v3: per-vertex data serialized as one record each (coord + ident + flags +
+  //     waypoint kind) and a trailing airport record section (elevation),
+  //     replacing the parallel coords/on_network/idents arrays. Extensible: a
+  //     new per-vertex field is one more field in the vertex record.
+  static constexpr uint32_t kFormatVersion = 3;
 
   // Serialize `image` to `path`. Returns an error if the file cannot be written
   // or the image exceeds format limits (e.g. > 65535 airway names).

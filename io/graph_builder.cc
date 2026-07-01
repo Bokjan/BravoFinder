@@ -53,11 +53,14 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   // --- Vertices: waypoints first, then airports. ---
   graph_.coords_.reserve(total);
   idents_.reserve(total);
+  kinds_.reserve(total);
+  airport_elevations_ft_.reserve(airport_count);
   DegreeGrid grid;
   for (int i = 0; i < waypoint_count; ++i) {
     const Waypoint& w = data.waypoints[i];
     graph_.coords_.push_back(w.coord);
     idents_.push_back(w.ident);
+    kinds_.push_back(w.kind);
     ident_index_.emplace(w.ident, i);
     ident_first_.emplace(w.ident.ident, i);
     grid.Insert(i, w.coord);
@@ -67,6 +70,8 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     const int v = waypoint_count + i;
     graph_.coords_.push_back(a.coord);
     idents_.push_back(Ident(a.icao, a.region));
+    kinds_.push_back(WaypointKind::kFix);  // airports have no navaid kind
+    airport_elevations_ft_.push_back(a.elevation_ft);
     airport_index_.emplace(a.icao, v);
   }
 
@@ -240,6 +245,8 @@ GraphBuilder GraphBuilder::FromImage(BfdbImage&& image) {
   b.graph_.edges_ = std::move(image.edges);
   b.idents_ = std::move(image.idents);
   b.on_network_ = std::move(image.on_network);
+  b.kinds_ = std::move(image.kinds);
+  b.airport_elevations_ft_ = std::move(image.airport_elevations_ft);
   b.airway_names_ = std::move(image.airway_names);
   b.first_airport_vertex_ = image.first_airport_vertex;
   b.RebuildIndices();
@@ -257,9 +264,18 @@ BfdbImage GraphBuilder::ToImage(const std::string& data_dir, uint32_t cycle, uin
   image.edges = graph_.edges_;
   image.on_network = on_network_;
   image.idents = idents_;
+  image.kinds = kinds_;
+  image.airport_elevations_ft = airport_elevations_ft_;
   image.airway_names = airway_names_;
   // mora/msa are owned by NavDatabase, not the builder; the caller fills them.
   return image;
+}
+
+int GraphBuilder::ElevationOf(int vertex) const {
+  if (vertex < first_airport_vertex_ || vertex >= static_cast<int>(idents_.size())) {
+    return 0;
+  }
+  return airport_elevations_ft_[vertex - first_airport_vertex_];
 }
 
 }  // namespace bf
