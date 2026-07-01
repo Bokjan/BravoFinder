@@ -198,15 +198,25 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
   // a bad_alloc/length_error that would bypass Result). Each count must fit in
   // the remaining bytes at its minimum on-disk element size; this is a necessary
   // condition, not an exact one -- a fuse, not a full validator. On-disk sizes:
-  // vertex record 34 B (coord 16 + ident refs 16 + flags 1 + kind 1), offsets
-  // 4 B, GraphEdge 15 B (4+4+2+2+2+1, tighter than the 16 B in-memory struct),
-  // airway ref 8 B, MSA sector at least 28 B (6xU32 refs + a U32 arc count).
+  // vertex record 34 B (coord 16 + ident refs 16 + flags 1 + kind 1), airport
+  // record 4 B (I32 elevation), offsets 4 B, GraphEdge 15 B (4+4+2+2+2+1, tighter
+  // than the 16 B in-memory struct), airway ref 8 B, MSA sector at least 28 B
+  // (6xU32 refs + a U32 arc count).
+  //
+  // first_airport_vertex must lie in [0, v]; the airport record section then
+  // holds (v - first_airport_vertex) elevations. An out-of-range value is
+  // rejected here rather than clamped, so the airport count below is trustworthy.
+  if (!r.ok() || img.first_airport_vertex < 0 ||
+      static_cast<uint32_t>(img.first_airport_vertex) > v) {
+    return bad("corrupt .bfdb: first_airport_vertex out of range");
+  }
+  const uint32_t airport_count = v - static_cast<uint32_t>(img.first_airport_vertex);
   const size_t avail = r.remaining();
   auto count_fits = [&](uint32_t count, size_t per_elem) {
     return static_cast<size_t>(count) <= avail / per_elem;
   };
-  if (!r.ok() || !count_fits(v, 34) || !count_fits(e, 15) || !count_fits(airway_count, 8) ||
-      !count_fits(msa_count, 28)) {
+  if (!count_fits(v, 34) || !count_fits(airport_count, 4) || !count_fits(e, 15) ||
+      !count_fits(airway_count, 8) || !count_fits(msa_count, 28)) {
     return bad("corrupt .bfdb: header counts exceed file size");
   }
   // Inline header strings (length-prefixed), in write order.
@@ -249,12 +259,9 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
     img.kinds[i] = static_cast<WaypointKind>(r.U8());
   }
   // Airport records: elevation per airport vertex, in vertex order.
-  const size_t airport_count =
-      v >= static_cast<uint32_t>(img.first_airport_vertex) && img.first_airport_vertex >= 0
-          ? v - static_cast<size_t>(img.first_airport_vertex)
-          : 0;
+  // airport_count was validated against the file size in the header fuse above.
   img.airport_elevations_ft.resize(airport_count);
-  for (size_t i = 0; i < airport_count; ++i) {
+  for (uint32_t i = 0; i < airport_count; ++i) {
     img.airport_elevations_ft[i] = r.I32();
   }
   // offsets

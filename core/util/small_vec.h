@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdlib>
 #include <initializer_list>
 #include <iterator>
 #include <memory>
+#include <type_traits>
 #include <utility>
 
 namespace bf {
@@ -22,9 +24,19 @@ inline constexpr int kIdentRegionInline = 4;
 // it only supports the operations GraphBuilder needs (push_back, indexed/size
 // access, range iteration, move). Zero external dependencies, per the project's
 // dependency discipline (no Abseil/Boost/LLVM).
+//
+// Restricted to trivial element types: the heap buffer is raw malloc storage
+// that elements are assigned into (never placement-new constructed), and the
+// inline array is default-initialized, so a non-trivial T would assign onto
+// unconstructed memory and never run destructors -- undefined behavior. The
+// static_assert enforces this; lifting it would mean adding real construct/
+// destroy plumbing, which this minimal type deliberately avoids.
 template <typename T, int N>
 class SmallVec {
   static_assert(N > 0, "SmallVec inline capacity must be positive");
+  static_assert(std::is_trivial_v<T>,
+                "SmallVec only supports trivial element types (it assigns into "
+                "raw malloc storage without constructing/destroying elements)");
 
  public:
   SmallVec() = default;

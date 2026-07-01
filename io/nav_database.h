@@ -86,10 +86,12 @@ class NavDatabase {
   std::vector<MsaSector> MsaForAirport(const std::string& icao) const;
 
   // --- Batch lookup API ------------------------------------------------------
-  // Each lookup takes a list of keys and returns a vector parallel to it, with
-  // nullopt where a key was not found. A single lookup is just a one-element
-  // batch. All are const and safe for concurrent use per contract B. Idents and
-  // ICAO codes are matched case-insensitively.
+  // Each lookup takes a list of keys and returns a result vector parallel to it,
+  // where a miss is the empty element for that result shape: nullopt for the
+  // optional-returning lookups, and an empty inner vector for LookupWaypoints
+  // (which returns all region matches per ident). A single lookup is just a
+  // one-element batch. All are const and safe for concurrent use per contract B.
+  // Idents and ICAO codes are matched case-insensitively.
 
   // Waypoints / navaids by ident. Since an ident is reused across regions, each
   // input ident maps to a vector of every matching WaypointInfo (possibly empty
