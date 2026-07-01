@@ -1,11 +1,17 @@
-# BravoFinder — 项目协作规范
+# BravoFinder — AI agent 工作指南
 
-> 面向在本仓库工作的人与 AI 助手。完整设计在 `.notes/DESIGN.md`（本地稿，不入库），
-> 本文件只沉淀**跨会话必须遵守的硬约定**，自包含、无需读设计稿即可守规矩。
+> **本文件只面向在本仓库工作的 AI agent**，沉淀跨会话必须遵守的硬约定，自包含、
+> 无需读设计稿即可守规矩。面向**使用者**的介绍与用法在 `README.md`（勿把使用者
+> 信息搬进本文件）；本文件只讲"改代码时怎么做才对"。
+>
+> **文档地图**（各司其职，别混）：
+> - `README.md` — 面向使用者：项目是什么、如何构建、CLI 用法、数据合规。
+> - `CLAUDE.md`（本文件）— 面向 AI agent：开发硬约定、不变量、雷区。
+> - `.notes/DESIGN.md` — 完整设计稿（本地，gitignore，不自动加载；需要背景时手动读）。
+> - `docs/` — 面向他人的公开文档（CONTRIBUTING、算法说明等，入库）。
 
-BravoFinder 是一个真实/合规航路引擎：解析 X-Plane 12 native 导航数据（含 ARINC 424
-程序），建图，用 A\* + Yen K-shortest 求尊重航空约束（航路方向、高低空、高度限制、
-SID/STAR）的候选航路。CLI 子命令 `bf build`（预编译缓存）/ `bf route`（查询）。
+一句话背景（细节看 README / DESIGN）：真实/合规航路引擎，解析 X-Plane 12 native 导航
+数据（含 ARINC 424 程序）建图，用 A\* + Yen K-shortest 求尊重航空约束的候选航路。
 
 ## 语言
 - 交流、注释、文档、commit 说明默认**简体中文**；文档优先中文。
@@ -43,7 +49,9 @@ SID/STAR）的候选航路。CLI 子命令 `bf build`（预编译缓存）/ `bf 
 - 无 CIFP 程序的机场测试用 **KIKR / KNWL**。
 - 真实导航数据 / `*.dat` / `*.bfdb` **绝不入库**（Jeppesen 版权，禁止再分发）。
 
-## 构建 / 测试
+## 构建 / 测试（开发时）
+> 面向使用者的完整 CLI 用法（`bf build` / `bf route` 各参数）见 README；此处只列
+> 改代码后必跑的 preset。**只用 `--preset`，不用路径形式**。
 ```
 cmake --preset debug      # Debug + ASan/UBSan + warnings-as-errors
 cmake --preset release    # Release -O2
