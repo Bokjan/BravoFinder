@@ -9,6 +9,7 @@ add_executable(bf_tests
                unit/cifp_parser_test.cc
                unit/route_string_test.cc
                unit/route_json_test.cc
+               unit/small_vec_test.cc
                integration/route_integration_test.cc
                integration/query_test.cc
                integration/bfdb_cache_test.cc

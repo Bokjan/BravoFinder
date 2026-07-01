@@ -82,6 +82,32 @@ std::pair<std::string, bool> RunLookup(const std::vector<std::optional<Info>>& r
   return {json, all_missing};
 }
 
+// The waypoint lookup returns a group per id (an ident is reused across
+// regions), so its result shape is vector<vector<WaypointInfo>> rather than the
+// optional-vector the other lookups use. Serialize as a JSON array parallel to
+// `ids`, where each element is itself an array of the region matches for that
+// id (empty when the ident is unknown or names an airport).
+std::pair<std::string, bool> RunWaypointLookup(
+    const std::vector<std::vector<bf::WaypointInfo>>& results) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.SetMaxDecimalPlaces(6);
+  writer.StartArray();
+  bool all_empty = true;
+  for (const auto& group : results) {
+    writer.StartArray();
+    for (const bf::WaypointInfo& w : group) {
+      bf::WriteWaypointJson(writer, w);
+    }
+    writer.EndArray();
+    if (!group.empty()) {
+      all_empty = false;
+    }
+  }
+  writer.EndArray();
+  return {buffer.GetString(), all_empty};
+}
+
 // Parse a string-array argument. Returns nullopt if missing or malformed.
 std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args, const char* key) {
   if (!args.HasMember(key) || !args[key].IsArray()) {
@@ -112,9 +138,7 @@ Tool MakeLookupTool(const char* name, const char* description, const char* schem
                 }
                 auto results = lookup(db, *ids);
                 return RunLookup(results, [](auto& w, const Info& x) {
-                  if constexpr (std::is_same_v<Info, bf::WaypointInfo>) {
-                    bf::WriteWaypointJson(w, x);
-                  } else if constexpr (std::is_same_v<Info, bf::AirportInfo>) {
+                  if constexpr (std::is_same_v<Info, bf::AirportInfo>) {
                     bf::WriteAirportJson(w, x);
                   } else if constexpr (std::is_same_v<Info, bf::AirportProcedures>) {
                     bf::WriteProceduresJson(w, x);
@@ -123,6 +147,21 @@ Tool MakeLookupTool(const char* name, const char* description, const char* schem
                   }
                 });
               });
+}
+
+// The waypoint lookup is special: an ident maps to a group of region matches
+// (vector<vector<WaypointInfo>>), not a single optional. This tool handles that
+// shape while keeping the id-list parsing shared with the other lookups.
+Tool MakeWaypointLookupTool(const char* name, const char* description, const char* schema) {
+  return Tool(
+      name, description, ParseSchema(schema),
+      [](const rapidjson::Value& args, const NavDatabase& db) -> std::pair<std::string, bool> {
+        auto ids = ParseIdList(args, "ids");
+        if (!ids) {
+          return {R"({"error":"ids (array of strings) is required"})", true};
+        }
+        return RunWaypointLookup(db.LookupWaypoints(*ids));
+      });
 }
 
 // The find_routes handler.
@@ -208,17 +247,14 @@ const std::vector<Tool>& AllTools() {
           R"("required":["departure","arrival"]})"),
       FindRoutesHandler);
 
-  tools.push_back(MakeLookupTool<bf::WaypointInfo>(
+  tools.push_back(MakeWaypointLookupTool(
       "lookup_waypoints",
-      "Look up waypoints / navaids by ident. Returns coordinates, kind, and "
-      "whether the fix lies on the route network. Batch: one result per id, "
-      "null when not found.",
+      "Look up waypoints / navaids by ident. An ident is reused across regions, "
+      "so each id returns a group of matches (ident, region, coordinate, kind, "
+      "on-network flag). Batch: one group per id, empty when not found.",
       R"({"type":"object","properties":{)"
-      R"("ids":{"type":"array","items":{"type":"string"},"description":"One or more waypoint idents to look up. Results are parallel to this list."}},)"
-      R"("required":["ids"]})",
-      [](const NavDatabase& db, const std::vector<std::string>& ids) {
-        return db.LookupWaypoints(ids);
-      }));
+      R"("ids":{"type":"array","items":{"type":"string"},"description":"One or more waypoint idents to look up. Each result is a group parallel to this list."}},)"
+      R"("required":["ids"]})"));
 
   tools.push_back(MakeLookupTool<bf::AirportInfo>(
       "lookup_airports",

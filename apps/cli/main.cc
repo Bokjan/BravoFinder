@@ -10,8 +10,8 @@
 #include <string>
 #include <vector>
 
-#include "core/result.h"
 #include "core/query/query_json.h"
+#include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_json.h"
 #include "core/routing/route_request.h"
@@ -119,17 +119,18 @@ int RunQuery(const bf::NavDatabase& db, const std::string& kind,
   if (kind == "waypoint") {
     auto results = db.LookupWaypoints(ids);
     for (size_t i = 0; i < ids.size(); ++i) {
-      if (!results[i]) {
+      if (results[i].empty()) {
         miss(ids[i]);
         continue;
       }
-      const bf::WaypointInfo& w = *results[i];
-      if (json) {
-        bf::WriteWaypointJson(writer, w);
-      } else {
-        std::cout << w.ident << " (" << w.region << ") " << bf::ToString(w.kind) << "  "
-                  << w.coord.latitude << ", " << w.coord.longitude
-                  << (w.on_network ? "  [on-network]" : "") << "\n";
+      for (const bf::WaypointInfo& w : results[i]) {
+        if (json) {
+          bf::WriteWaypointJson(writer, w);
+        } else {
+          std::cout << w.ident << " (" << w.region << ") " << bf::ToString(w.kind) << "  "
+                    << w.coord.latitude << ", " << w.coord.longitude
+                    << (w.on_network ? "  [on-network]" : "") << "\n";
+        }
       }
     }
   } else if (kind == "airport") {
@@ -264,8 +265,8 @@ int main(int argc, char** argv) {
                     "Select a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS (default: auto)");
 
   // --- query: look up waypoints / airports / procedures / airways. ---
-  CLI::App* query =
-      app.add_subcommand("query", "Look up navigation data (waypoints, airports, procedures, airways)");
+  CLI::App* query = app.add_subcommand(
+      "query", "Look up navigation data (waypoints, airports, procedures, airways)");
   std::string query_kind;
   std::vector<std::string> query_ids;
   std::string query_data_dir = "navdata";

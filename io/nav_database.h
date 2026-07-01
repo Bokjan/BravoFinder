@@ -91,9 +91,11 @@ class NavDatabase {
   // batch. All are const and safe for concurrent use per contract B. Idents and
   // ICAO codes are matched case-insensitively.
 
-  // Waypoints / navaids by ident. When an ident is reused across regions, the
-  // first match is returned (as elsewhere in the ident-only path).
-  std::vector<std::optional<WaypointInfo>> LookupWaypoints(
+  // Waypoints / navaids by ident. Since an ident is reused across regions, each
+  // input ident maps to a vector of every matching WaypointInfo (possibly empty
+  // when the ident is unknown or names an airport). The outer vector is parallel
+  // to `idents`; the inner vector holds all region matches for that ident.
+  std::vector<std::vector<WaypointInfo>> LookupWaypoints(
       const std::vector<std::string>& idents) const;
 
   // Airports by ICAO code.
@@ -107,8 +109,7 @@ class NavDatabase {
 
   // Airways by designator (e.g. "Y28"). Returns every directed segment carrying
   // that name. nullopt when no segment uses the name.
-  std::vector<std::optional<AirwayInfo>> LookupAirways(
-      const std::vector<std::string>& names) const;
+  std::vector<std::optional<AirwayInfo>> LookupAirways(const std::vector<std::string>& names) const;
 
  private:
   // Load (and cache) an airport's CIFP procedures on demand. Returns nullptr if

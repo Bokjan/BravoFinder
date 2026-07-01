@@ -33,18 +33,19 @@ TEST_CASE("query: batch waypoint lookup is parallel to input with kinds", "[inte
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   // A known fix, a known VOR, and a bogus ident: results must be parallel to the
-  // input, with nullopt for the miss.
+  // input, with an empty group for the miss. Each group holds every region
+  // match for that ident.
   const std::vector<std::string> ids{"NINOX", "DGC", "ZZ_NOT_REAL_ZZ"};
   auto r = db->LookupWaypoints(ids);
   REQUIRE(r.size() == ids.size());
-  REQUIRE(r[0].has_value());
-  CHECK(r[0]->ident == "NINOX");
-  CHECK(r[0]->kind == bf::WaypointKind::kFix);
-  REQUIRE(r[1].has_value());
-  CHECK(r[1]->ident == "DGC");
-  CHECK(r[1]->kind == bf::WaypointKind::kVor);  // DGC is a VOR
-  CHECK(r[1]->on_network);
-  CHECK_FALSE(r[2].has_value());
+  REQUIRE_FALSE(r[0].empty());
+  CHECK(r[0][0].ident == "NINOX");
+  CHECK(r[0][0].kind == bf::WaypointKind::kFix);
+  REQUIRE_FALSE(r[1].empty());
+  CHECK(r[1][0].ident == "DGC");
+  CHECK(r[1][0].kind == bf::WaypointKind::kVor);  // DGC is a VOR
+  CHECK(r[1][0].on_network);
+  CHECK(r[2].empty());
 }
 
 TEST_CASE("query: case-insensitive waypoint ident", "[integration][query]") {
@@ -54,12 +55,11 @@ TEST_CASE("query: case-insensitive waypoint ident", "[integration][query]") {
   }
   auto r = db->LookupWaypoints({"ninox"});
   REQUIRE(r.size() == 1);
-  REQUIRE(r[0].has_value());
-  CHECK(r[0]->ident == "NINOX");
+  REQUIRE_FALSE(r[0].empty());
+  CHECK(r[0][0].ident == "NINOX");
 }
 
-TEST_CASE("query: airport lookup carries elevation and procedure flag",
-          "[integration][query]") {
+TEST_CASE("query: airport lookup carries elevation and procedure flag", "[integration][query]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
@@ -70,7 +70,7 @@ TEST_CASE("query: airport lookup carries elevation and procedure flag",
   CHECK(r[0]->icao == "KJFK");
   CHECK(r[0]->coord.latitude > 40.0);
   CHECK(r[0]->coord.latitude < 41.0);
-  CHECK(r[0]->has_procedures);   // KJFK publishes CIFP procedures
+  CHECK(r[0]->has_procedures);  // KJFK publishes CIFP procedures
   REQUIRE(r[1].has_value());
   CHECK(r[1]->icao == "KIKR");
   CHECK_FALSE(r[1]->has_procedures);  // KIKR has no CIFP file
@@ -78,8 +78,7 @@ TEST_CASE("query: airport lookup carries elevation and procedure flag",
   CHECK_FALSE(r[2].has_value());
 }
 
-TEST_CASE("query: procedure lookup lists SIDs for an airport with CIFP",
-          "[integration][query]") {
+TEST_CASE("query: procedure lookup lists SIDs for an airport with CIFP", "[integration][query]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
@@ -135,7 +134,7 @@ TEST_CASE("query: concurrent lookups on one database are race-free", "[integrati
         auto a = db->LookupAirports({"KJFK"});
         auto p = db->LookupProcedures({"KJFK"});
         auto ai = db->LookupAirways({"Y28"});
-        if (w[0] && a[0] && p[0] && ai[0]) {
+        if (!w[0].empty() && !w[1].empty() && a[0] && p[0] && ai[0]) {
           ok.fetch_add(1, std::memory_order_relaxed);
         }
       }

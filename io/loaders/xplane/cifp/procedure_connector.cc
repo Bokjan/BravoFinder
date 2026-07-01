@@ -25,17 +25,16 @@ double LegDistance(const ProcedureLeg& leg, const Coordinate* prev_coord,
   return 0.0;
 }
 
-// Resolve a procedure leg's fix to a graph vertex, preferring the full
-// (ident, region) key. Returns -1 when the leg has no resolvable fix.
+// Resolve a procedure leg's fix to a graph vertex by its full (ident, region)
+// key. Returns -1 when the leg has no resolvable fix. The ident-only fallback
+// was removed: a procedure leg carries its region, so resolving by
+// (ident, region) is both correct and unambiguous, and silently guessing a
+// region would risk wiring a procedure to the wrong fix.
 int ResolveFix(const ProcedureLeg& leg, const GraphBuilder& builder) {
   if (leg.fix.ident.empty()) {
     return -1;
   }
-  int v = builder.VertexByIdent(leg.fix);
-  if (v < 0) {
-    v = builder.VertexByIdent(leg.fix.ident);
-  }
-  return v;
+  return builder.VertexByIdent(leg.fix);
 }
 
 // Whether this procedure record should be considered, honoring an optional

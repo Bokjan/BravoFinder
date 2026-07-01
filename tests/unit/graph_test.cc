@@ -42,8 +42,8 @@ bf::NavData MakeLineData() {
 
 TEST_CASE("A* finds path along a linear airway", "[graph]") {
   bf::GraphBuilder builder(MakeLineData());
-  const int a = builder.VertexByIdent("AAA");
-  const int d = builder.VertexByIdent("DDD");
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int d = builder.VerticesByIdent("DDD")[0];
   REQUIRE(a >= 0);
   REQUIRE(d >= 0);
 
@@ -67,8 +67,8 @@ TEST_CASE("one-way airway is not traversable backward", "[graph]") {
   d.airways = {{bf::Ident("AAA", "ZZ"), bf::Ident("BBB", "ZZ"), fwd}};
 
   bf::GraphBuilder builder(d);
-  const int a = builder.VertexByIdent("AAA");
-  const int b = builder.VertexByIdent("BBB");
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int b = builder.VerticesByIdent("BBB")[0];
 
   // Forward is allowed...
   CHECK(bf::FindShortestPath(builder.graph(), a, b).found);
@@ -82,8 +82,8 @@ TEST_CASE("unreachable vertices report no path", "[graph]") {
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{10, 10}, {}}};
   // No airways: the two points are disconnected.
   bf::GraphBuilder builder(d);
-  const int a = builder.VertexByIdent("AAA");
-  const int b = builder.VertexByIdent("BBB");
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int b = builder.VerticesByIdent("BBB")[0];
   CHECK_FALSE(bf::FindShortestPath(builder.graph(), a, b).found);
 }
 
@@ -92,10 +92,10 @@ TEST_CASE("multi-source/goal A* picks the cheapest seeded combination", "[graph]
   // A and B; goals seed at C and D. The search must weigh seed costs against
   // enroute distance to choose the best end-to-end combination.
   bf::GraphBuilder builder(MakeLineData());
-  const int a = builder.VertexByIdent("AAA");
-  const int b = builder.VertexByIdent("BBB");
-  const int c = builder.VertexByIdent("CCC");
-  const int d = builder.VertexByIdent("DDD");
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int b = builder.VerticesByIdent("BBB")[0];
+  const int c = builder.VerticesByIdent("CCC")[0];
+  const int d = builder.VerticesByIdent("DDD")[0];
   const bf::NavGraph& g = builder.graph();
 
   SECTION("cheap seeds at the near pair win") {
@@ -140,11 +140,39 @@ TEST_CASE("multi-source/goal A* reports no path when disconnected", "[graph]") {
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{10, 10}, {}}};
   bf::GraphBuilder builder(d);  // no airways
-  const int a = builder.VertexByIdent("AAA");
-  const int b = builder.VertexByIdent("BBB");
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int b = builder.VerticesByIdent("BBB")[0];
   bf::ShortestPath p =
       bf::FindShortestPathMulti(builder.graph(), {{a, 0.0}}, {{b, 0.0}}, bf::SearchOptions{});
   CHECK_FALSE(p.found);
+}
+
+TEST_CASE("VerticesByIdent returns every region match for a reused ident", "[graph]") {
+  // An ident is reused across regions (e.g. the same fix code in K6 and EH).
+  // The builder must surface ALL matches, never silently pick one.
+  bf::NavData d;
+  d.waypoints = {
+      bf::Waypoint{bf::Ident("SHARED", "K6"), bf::Coordinate{50.0, 4.0}, bf::WaypointKind::kFix},
+      bf::Waypoint{bf::Ident("SHARED", "EH"), bf::Coordinate{52.0, 4.5}, bf::WaypointKind::kFix},
+      bf::Waypoint{bf::Ident("SHARED", "LF"), bf::Coordinate{48.0, 3.0}, bf::WaypointKind::kFix},
+      bf::Waypoint{bf::Ident("LONE", "K6"), bf::Coordinate{49.0, 2.0}, bf::WaypointKind::kFix},
+  };
+  bf::GraphBuilder builder(d);
+
+  // The reused ident resolves to all three regions, in insertion order.
+  const std::vector<int> shared = builder.VerticesByIdent("SHARED");
+  REQUIRE(shared.size() == 3);
+  CHECK(builder.IdentOf(shared[0]).region == "K6");
+  CHECK(builder.IdentOf(shared[1]).region == "EH");
+  CHECK(builder.IdentOf(shared[2]).region == "LF");
+
+  // A unique ident still resolves to exactly one vertex.
+  const std::vector<int> lone = builder.VerticesByIdent("LONE");
+  REQUIRE(lone.size() == 1);
+  CHECK(builder.IdentOf(lone[0]).region == "K6");
+
+  // An unknown ident resolves to nothing.
+  CHECK(builder.VerticesByIdent("NOPE").empty());
 }
 
 }  // namespace

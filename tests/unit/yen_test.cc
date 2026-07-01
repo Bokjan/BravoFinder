@@ -1,5 +1,5 @@
-#include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <catch2/catch_test_macros.hpp>
 #include <random>
 #include <set>
 #include <string>
@@ -45,8 +45,8 @@ bf::NavData MakeDiamondData() {
 
 TEST_CASE("Yen returns K distinct paths ordered by cost", "[yen]") {
   bf::GraphBuilder builder(MakeDiamondData());
-  const int a = builder.VertexByIdent("AAA");
-  const int dd = builder.VertexByIdent("DDD");
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int dd = builder.VerticesByIdent("DDD")[0];
   REQUIRE(a >= 0);
   REQUIRE(dd >= 0);
 
@@ -61,14 +61,14 @@ TEST_CASE("Yen returns K distinct paths ordered by cost", "[yen]") {
   // The two paths differ.
   CHECK(paths[0].vertices != paths[1].vertices);
   // The shorter one goes through BBB.
-  const int bbb = builder.VertexByIdent("BBB");
+  const int bbb = builder.VerticesByIdent("BBB")[0];
   CHECK(paths[0].vertices[1] == bbb);
 }
 
 TEST_CASE("Yen with k=1 returns just the best path", "[yen]") {
   bf::GraphBuilder builder(MakeDiamondData());
-  const int a = builder.VertexByIdent("AAA");
-  const int dd = builder.VertexByIdent("DDD");
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int dd = builder.VerticesByIdent("DDD")[0];
   std::vector<bf::ShortestPath> paths =
       bf::FindKShortestPaths(builder.graph(), a, dd, 1, bf::SearchOptions{});
   REQUIRE(paths.size() == 1);
@@ -79,8 +79,8 @@ TEST_CASE("Yen on unreachable goal returns empty", "[yen]") {
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{0, 5}, {}}};
   bf::GraphBuilder builder(d);
-  const int a = builder.VertexByIdent("AAA");
-  const int b = builder.VertexByIdent("BBB");
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int b = builder.VerticesByIdent("BBB")[0];
   std::vector<bf::ShortestPath> paths =
       bf::FindKShortestPaths(builder.graph(), a, b, 3, bf::SearchOptions{});
   CHECK(paths.empty());
@@ -116,9 +116,9 @@ bf::NavData MakeTwoEntryData() {
 
 TEST_CASE("multi-endpoint Yen yields candidates through different entry fixes", "[yen]") {
   bf::GraphBuilder builder(MakeTwoEntryData());
-  const int s1 = builder.VertexByIdent("S1");
-  const int s2 = builder.VertexByIdent("S2");
-  const int g = builder.VertexByIdent("GGG");
+  const int s1 = builder.VerticesByIdent("S1")[0];
+  const int s2 = builder.VerticesByIdent("S2")[0];
+  const int g = builder.VerticesByIdent("GGG")[0];
   REQUIRE(s1 >= 0);
   REQUIRE(s2 >= 0);
   REQUIRE(g >= 0);
@@ -207,8 +207,8 @@ TEST_CASE("Yen golden candidate sequence on a lattice (Lawler regression guard)"
   // deviations at every position. If this signature changes, the k-shortest
   // result set or its order changed -- which the Lawler optimization must NOT do.
   bf::GraphBuilder builder(MakeLatticeData(/*cols=*/4, /*rows=*/3));
-  const int start = builder.VertexByIdent("L0r1");
-  const int goal = builder.VertexByIdent("L3r1");
+  const int start = builder.VerticesByIdent("L0r1")[0];
+  const int goal = builder.VerticesByIdent("L3r1")[0];
   REQUIRE(start >= 0);
   REQUIRE(goal >= 0);
 
@@ -246,10 +246,10 @@ TEST_CASE("multi-source Yen golden sequence on a lattice (Lawler regression guar
   // columns and two seeded goal rows -- exercising the super-source spur (index
   // -1) path that Lawler's deviation index must represent.
   bf::GraphBuilder builder(MakeLatticeData(/*cols=*/4, /*rows=*/3));
-  const std::vector<bf::SeededEndpoint> sources = {
-      {builder.VertexByIdent("L0r0"), 5.0}, {builder.VertexByIdent("L0r1"), 5.0}};
-  const std::vector<bf::SeededEndpoint> goals = {
-      {builder.VertexByIdent("L3r0"), 3.0}, {builder.VertexByIdent("L3r1"), 3.0}};
+  const std::vector<bf::SeededEndpoint> sources = {{builder.VerticesByIdent("L0r0")[0], 5.0},
+                                                   {builder.VerticesByIdent("L0r1")[0], 5.0}};
+  const std::vector<bf::SeededEndpoint> goals = {{builder.VerticesByIdent("L3r0")[0], 3.0},
+                                                 {builder.VerticesByIdent("L3r1")[0], 3.0}};
   for (const auto& s : sources) REQUIRE(s.vertex >= 0);
   for (const auto& g : goals) REQUIRE(g.vertex >= 0);
 
@@ -325,7 +325,8 @@ bool RefCostOfPath(const bf::NavGraph& g, const std::vector<int>& path, double& 
 }
 
 // Naive single-source Yen (no Lawler): spur from index 0 every round.
-std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int start, int goal, int k) {
+std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int start, int goal,
+                                             int k) {
   std::vector<bf::ShortestPath> result;
   if (k <= 0) return result;
   bf::ShortestPath first = bf::FindShortestPath(graph, start, goal, bf::SearchOptions{});
@@ -338,17 +339,14 @@ std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int star
       const std::vector<int> root(prev.begin(), prev.begin() + i + 1);
       std::set<std::pair<int, int>> banned_edges;
       for (const bf::ShortestPath& p : result) {
-        if (p.vertices.size() > i + 1 &&
-            std::equal(root.begin(), root.end(), p.vertices.begin())) {
+        if (p.vertices.size() > i + 1 && std::equal(root.begin(), root.end(), p.vertices.begin())) {
           banned_edges.emplace(p.vertices[i], p.vertices[i + 1]);
         }
       }
       const std::set<int> banned_nodes(root.begin(), root.end() - 1);
       bf::SearchOptions opts;
       opts.node_blocked = [banned_nodes](int v) { return banned_nodes.count(v) != 0; };
-      opts.edge_blocked = [banned_edges](int f, int t) {
-        return banned_edges.count({f, t}) != 0;
-      };
+      opts.edge_blocked = [banned_edges](int f, int t) { return banned_edges.count({f, t}) != 0; };
       const bf::ShortestPath spur = bf::FindShortestPath(graph, prev[i], goal, opts);
       if (!spur.found) continue;
       std::vector<int> total(root.begin(), root.end() - 1);
@@ -445,9 +443,7 @@ std::vector<bf::ShortestPath> NaiveKShortestMulti(const bf::NavGraph& graph,
       const std::set<int> banned_nodes(root.begin(), root.end() - 1);
       bf::SearchOptions opts;
       opts.node_blocked = [banned_nodes](int v) { return banned_nodes.count(v) != 0; };
-      opts.edge_blocked = [banned_edges](int f, int t) {
-        return banned_edges.count({f, t}) != 0;
-      };
+      opts.edge_blocked = [banned_edges](int f, int t) { return banned_edges.count({f, t}) != 0; };
       add(root, bf::FindShortestPathMulti(graph, {bf::SeededEndpoint{prev[i], 0.0}}, goals, opts));
     }
     if (candidates.empty()) break;
@@ -490,9 +486,8 @@ bf::NavData MakeRandomData(std::mt19937& rng, int n, int extra_edges) {
     const int a = pick(rng);
     const int b = pick(rng);
     if (a != b) {
-      d.airways.push_back(
-          {bf::Ident("W" + std::to_string(a), "ZZ"), bf::Ident("W" + std::to_string(b), "ZZ"),
-           seg(n + e)});
+      d.airways.push_back({bf::Ident("W" + std::to_string(a), "ZZ"),
+                           bf::Ident("W" + std::to_string(b), "ZZ"), seg(n + e)});
     }
   }
   return d;

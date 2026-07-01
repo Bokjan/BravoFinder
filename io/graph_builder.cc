@@ -62,7 +62,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     idents_.push_back(w.ident);
     kinds_.push_back(w.kind);
     ident_index_.emplace(w.ident, i);
-    ident_first_.emplace(w.ident.ident, i);
+    ident_all_[w.ident.ident].push_back(i);
     grid.Insert(i, w.coord);
   }
   for (int i = 0; i < airport_count; ++i) {
@@ -201,9 +201,12 @@ std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int cou
   return candidates;
 }
 
-int GraphBuilder::VertexByIdent(const std::string& ident) const {
-  auto it = ident_first_.find(ident);
-  return it == ident_first_.end() ? -1 : it->second;
+std::vector<int> GraphBuilder::VerticesByIdent(const std::string& ident) const {
+  auto it = ident_all_.find(ident);
+  if (it == ident_all_.end()) {
+    return {};
+  }
+  return {it->second.begin(), it->second.end()};
 }
 
 int GraphBuilder::VertexByAirport(const std::string& icao) const {
@@ -222,16 +225,16 @@ const std::string& GraphBuilder::AirwayName(int airway_id) const {
 void GraphBuilder::RebuildIndices() {
   const int v_count = static_cast<int>(idents_.size());
   ident_index_.clear();
-  ident_first_.clear();
+  ident_all_.clear();
   airport_index_.clear();
   ident_index_.reserve(v_count);
-  ident_first_.reserve(v_count);
+  ident_all_.reserve(v_count);
   // Waypoints occupy [0, first_airport_vertex_); airports the tail. Both are
-  // reachable by (ident, region); only waypoints seed the ident-only and
+  // reachable by (ident, region); only waypoints seed the ident-all and
   // airports the ICAO lookup, matching the constructor's original wiring.
   for (int i = 0; i < first_airport_vertex_; ++i) {
     ident_index_.emplace(idents_[i], i);
-    ident_first_.emplace(idents_[i].ident, i);
+    ident_all_[idents_[i].ident].push_back(i);
   }
   for (int v = first_airport_vertex_; v < v_count; ++v) {
     airport_index_.emplace(idents_[v].ident, v);

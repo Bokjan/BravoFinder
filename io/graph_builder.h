@@ -7,6 +7,7 @@
 
 #include "core/domain/waypoint.h"
 #include "core/graph/nav_graph.h"
+#include "core/util/small_vec.h"
 #include "io/cache/bfdb_cache.h"
 #include "io/nav_data.h"
 
@@ -37,8 +38,12 @@ class GraphBuilder {
 
   const NavGraph& graph() const { return graph_; }
 
-  // Resolve a waypoint by ident alone (first match across regions), or -1.
-  int VertexByIdent(const std::string& ident) const;
+  // Resolve every waypoint sharing `ident` across all regions. Idents are not
+  // globally unique, so this returns the full set of matching vertices rather
+  // than silently picking one (the old ident-only "first" lookup was eliminated
+  // because the choice was decided by load order and invisible to the user).
+  // Callers that know the region should use the (ident, region) overload below.
+  std::vector<int> VerticesByIdent(const std::string& ident) const;
 
   // Resolve a waypoint by its full (ident, region) key, or -1. Preferred over
   // the ident-only lookup when the region is known (procedure fixes carry it),
@@ -87,14 +92,16 @@ class GraphBuilder {
   void RebuildIndices();
 
   NavGraph graph_;
-  std::vector<Ident> idents_;         // per-vertex ident, size = V
-  std::vector<bool> on_network_;      // per-vertex: participates in an airway, size = V
-  std::vector<WaypointKind> kinds_;   // per-vertex point kind, size = V
-  int first_airport_vertex_ = 0;      // vertices [this, V) are airports
-  std::vector<int> airport_elevations_ft_;  // per-airport elevation, size = V - first_airport_vertex_
+  std::vector<Ident> idents_;        // per-vertex ident, size = V
+  std::vector<bool> on_network_;     // per-vertex: participates in an airway, size = V
+  std::vector<WaypointKind> kinds_;  // per-vertex point kind, size = V
+  int first_airport_vertex_ = 0;     // vertices [this, V) are airports
+  std::vector<int>
+      airport_elevations_ft_;  // per-airport elevation, size = V - first_airport_vertex_
   std::vector<std::string> airway_names_;
-  std::unordered_map<Ident, int> ident_index_;          // (ident,region) -> vertex
-  std::unordered_map<std::string, int> ident_first_;    // ident -> first vertex
+  std::unordered_map<Ident, int> ident_index_;  // (ident,region) -> vertex
+  std::unordered_map<std::string, SmallVec<int, kIdentRegionInline>>
+      ident_all_;                                       // ident -> all vertices
   std::unordered_map<std::string, int> airport_index_;  // ICAO -> vertex
 };
 

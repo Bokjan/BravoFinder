@@ -156,7 +156,8 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   }
   // Trailing procedure leg: last connection fix -> airport via the STAR.
   if (!arr_label.empty()) {
-    route.legs.push_back(RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : star, arr_seed, {}});
+    route.legs.push_back(
+        RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : star, arr_seed, {}});
   }
 
   // Route string in filed-flight-plan style: DEP SID FIX <airways> FIX STAR ARR.
@@ -378,10 +379,11 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
       }
       return plan;
     }
-    const int wp = builder_->VertexByIdent(up);
-    if (wp >= 0) {
-      plan.connections.push_back(Connection{wp, 0.0, {}});
-    }
+    // A bare ident is no longer accepted as a route endpoint: idents are not
+    // globally unique, and silently picking one region's match would put the
+    // whole route on the wrong endpoint. The caller must use an airport ICAO or
+    // a (ident, region) pair. With no airport and no ident hit, plan.connections
+    // stays empty, so the caller reports an "unknown endpoint" error.
     return plan;
   };
 
@@ -545,20 +547,24 @@ void NavDatabase::BuildAirwayIndex() {
   }
 }
 
-std::vector<std::optional<WaypointInfo>> NavDatabase::LookupWaypoints(
+std::vector<std::vector<WaypointInfo>> NavDatabase::LookupWaypoints(
     const std::vector<std::string>& idents) const {
-  std::vector<std::optional<WaypointInfo>> out(idents.size());
+  std::vector<std::vector<WaypointInfo>> out(idents.size());
   if (!builder_) {
     return out;
   }
   for (size_t i = 0; i < idents.size(); ++i) {
-    const int v = builder_->VertexByIdent(ToUpper(idents[i]));
-    if (v < 0 || builder_->IsAirport(v)) {
-      continue;  // unknown, or an airport (use LookupAirports for those)
+    const std::vector<int> vertices = builder_->VerticesByIdent(ToUpper(idents[i]));
+    for (const int v : vertices) {
+      // Airports share the ident namespace but are looked up via LookupAirports;
+      // skip them here so a bare ICAO does not masquerade as a waypoint match.
+      if (builder_->IsAirport(v)) {
+        continue;
+      }
+      const Ident& id = builder_->IdentOf(v);
+      out[i].push_back(WaypointInfo{id.ident, id.region, builder_->graph().CoordOf(v),
+                                    builder_->KindOf(v), builder_->OnNetwork(v)});
     }
-    const Ident& id = builder_->IdentOf(v);
-    out[i] = WaypointInfo{id.ident, id.region, builder_->graph().CoordOf(v), builder_->KindOf(v),
-                          builder_->OnNetwork(v)};
   }
   return out;
 }
@@ -595,8 +601,7 @@ std::vector<std::optional<AirportProcedures>> NavDatabase::LookupProcedures(
     ap.icao = up;
     ap.procedures.reserve(cifp->procedures.size());
     for (const Procedure& p : cifp->procedures) {
-      ap.procedures.push_back(
-          ProcedureSummary{p.type, p.name, p.transition_ident, p.runway});
+      ap.procedures.push_back(ProcedureSummary{p.type, p.name, p.transition_ident, p.runway});
     }
     out[i] = std::move(ap);
   }
