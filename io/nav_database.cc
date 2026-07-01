@@ -157,6 +157,7 @@ Result<NavDatabase> NavDatabase::Open(const std::string& data_dir) {
   db.mora_ = std::move(data.value().mora);
   db.msa_ = std::move(data.value().msa);
   db.builder_ = std::make_unique<GraphBuilder>(data.value());
+  db.BuildAirwayIndex();
   return Result<NavDatabase>::Ok(std::move(db));
 }
 
@@ -210,6 +211,7 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path,
       db.cifp_archive_ = std::move(archive).value();
     }
   }
+  db.BuildAirwayIndex();
   return Result<NavDatabase>::Ok(std::move(db));
 }
 
@@ -443,6 +445,98 @@ std::vector<MsaSector> NavDatabase::MsaForAirport(const std::string& icao) const
   for (const MsaSector& s : msa_) {
     if (s.airport_icao == up) {
       out.push_back(s);
+    }
+  }
+  return out;
+}
+
+void NavDatabase::BuildAirwayIndex() {
+  if (!builder_) {
+    return;
+  }
+  const NavGraph& graph = builder_->graph();
+  const int vcount = graph.VertexCount();
+  for (int u = 0; u < vcount; ++u) {
+    for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
+      if (e->airway_id == 0) {
+        continue;  // synthetic DCT edge, not a named airway
+      }
+      const std::string& name = builder_->AirwayName(e->airway_id);
+      AirwayInfo& info = airway_index_[name];
+      if (info.name.empty()) {
+        info.name = name;
+      }
+      info.segments.push_back(AirwayLeg{builder_->IdentOf(u).ident, builder_->IdentOf(e->to).ident,
+                                        e->distance_nm, EdgeIsHigh(*e), e->base_fl, e->top_fl});
+    }
+  }
+}
+
+std::vector<std::optional<WaypointInfo>> NavDatabase::LookupWaypoints(
+    const std::vector<std::string>& idents) const {
+  std::vector<std::optional<WaypointInfo>> out(idents.size());
+  if (!builder_) {
+    return out;
+  }
+  for (size_t i = 0; i < idents.size(); ++i) {
+    const int v = builder_->VertexByIdent(ToUpper(idents[i]));
+    if (v < 0 || builder_->IsAirport(v)) {
+      continue;  // unknown, or an airport (use LookupAirports for those)
+    }
+    const Ident& id = builder_->IdentOf(v);
+    out[i] = WaypointInfo{id.ident, id.region, builder_->graph().CoordOf(v), builder_->KindOf(v),
+                          builder_->OnNetwork(v)};
+  }
+  return out;
+}
+
+std::vector<std::optional<AirportInfo>> NavDatabase::LookupAirports(
+    const std::vector<std::string>& icaos) const {
+  std::vector<std::optional<AirportInfo>> out(icaos.size());
+  if (!builder_) {
+    return out;
+  }
+  for (size_t i = 0; i < icaos.size(); ++i) {
+    const std::string up = ToUpper(icaos[i]);
+    const int v = builder_->VertexByAirport(up);
+    if (v < 0) {
+      continue;
+    }
+    const Ident& id = builder_->IdentOf(v);
+    out[i] = AirportInfo{id.ident, id.region, builder_->graph().CoordOf(v),
+                         builder_->ElevationOf(v), ProceduresFor(up) != nullptr};
+  }
+  return out;
+}
+
+std::vector<std::optional<AirportProcedures>> NavDatabase::LookupProcedures(
+    const std::vector<std::string>& icaos) const {
+  std::vector<std::optional<AirportProcedures>> out(icaos.size());
+  for (size_t i = 0; i < icaos.size(); ++i) {
+    const std::string up = ToUpper(icaos[i]);
+    const CifpData* cifp = ProceduresFor(up);
+    if (cifp == nullptr) {
+      continue;
+    }
+    AirportProcedures ap;
+    ap.icao = up;
+    ap.procedures.reserve(cifp->procedures.size());
+    for (const Procedure& p : cifp->procedures) {
+      ap.procedures.push_back(
+          ProcedureSummary{p.type, p.name, p.transition_ident, p.runway});
+    }
+    out[i] = std::move(ap);
+  }
+  return out;
+}
+
+std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
+    const std::vector<std::string>& names) const {
+  std::vector<std::optional<AirwayInfo>> out(names.size());
+  for (size_t i = 0; i < names.size(); ++i) {
+    auto it = airway_index_.find(ToUpper(names[i]));
+    if (it != airway_index_.end()) {
+      out[i] = it->second;
     }
   }
   return out;

@@ -10,6 +10,7 @@
 
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
+#include "core/query/query_types.h"
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
@@ -84,6 +85,31 @@ class NavDatabase {
   // an empty span if none. Case-insensitive on the ICAO code.
   std::vector<MsaSector> MsaForAirport(const std::string& icao) const;
 
+  // --- Batch lookup API ------------------------------------------------------
+  // Each lookup takes a list of keys and returns a vector parallel to it, with
+  // nullopt where a key was not found. A single lookup is just a one-element
+  // batch. All are const and safe for concurrent use per contract B. Idents and
+  // ICAO codes are matched case-insensitively.
+
+  // Waypoints / navaids by ident. When an ident is reused across regions, the
+  // first match is returned (as elsewhere in the ident-only path).
+  std::vector<std::optional<WaypointInfo>> LookupWaypoints(
+      const std::vector<std::string>& idents) const;
+
+  // Airports by ICAO code.
+  std::vector<std::optional<AirportInfo>> LookupAirports(
+      const std::vector<std::string>& icaos) const;
+
+  // Published terminal procedures (SID/STAR/approach) by airport ICAO. nullopt
+  // when the airport is unknown or has no CIFP data.
+  std::vector<std::optional<AirportProcedures>> LookupProcedures(
+      const std::vector<std::string>& icaos) const;
+
+  // Airways by designator (e.g. "Y28"). Returns every directed segment carrying
+  // that name. nullopt when no segment uses the name.
+  std::vector<std::optional<AirwayInfo>> LookupAirways(
+      const std::vector<std::string>& names) const;
+
  private:
   // Load (and cache) an airport's CIFP procedures on demand. Returns nullptr if
   // the airport has no CIFP file. The cache accumulates across queries so a
@@ -96,6 +122,11 @@ class NavDatabase {
   // address is stable even when a concurrent insert rehashes the map.
   const CifpData* ProceduresFor(const std::string& icao) const;
 
+  // Build the airway-name -> segments index by scanning every graph edge once.
+  // Called at the end of Open/OpenCached; the index is then frozen (read-only),
+  // so LookupAirways needs no lock (contract B: immutable after Open).
+  void BuildAirwayIndex();
+
   // AIRAC provenance, carried into the .bfdb cache header.
   uint32_t cycle_ = 0;
   uint32_t build_ = 0;
@@ -103,6 +134,9 @@ class NavDatabase {
   MoraGrid mora_;
   std::vector<MsaSector> msa_;
   std::string data_dir_;
+  // Airway designator -> its directed segments. Built once at Open, then
+  // immutable, so reads are lock-free.
+  std::unordered_map<std::string, AirwayInfo> airway_index_;
   // Optional CIFP procedure cache. When present, ProceduresFor fetches segments
   // from it instead of parsing CIFP/<ICAO>.dat files. Immutable after Open, so
   // it needs no lock (its Fetch opens an independent ifstream per call).

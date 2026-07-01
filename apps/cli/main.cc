@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "core/result.h"
+#include "core/query/query_json.h"
 #include "core/routing/route.h"
 #include "core/routing/route_json.h"
 #include "core/routing/route_request.h"
@@ -90,6 +91,108 @@ void PrintRoutesJson(const std::vector<bf::Route>& routes) {
   std::cout << buffer.GetString() << "\n";
 }
 
+// Run one batch query and print its results (text or JSON). The lookup returns a
+// vector<optional<Info>> parallel to `ids`; a nullopt entry is reported as not
+// found. Returns the number of ids that were not found.
+int RunQuery(const bf::NavDatabase& db, const std::string& kind,
+             const std::vector<std::string>& ids, const std::string& format) {
+  const bool json = format == "json";
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.SetMaxDecimalPlaces(6);
+  if (json) {
+    writer.StartArray();
+  }
+  int not_found = 0;
+
+  // Emit a JSON null (batch mode keeps output parallel to the input) or a text
+  // "not found" line for a missing id.
+  auto miss = [&](const std::string& id) {
+    ++not_found;
+    if (json) {
+      writer.Null();
+    } else {
+      std::cout << id << ": not found\n";
+    }
+  };
+
+  if (kind == "waypoint") {
+    auto results = db.LookupWaypoints(ids);
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (!results[i]) {
+        miss(ids[i]);
+        continue;
+      }
+      const bf::WaypointInfo& w = *results[i];
+      if (json) {
+        bf::WriteWaypointJson(writer, w);
+      } else {
+        std::cout << w.ident << " (" << w.region << ") " << bf::ToString(w.kind) << "  "
+                  << w.coord.latitude << ", " << w.coord.longitude
+                  << (w.on_network ? "  [on-network]" : "") << "\n";
+      }
+    }
+  } else if (kind == "airport") {
+    auto results = db.LookupAirports(ids);
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (!results[i]) {
+        miss(ids[i]);
+        continue;
+      }
+      const bf::AirportInfo& a = *results[i];
+      if (json) {
+        bf::WriteAirportJson(writer, a);
+      } else {
+        std::cout << a.icao << " (" << a.region << ")  " << a.coord.latitude << ", "
+                  << a.coord.longitude << "  elev " << a.elevation_ft << " ft"
+                  << (a.has_procedures ? "  [has procedures]" : "") << "\n";
+      }
+    }
+  } else if (kind == "procedure") {
+    auto results = db.LookupProcedures(ids);
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (!results[i]) {
+        miss(ids[i]);
+        continue;
+      }
+      const bf::AirportProcedures& ap = *results[i];
+      if (json) {
+        bf::WriteProceduresJson(writer, ap);
+      } else {
+        std::cout << ap.icao << ": " << ap.procedures.size() << " procedures\n";
+        for (const bf::ProcedureSummary& p : ap.procedures) {
+          std::cout << "  " << bf::ToString(p.type) << " " << p.name << "." << p.transition
+                    << (p.runway.empty() ? "" : "  rwy " + p.runway) << "\n";
+        }
+      }
+    }
+  } else {  // airway
+    auto results = db.LookupAirways(ids);
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (!results[i]) {
+        miss(ids[i]);
+        continue;
+      }
+      const bf::AirwayInfo& a = *results[i];
+      if (json) {
+        bf::WriteAirwayJson(writer, a);
+      } else {
+        std::cout << a.name << ": " << a.segments.size() << " segments\n";
+        for (const bf::AirwayLeg& s : a.segments) {
+          std::cout << "  " << s.from << " -> " << s.to << "  " << s.distance_nm << " NM  "
+                    << (s.high ? "high" : "low") << "  FL" << s.base_fl << "-" << s.top_fl << "\n";
+        }
+      }
+    }
+  }
+
+  if (json) {
+    writer.EndArray();
+    std::cout << buffer.GetString() << "\n";
+  }
+  return not_found;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -153,6 +256,28 @@ int main(int argc, char** argv) {
                     "Departure runway to restrict the SID, e.g. RW31L (default: any)");
   route->add_option("--rwy-arr", rwy_arr,
                     "Arrival runway to restrict the STAR, e.g. RW25L (default: any)");
+
+  // --- query: look up waypoints / airports / procedures / airways. ---
+  CLI::App* query =
+      app.add_subcommand("query", "Look up navigation data (waypoints, airports, procedures, airways)");
+  std::string query_kind;
+  std::vector<std::string> query_ids;
+  std::string query_data_dir = "navdata";
+  std::string query_db_path;
+  std::string query_cifp_db_path;
+  std::string query_format = "text";
+  query->add_option("kind", query_kind, "What to look up: waypoint, airport, procedure, or airway")
+      ->required()
+      ->check(CLI::IsMember({"waypoint", "airport", "procedure", "airway"}));
+  query->add_option("id", query_ids, "One or more idents / ICAO codes / airway names")->required();
+  query->add_option("--data", query_data_dir, "Directory of X-Plane navigation data")
+      ->capture_default_str();
+  query->add_option("--db", query_db_path, "Prebuilt .bfdb cache to load (skips parsing)");
+  query->add_option("--cifp-db", query_cifp_db_path,
+                    "CIFP procedure cache to load (default: <db-stem>_cifp.bfdb next to --db)");
+  query->add_option("--format", query_format, "Output format: text or json")
+      ->capture_default_str()
+      ->check(CLI::IsMember({"text", "json"}));
 
   CLI11_PARSE(app, argc, argv);
 
@@ -233,6 +358,23 @@ int main(int argc, char** argv) {
           std::cout << "\n";
         }
       }
+    }
+  }
+
+  if (*query) {
+    bf::Result<bf::NavDatabase> db =
+        query_db_path.empty()
+            ? bf::NavDatabase::Open(query_data_dir)
+            : bf::NavDatabase::OpenCached(query_db_path, query_data_dir, query_cifp_db_path);
+    if (!db) {
+      std::cerr << "error: " << db.error().message << "\n";
+      return EXIT_FAILURE;
+    }
+    const int not_found = RunQuery(db.value(), query_kind, query_ids, query_format);
+    // Exit non-zero if every requested id was missing, so scripts can detect a
+    // wholly failed lookup; a partial hit still succeeds.
+    if (not_found == static_cast<int>(query_ids.size())) {
+      return EXIT_FAILURE;
     }
   }
 

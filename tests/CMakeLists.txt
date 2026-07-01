@@ -10,6 +10,7 @@ add_executable(bf_tests
                unit/route_string_test.cc
                unit/route_json_test.cc
                integration/route_integration_test.cc
+               integration/query_test.cc
                integration/bfdb_cache_test.cc
                integration/cifp_cache_test.cc)
 
