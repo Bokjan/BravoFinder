@@ -47,11 +47,16 @@ bool CostOfPath(const NavGraph& graph, const std::vector<int>& path, const Searc
   return true;
 }
 
-// A candidate path ordered by effective cost for the B set.
+// A candidate path ordered by effective cost for the B set. `deviation` records
+// the spur index at which this candidate branched from its parent accepted path
+// (Lawler's optimization): once accepted, the next round only needs to spur from
+// this index onward, since spurs before it merely regenerate paths already
+// considered in an earlier round. It is metadata, NOT part of the ordering key.
 struct Candidate {
   double cost;
   double distance;
   std::vector<int> vertices;
+  int deviation = 0;
   bool operator<(const Candidate& other) const {
     if (cost != other.cost) {
       return cost < other.cost;
@@ -115,14 +120,23 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
   }
   result.push_back(std::move(first));
 
-  // Candidate set B, kept sorted/deduped by (cost, vertices).
+  // Candidate set B, kept sorted/deduped by (cost, vertices). B persists across
+  // the outer k iterations (Lawler): candidates not chosen this round stay for
+  // the next.
   std::set<Candidate> candidates;
+
+  // Lawler's optimization: the deviation index of the most recently accepted
+  // path -- the spur position at which it branched from its parent. Spur nodes
+  // before this index would reproduce root prefixes already fully explored in an
+  // earlier round, so the next round starts spurring here. The first (shortest)
+  // path has no parent; index 0 spurs it in full.
+  int last_deviation = 0;
 
   for (int kth = 1; kth < k; ++kth) {
     const std::vector<int> prev_path = result.back().vertices;
 
-    // Each node of the previous path (except the goal) is a spur node.
-    for (size_t i = 0; i + 1 < prev_path.size(); ++i) {
+    // Spur from the previous path's deviation index onward (Lawler), not from 0.
+    for (size_t i = static_cast<size_t>(last_deviation); i + 1 < prev_path.size(); ++i) {
       const int spur_node = prev_path[i];
       // Root = prev_path[0..i]; the spur search starts at spur_node.
       const std::vector<int> root(prev_path.begin(), prev_path.begin() + i + 1);
@@ -166,7 +180,7 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
       double cost = 0.0;
       double distance = 0.0;
       if (CostOfPath(graph, total, base_options, cost, distance)) {
-        candidates.insert(Candidate{cost, distance, std::move(total)});
+        candidates.insert(Candidate{cost, distance, std::move(total), static_cast<int>(i)});
       }
     }
 
@@ -180,6 +194,7 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
     next.cost = best->cost;
     next.distance_nm = best->distance;
     next.found = true;
+    last_deviation = best->deviation;
     candidates.erase(best);
     result.push_back(std::move(next));
   }
@@ -210,7 +225,8 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   }
   result.push_back(std::move(first));
 
-  // Candidate set B, kept sorted/deduped by (cost, vertices).
+  // Candidate set B, kept sorted/deduped by (cost, vertices). B persists across
+  // the outer k iterations (Lawler).
   std::set<Candidate> candidates;
 
   // Run one spur search and fold the resulting full path into the candidate set.
@@ -218,7 +234,10 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   // level spur); `spur_tail` is the freshly searched suffix starting at the spur
   // node. The two are stitched (root minus its last node, which equals the spur
   // node, then the tail) and re-costed end to end including both seeds.
-  auto add_candidate = [&](const std::vector<int>& root, const ShortestPath& spur_tail) {
+  // `deviation` is the spur index (-1 for the super-source spur) recorded on the
+  // candidate for Lawler's next-round start.
+  auto add_candidate = [&](const std::vector<int>& root, const ShortestPath& spur_tail,
+                           int deviation) {
     if (!spur_tail.found || spur_tail.vertices.empty()) {
       return;
     }
@@ -227,9 +246,14 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
     double cost = 0.0;
     double distance = 0.0;
     if (CostOfPathMulti(graph, total, source_seed, goal_seed, base_options, cost, distance)) {
-      candidates.insert(Candidate{cost, distance, std::move(total)});
+      candidates.insert(Candidate{cost, distance, std::move(total), deviation});
     }
   };
+
+  // Lawler's optimization: deviation index of the most recently accepted path.
+  // -1 means the super-source spur (a different starting connection fix); the
+  // first accepted path conceptually deviates there, so the search starts at -1.
+  int last_deviation = -1;
 
   for (int kth = 1; kth < k; ++kth) {
     const std::vector<int> prev_path = result.back().vertices;
@@ -238,8 +262,9 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
     // conceptual super-source at index -1 whose "edge" to the first node selects
     // the starting connection fix. Banning that first-node choice forces the
     // search onto a different SID/STAR entry, which is how candidates that use a
-    // different source fix arise.
-    for (int i = -1; i + 1 < static_cast<int>(prev_path.size()); ++i) {
+    // different source fix arise. Lawler: start at the previous path's deviation
+    // index rather than always at -1.
+    for (int i = last_deviation; i + 1 < static_cast<int>(prev_path.size()); ++i) {
       if (i < 0) {
         // Source-level spur: re-run the multi-source search with every starting
         // fix used by an accepted path that shares the (empty) root banned, so a
@@ -261,7 +286,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
         }
         const ShortestPath spur =
             FindShortestPathMulti(graph, spur_sources, goals, base_options, heuristic);
-        add_candidate({}, spur);
+        add_candidate({}, spur, /*deviation=*/-1);
         continue;
       }
 
@@ -299,7 +324,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
       // stitched path's first vertex.
       const ShortestPath spur = FindShortestPathMulti(
           graph, {SeededEndpoint{spur_node, 0.0}}, goals, spur_opts, heuristic);
-      add_candidate(root, spur);
+      add_candidate(root, spur, /*deviation=*/i);
     }
 
     if (candidates.empty()) {
@@ -311,6 +336,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
     next.cost = best->cost;
     next.distance_nm = best->distance;
     next.found = true;
+    last_deviation = best->deviation;
     candidates.erase(best);
     result.push_back(std::move(next));
   }
