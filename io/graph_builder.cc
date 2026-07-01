@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace bf {
@@ -71,23 +73,31 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   // --- Airway-name table; "DCT" reserved at index 0 for synthetic edges. ---
   airway_names_.push_back("DCT");
   std::unordered_map<std::string, int> name_to_id;
-  auto airway_id_for = [&](const std::string& name) {
+  auto airway_id_for = [&](const std::string& name) -> uint16_t {
     auto it = name_to_id.find(name);
     if (it != name_to_id.end()) {
-      return it->second;
+      return static_cast<uint16_t>(it->second);
     }
     const int id = static_cast<int>(airway_names_.size());
+    // airway_id is a uint16 in GraphEdge; guard against overflow. Real AIRAC
+    // data has ~12k distinct airway names, far under the limit, so this is a
+    // fuse rather than an expected condition.
+    if (id > 0xFFFF) {
+      return 0;  // fall back to "DCT"; should never happen with real data
+    }
     airway_names_.push_back(name);
     name_to_id.emplace(name, id);
-    return id;
+    return static_cast<uint16_t>(id);
   };
 
   // --- Adjacency list (built first, then flattened to CSR). ---
   std::vector<std::vector<GraphEdge>> adj(total);
-  auto add_edge = [&](int from, int to, int airway_id, const AirwaySegment& s) {
+  auto add_edge = [&](int from, int to, uint16_t airway_id, const AirwaySegment& s) {
     const double dist = graph_.coords_[from].DistanceTo(graph_.coords_[to]);
-    adj[from].push_back(GraphEdge{to, dist, airway_id, static_cast<int16_t>(s.base_fl),
-                                  static_cast<int16_t>(s.top_fl), s.level == AirwayLevel::kHigh});
+    const uint8_t flags = s.level == AirwayLevel::kHigh ? kEdgeHigh : 0;
+    adj[from].push_back(GraphEdge{to, static_cast<float>(dist), airway_id,
+                                  static_cast<int16_t>(s.base_fl), static_cast<int16_t>(s.top_fl),
+                                  flags});
   };
 
   for (const AirwayConnection& conn : data.airways) {
@@ -98,7 +108,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     }
     const int from = from_it->second;
     const int to = to_it->second;
-    const int id = airway_id_for(conn.segment.name);
+    const uint16_t id = airway_id_for(conn.segment.name);
     // Honor directionality: kForward = from->to only, kBackward = to->from only,
     // kBoth = both directions.
     if (conn.segment.direction != AirwayDirection::kBackward) {
@@ -202,6 +212,54 @@ bool GraphBuilder::IsAirport(int vertex) const {
 
 const std::string& GraphBuilder::AirwayName(int airway_id) const {
   return airway_names_[airway_id];
+}
+
+void GraphBuilder::RebuildIndices() {
+  const int v_count = static_cast<int>(idents_.size());
+  ident_index_.clear();
+  ident_first_.clear();
+  airport_index_.clear();
+  ident_index_.reserve(v_count);
+  ident_first_.reserve(v_count);
+  // Waypoints occupy [0, first_airport_vertex_); airports the tail. Both are
+  // reachable by (ident, region); only waypoints seed the ident-only and
+  // airports the ICAO lookup, matching the constructor's original wiring.
+  for (int i = 0; i < first_airport_vertex_; ++i) {
+    ident_index_.emplace(idents_[i], i);
+    ident_first_.emplace(idents_[i].ident, i);
+  }
+  for (int v = first_airport_vertex_; v < v_count; ++v) {
+    airport_index_.emplace(idents_[v].ident, v);
+  }
+}
+
+GraphBuilder GraphBuilder::FromImage(BfdbImage&& image) {
+  GraphBuilder b;
+  b.graph_.coords_ = std::move(image.coords);
+  b.graph_.offsets_ = std::move(image.offsets);
+  b.graph_.edges_ = std::move(image.edges);
+  b.idents_ = std::move(image.idents);
+  b.on_network_ = std::move(image.on_network);
+  b.airway_names_ = std::move(image.airway_names);
+  b.first_airport_vertex_ = image.first_airport_vertex;
+  b.RebuildIndices();
+  return b;
+}
+
+BfdbImage GraphBuilder::ToImage(const std::string& data_dir, uint32_t cycle, uint32_t build) const {
+  BfdbImage image;
+  image.cycle = cycle;
+  image.build = build;
+  image.first_airport_vertex = first_airport_vertex_;
+  image.data_dir = data_dir;
+  image.coords = graph_.coords_;
+  image.offsets = graph_.offsets_;
+  image.edges = graph_.edges_;
+  image.on_network = on_network_;
+  image.idents = idents_;
+  image.airway_names = airway_names_;
+  // mora/msa are owned by NavDatabase, not the builder; the caller fills them.
+  return image;
 }
 
 }  // namespace bf

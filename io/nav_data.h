@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include "core/domain/airport.h"
@@ -29,6 +30,10 @@ struct NavData {
   std::vector<Airport> airports;
   MoraGrid mora;
   std::vector<MsaSector> msa;  // terminal-area minimum sector altitudes
+  // AIRAC provenance parsed from the data-file header line, e.g. cycle 2601 /
+  // build 20260112. Zero if not found. Carried into the .bfdb cache header.
+  uint32_t cycle = 0;
+  uint32_t build = 0;
 };
 
 }  // namespace bf

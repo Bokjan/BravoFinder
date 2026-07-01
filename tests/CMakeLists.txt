@@ -7,7 +7,8 @@ add_executable(bf_tests
                unit/constraint_test.cc
                unit/yen_test.cc
                unit/cifp_parser_test.cc
-               integration/route_integration_test.cc)
+               integration/route_integration_test.cc
+               integration/bfdb_cache_test.cc)
 
 target_link_libraries(bf_tests PRIVATE bf::io Catch2::Catch2WithMain)
 

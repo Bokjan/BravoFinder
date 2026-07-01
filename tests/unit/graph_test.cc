@@ -6,6 +6,12 @@
 
 using Catch::Matchers::WithinRel;
 
+TEST_CASE("GraphEdge stays compact (16 bytes)", "[graph]") {
+  // The edge array is the largest structure in the graph and A* walks it on the
+  // hot path; keeping the edge at 16 bytes doubles how many fit in a cache line.
+  STATIC_REQUIRE(sizeof(bf::GraphEdge) == 16);
+}
+
 namespace {
 
 // Build a tiny dataset by hand: four waypoints in a line A-B-C-D connected by a

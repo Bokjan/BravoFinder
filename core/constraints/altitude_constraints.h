@@ -42,7 +42,7 @@ class LevelPreferenceConstraint : public Constraint {
       return EdgeVerdict::Allow();
     }
     const bool wants_high = request.level == LevelPreference::kHigh;
-    if (ctx.edge.is_high == wants_high) {
+    if (EdgeIsHigh(ctx.edge) == wants_high) {
       return EdgeVerdict::Allow();
     }
     return EdgeVerdict::Penalize(ctx.edge.distance_nm * penalty_fraction_);

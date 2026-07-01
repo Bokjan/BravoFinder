@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -38,6 +39,18 @@ class NavDatabase {
   // ready database or an Error.
   static Result<NavDatabase> Open(const std::string& data_dir);
 
+  // Load a prebuilt graph from a `.bfdb` cache file, skipping all parsing and
+  // graph construction (seconds -> milliseconds). `data_dir` locates the CIFP
+  // files that ProceduresFor still reads on demand; if empty, the data_dir
+  // recorded at build time is used. Returns an Error if the cache is missing,
+  // corrupt, or of an incompatible format.
+  static Result<NavDatabase> OpenCached(const std::string& bfdb_path,
+                                        const std::string& data_dir = "");
+
+  // Serialize the built graph and metadata to a `.bfdb` cache file. Called by
+  // `bf build` after Open(). Returns an Error if the file cannot be written.
+  Result<void> WriteCache(const std::string& out_path) const;
+
   // Find up to request.k candidate routes, ordered best-first, honoring the
   // request's altitude/level constraints. Endpoints resolve as airport ICAO
   // first, then waypoint ident; case-insensitive. Returns an Error if an
@@ -64,6 +77,8 @@ class NavDatabase {
   MoraGrid mora_;
   std::vector<MsaSector> msa_;
   std::string data_dir_;
+  uint32_t cycle_ = 0;  // AIRAC provenance, carried into the .bfdb cache header
+  uint32_t build_ = 0;
   // Procedure cache, lazily filled by FindRoutes (logically const). Guarded by
   // cache_mutex_. The mutex is held in a unique_ptr so NavDatabase stays movable
   // (std::mutex is not movable; the defaulted move operations need a movable

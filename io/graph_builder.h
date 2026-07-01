@@ -1,10 +1,12 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "core/graph/nav_graph.h"
+#include "io/cache/bfdb_cache.h"
 #include "io/nav_data.h"
 
 namespace bf {
@@ -21,6 +23,16 @@ class GraphBuilder {
   // Build the graph from `data`. Airports are connected with up to
   // `airport_dct_count` direct edges to their nearest waypoints.
   explicit GraphBuilder(const NavData& data, int airport_dct_count = 5);
+
+  // Assemble a builder directly from a deserialized cache image (the `bf route
+  // --db` path): the graph arrays and vertex metadata are moved in, and the
+  // three lookup maps are rebuilt from the idents. Skips all parsing and graph
+  // construction.
+  static GraphBuilder FromImage(BfdbImage&& image);
+
+  // Export the built graph and metadata as a cache image for BfdbCache::Write
+  // (the `bf build` path). `data_dir`/`cycle`/`build` become the image header.
+  BfdbImage ToImage(const std::string& data_dir, uint32_t cycle, uint32_t build) const;
 
   const NavGraph& graph() const { return graph_; }
 
@@ -59,6 +71,13 @@ class GraphBuilder {
   const Ident& IdentOf(int vertex) const { return idents_[vertex]; }
 
  private:
+  // For FromImage: constructs an empty builder to be populated from an image.
+  GraphBuilder() = default;
+
+  // Rebuild the three lookup maps from idents_ / first_airport_vertex_. Used
+  // after the vertex metadata is in place (both build paths converge here).
+  void RebuildIndices();
+
   NavGraph graph_;
   std::vector<Ident> idents_;     // per-vertex ident, size = V
   std::vector<bool> on_network_;  // per-vertex: participates in an airway, size = V

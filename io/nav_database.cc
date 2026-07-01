@@ -11,6 +11,7 @@
 #include "core/constraints/altitude_constraints.h"
 #include "core/constraints/mora_constraint.h"
 #include "core/graph/yen_kshortest.h"
+#include "io/cache/bfdb_cache.h"
 #include "io/graph_builder.h"
 #include "io/loaders/xplane/cifp/cifp_parser.h"
 #include "io/loaders/xplane/cifp/procedure_connector.h"
@@ -150,10 +151,40 @@ Result<NavDatabase> NavDatabase::Open(const std::string& data_dir) {
   }
   NavDatabase db;
   db.data_dir_ = data_dir;
+  db.cycle_ = data.value().cycle;
+  db.build_ = data.value().build;
   db.mora_ = std::move(data.value().mora);
   db.msa_ = std::move(data.value().msa);
   db.builder_ = std::make_unique<GraphBuilder>(data.value());
   return Result<NavDatabase>::Ok(std::move(db));
+}
+
+Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path,
+                                            const std::string& data_dir) {
+  Result<BfdbImage> image = BfdbCache::Read(bfdb_path);
+  if (!image) {
+    return Result<NavDatabase>::Err(std::move(image).error());
+  }
+  BfdbImage& img = image.value();
+  NavDatabase db;
+  // The CIFP directory: an explicit override wins, else the build-time dir.
+  db.data_dir_ = data_dir.empty() ? img.data_dir : data_dir;
+  db.cycle_ = img.cycle;
+  db.build_ = img.build;
+  db.mora_ = std::move(img.mora);
+  db.msa_ = std::move(img.msa);
+  db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromImage(std::move(img)));
+  return Result<NavDatabase>::Ok(std::move(db));
+}
+
+Result<void> NavDatabase::WriteCache(const std::string& out_path) const {
+  if (!builder_) {
+    return Result<void>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
+  }
+  BfdbImage image = builder_->ToImage(data_dir_, cycle_, build_);
+  image.mora = mora_;
+  image.msa = msa_;
+  return BfdbCache::Write(out_path, image);
 }
 
 const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {

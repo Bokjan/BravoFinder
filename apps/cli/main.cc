@@ -150,10 +150,19 @@ int main(int argc, char** argv) {
   CLI::App app{"BravoFinder - a flight route finder"};
   app.require_subcommand(1);
 
+  // --- build: parse X-Plane data, build the graph, write a .bfdb cache. ---
+  CLI::App* build = app.add_subcommand("build", "Build a .bfdb cache from X-Plane data");
+  std::string build_data_dir;
+  std::string build_output;
+  build->add_option("data_dir", build_data_dir, "Directory of X-Plane navigation data")->required();
+  build->add_option("-o,--output", build_output,
+                    "Output .bfdb path (default: <data_dir>/nav.bfdb)");
+
   CLI::App* route = app.add_subcommand("route", "Find a route between two points");
   std::string departure;
   std::string arrival;
   std::string data_dir = "navdata";
+  std::string db_path;
   std::string format = "text";
   std::string level = "none";
   std::optional<int> cruise_fl;
@@ -164,6 +173,9 @@ int main(int argc, char** argv) {
   route->add_option("arrival", arrival, "Arrival ICAO or waypoint ident")->required();
   route->add_option("--data", data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();
+  route->add_option("--db", db_path,
+                    "Prebuilt .bfdb cache to load (skips parsing; --data still "
+                    "locates CIFP files for procedures)");
   route->add_option("--format", format, "Output format: text or json")
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
@@ -182,8 +194,29 @@ int main(int argc, char** argv) {
 
   CLI11_PARSE(app, argc, argv);
 
+  if (*build) {
+    const std::string out = build_output.empty() ? build_data_dir + "/nav.bfdb" : build_output;
+    bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(build_data_dir);
+    if (!db) {
+      std::cerr << "error: " << db.error().message << "\n";
+      return EXIT_FAILURE;
+    }
+    bf::Result<void> written = db.value().WriteCache(out);
+    if (!written) {
+      std::cerr << "error: " << written.error().message << "\n";
+      return EXIT_FAILURE;
+    }
+    std::cout << "wrote " << out << "\n";
+    return EXIT_SUCCESS;
+  }
+
   if (*route) {
-    bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(data_dir);
+    // With --db, load the prebuilt cache (milliseconds); otherwise parse and
+    // build from the data directory (M1 path). --data still locates CIFP files
+    // for on-demand procedure parsing in both cases.
+    bf::Result<bf::NavDatabase> db = db_path.empty()
+                                         ? bf::NavDatabase::Open(data_dir)
+                                         : bf::NavDatabase::OpenCached(db_path, data_dir);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
       return EXIT_FAILURE;

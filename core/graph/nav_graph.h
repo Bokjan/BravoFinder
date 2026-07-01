@@ -7,19 +7,35 @@
 
 namespace bf {
 
+// Bit flags packed into GraphEdge::flags.
+enum EdgeFlag : uint8_t {
+  kEdgeHigh = 1u << 0,  // Jet (high) airway; clear = Victor (low). Remaining
+                        // bits are reserved for future constraints (RAD/CDR).
+};
+
 // A directed edge in the navigation graph, stored in compressed-sparse-row
 // (CSR) form. `to` is the destination vertex index; `distance_nm` is the
 // great-circle length of the segment. `airway_id` indexes into the graph's
 // airway-name table (0 is the reserved "DCT" entry for synthetic edges).
 // Altitude band and level are kept for constraint filtering.
+//
+// Fields are sized to keep the struct compact (16 bytes): the edge array is the
+// largest structure in the graph and A* traverses it on the hot path, so a
+// smaller edge doubles the number that fit in a cache line. `distance_nm` is
+// stored as float (single-segment precision to ~2 m, ample); path costs are
+// accumulated in double by the search, so no precision is lost across a route.
 struct GraphEdge {
-  int to = -1;
-  double distance_nm = 0.0;
-  int airway_id = -1;
-  int16_t base_fl = 0;   // lowest usable flight level (0 = no limit, e.g. DCT)
-  int16_t top_fl = 0;    // highest usable flight level (0 = no limit)
-  bool is_high = false;  // true for Jet (high) airways, false for Victor (low)
+  int32_t to = -1;           // destination vertex index
+  float distance_nm = 0.0f;  // great-circle length; searches accumulate in double
+  uint16_t airway_id = 0;    // index into airway-name table (0 = "DCT")
+  int16_t base_fl = 0;       // lowest usable flight level (0 = no limit, e.g. DCT)
+  int16_t top_fl = 0;        // highest usable flight level (0 = no limit)
+  uint8_t flags = 0;         // EdgeFlag bits (bit 0 = high/low airway)
 };
+static_assert(sizeof(GraphEdge) == 16, "GraphEdge is expected to be 16 bytes");
+
+// Whether an edge belongs to a high (Jet) airway.
+inline bool EdgeIsHigh(const GraphEdge& e) { return (e.flags & kEdgeHigh) != 0; }
 
 // An immutable directed graph over navigation waypoints, stored as CSR for
 // cache-friendly traversal. Vertices are integer indices; each vertex carries

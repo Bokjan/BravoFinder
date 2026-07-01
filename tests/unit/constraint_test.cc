@@ -9,11 +9,11 @@ namespace {
 bf::GraphEdge MakeEdge(int base_fl, int top_fl, bool is_high) {
   bf::GraphEdge e;
   e.to = 1;
-  e.distance_nm = 100.0;
+  e.distance_nm = 100.0f;
   e.airway_id = 1;
   e.base_fl = static_cast<int16_t>(base_fl);
   e.top_fl = static_cast<int16_t>(top_fl);
-  e.is_high = is_high;
+  e.flags = is_high ? bf::kEdgeHigh : 0;
   return e;
 }
 

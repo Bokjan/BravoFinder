@@ -66,4 +66,27 @@ class Result {
   std::variant<T, E> data_;
 };
 
+// Result<void, E> for operations that either succeed with no value or fail with
+// an error (e.g. writing a file). Mirrors std::expected<void, E>: Ok() takes no
+// argument, has_value() reports success, error() yields the failure.
+template <class E>
+class Result<void, E> {
+ public:
+  static Result Ok() { return Result(std::monostate{}); }
+  static Result Err(E error) { return Result(std::move(error)); }
+
+  bool has_value() const noexcept { return data_.index() == 0; }
+  explicit operator bool() const noexcept { return has_value(); }
+
+  // Access the error. Precondition: has_value() is false.
+  const E& error() const& { return std::get<1>(data_); }
+  E& error() & { return std::get<1>(data_); }
+
+ private:
+  explicit Result(std::monostate tag) : data_(std::in_place_index<0>, tag) {}
+  explicit Result(E error) : data_(std::in_place_index<1>, std::move(error)) {}
+
+  std::variant<std::monostate, E> data_;
+};
+
 }  // namespace bf

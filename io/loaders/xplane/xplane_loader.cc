@@ -1,9 +1,11 @@
 #include "io/loaders/xplane/xplane_loader.h"
 
+#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 #include "core/domain/ident.h"
 
@@ -43,6 +45,41 @@ bool ForEachDataRow(const std::string& path, RowFn parse_row) {
   return true;
 }
 
+// Extract the AIRAC cycle and build from a data file's header. X-Plane header
+// lines read like:
+//   1200 Version - data cycle 2601, build 20260112, metadata FixXP1200. ...
+// Returns {cycle, build}, each 0 if not found. Only the first ~5 lines are
+// scanned (the header precedes the "Version" data marker).
+std::pair<uint32_t, uint32_t> ParseCycleBuild(const std::string& path) {
+  std::ifstream in(path);
+  if (!in.is_open()) {
+    return {0, 0};
+  }
+  auto number_after = [](const std::string& s, const std::string& token) -> uint32_t {
+    const size_t pos = s.find(token);
+    if (pos == std::string::npos) {
+      return 0;
+    }
+    size_t i = pos + token.size();
+    while (i < s.size() && !std::isdigit(static_cast<unsigned char>(s[i]))) {
+      ++i;
+    }
+    uint32_t value = 0;
+    while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
+      value = value * 10 + static_cast<uint32_t>(s[i] - '0');
+      ++i;
+    }
+    return value;
+  };
+  std::string line;
+  for (int n = 0; n < 5 && std::getline(in, line); ++n) {
+    if (line.find("cycle") != std::string::npos) {
+      return {number_after(line, "cycle"), number_after(line, "build")};
+    }
+  }
+  return {0, 0};
+}
+
 // Map an earth_nav.dat row code to a routable waypoint kind, or kOther for row
 // codes that are not enroute navaids (ILS components, markers, etc.).
 WaypointKind NavKindFromRowCode(int code) {
@@ -70,6 +107,8 @@ AirwayDirection ParseDirection(const std::string& token) {
 
 Result<NavData> XPlaneLoader::Load(const std::string& data_dir) {
   NavData data;
+  // AIRAC provenance from the fix file header (0 if absent; non-fatal).
+  std::tie(data.cycle, data.build) = ParseCycleBuild(data_dir + "/earth_fix.dat");
   // Track which (ident, region) points already exist so navaids do not add
   // duplicates (e.g. a co-located VOR and DME share an ident).
   std::unordered_set<Ident> seen;

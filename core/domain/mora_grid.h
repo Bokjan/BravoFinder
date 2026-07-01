@@ -40,6 +40,27 @@ class MoraGrid {
 
   bool Empty() const { return populated_ == 0; }
 
+  // The raw cell array (row-major, size kLatCount * kLonCount) for
+  // serialization. Values are flight levels; 0 means unknown.
+  const std::vector<int16_t>& cells() const { return cells_; }
+
+  // Rebuild a grid from a serialized cell array. `cells` must have exactly
+  // kLatCount * kLonCount entries; otherwise an empty grid is returned. The
+  // populated count is recomputed from the non-zero cells.
+  static MoraGrid FromCells(std::vector<int16_t> cells) {
+    MoraGrid g;
+    if (cells.size() != static_cast<size_t>(kLatCount) * kLonCount) {
+      return g;
+    }
+    g.cells_ = std::move(cells);
+    for (int16_t v : g.cells_) {
+      if (v != 0) {
+        ++g.populated_;
+      }
+    }
+    return g;
+  }
+
  private:
   static int FloorToInt(double v) {
     int i = static_cast<int>(v);

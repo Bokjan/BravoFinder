@@ -36,14 +36,16 @@ A single loaded database is safe to query concurrently from multiple threads.
 - **M3 (done)** — SID/STAR/approach procedures (ARINC 424 / CIFP, all 23 path
   terminators), terminal-area MSA, procedure-based airport connection, procedures
   surfaced in the route and CLI output.
-- **M4 (in progress)** — done: a procedure exposes every on-network fix it passes
-  as a candidate connection (with an along-track seed); the K-shortest search
-  spans different connection fixes / procedures rather than one fixed pair; and
+- **M4 (done)** — a procedure exposes every on-network fix it passes as a
+  candidate connection (with an along-track seed); the K-shortest search spans
+  different connection fixes / procedures rather than one fixed pair;
   radar-vectored departures are flagged distinctly instead of looking like
-  missing data. A full-corpus review showed the originally-planned "equivalent
-  modeling of heading/arc/altitude legs" is not needed for routing (procedures
-  already attach via definite fixes; the rest is distance-less and belongs to the
-  later geometry work). Remaining: a compact `.bfdb` cache for instant startup.
+  missing data; and `bf build` writes a compact, portable `.bfdb` cache that
+  `bf route --db` loads for instant startup (~1.5s -> ~50ms). A full-corpus
+  review showed the originally-planned "equivalent modeling of heading/arc/
+  altitude legs" is not needed for routing (procedures already attach via
+  definite fixes; the rest is distance-less and belongs to the later geometry
+  work).
 
 Not planned for the first phase: Web API, map visualization.
 
@@ -67,10 +69,18 @@ cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 ## Usage
 
 ```bash
+# Build a binary cache once per AIRAC cycle for fast startup (~1.5s -> ~50ms)
+bf build navdata                    # writes navdata/nav.bfdb
+bf build /path/to/xplane -o my.bfdb
+
 # Find a route (reads navigation data from ./navdata by default)
 bf route KJFK KLAX
 bf route EGLL LFPG --format json
 bf route KSEA KBOS --data /path/to/xplane/data
+
+# Load the prebuilt cache to skip parsing (--data still locates CIFP files
+# for on-demand procedure parsing)
+bf route KJFK KLAX --db navdata/nav.bfdb
 
 # Constrain by cruise altitude (enables altitude-band and MORA filtering)
 bf route KJFK KLAX --alt 350
@@ -85,6 +95,10 @@ bf route KJFK KLAX --rwy-dep RW31L
 Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an
 airport has procedure data, the route and its legs name the SID and STAR used (and
 the interchangeable procedures that share the same connection fix).
+
+The `.bfdb` cache is a portable, little-endian binary snapshot of the built
+graph. It is derived from Navigraph/Jeppesen data and, like the source data, must
+not be redistributed (it is git-ignored).
 
 ## Navigation Data
 
