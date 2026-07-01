@@ -180,6 +180,32 @@ TEST_CASE("cifp cache: a corrupt or missing cache is rejected cleanly", "[unit][
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
     std::remove(path.c_str());
   }
+  // Valid magic, version and header strings, but an absurd airport count. The
+  // directory row count must be bounded by the file size before allocating the
+  // rows vector, or a forged count would crash instead of a clean Result.
+  {
+    const std::string path = TempPath("boguscount_cifp.bfdb");
+    auto put_u32 = [](std::string& s, uint32_t v) {
+      for (int i = 0; i < 4; ++i) {
+        s.push_back(static_cast<char>((v >> (8 * i)) & 0xFF));
+      }
+    };
+    std::string buf;
+    buf.append("BFCP", 4);
+    put_u32(buf, bf::CifpCache::kFormatVersion);
+    put_u32(buf, 0);           // program_semver length (empty)
+    put_u32(buf, 0);           // source_loader length (empty)
+    put_u32(buf, 2601);        // cycle
+    put_u32(buf, 20260112);    // build
+    put_u32(buf, 0xFFFFFFFF);  // airport_count: absurd
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+    f.close();
+    bf::Result<bf::CifpArchive> r = bf::CifpCache::Open(path);
+    CHECK_FALSE(r);
+    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    std::remove(path.c_str());
+  }
 }
 
 TEST_CASE("cifp cache: eager loading yields the same route as on-demand", "[integration][cifp]") {

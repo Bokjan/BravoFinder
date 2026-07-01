@@ -173,6 +173,23 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
   const uint32_t airway_count = r.U32();
   const uint32_t msa_count = r.U32();
   img.first_airport_vertex = static_cast<int>(r.U32());
+
+  // Sanity-check the header counts against the bytes actually present BEFORE any
+  // resize, so a corrupt or forged header cannot trigger a huge allocation (and
+  // a bad_alloc/length_error that would bypass Result). Each count must fit in
+  // the remaining bytes at its minimum on-disk element size; this is a necessary
+  // condition, not an exact one -- a fuse, not a full validator. On-disk element
+  // sizes: coords 16 B (2xF64), offsets 4 B, GraphEdge 15 B (4+4+2+2+2+1, tighter
+  // than the 16 B in-memory struct), ident ref 16 B (4xU32), airway ref 8 B,
+  // MSA sector at least 28 B (6xU32 refs + a U32 arc count).
+  const size_t avail = r.remaining();
+  auto count_fits = [&](uint32_t count, size_t per_elem) {
+    return static_cast<size_t>(count) <= avail / per_elem;
+  };
+  if (!r.ok() || !count_fits(v, 16) || !count_fits(e, 15) || !count_fits(airway_count, 8) ||
+      !count_fits(msa_count, 28)) {
+    return bad("corrupt .bfdb: header counts exceed file size");
+  }
   // Inline header strings (length-prefixed), in write order.
   auto read_inline = [&](std::string& s) {
     const uint32_t len = r.U32();

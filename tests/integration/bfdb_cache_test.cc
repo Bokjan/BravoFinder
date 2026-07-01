@@ -169,4 +169,33 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
     std::remove(path.c_str());
   }
+  // Valid magic and version, but an absurd vertex count in the header. The
+  // counts must be range-checked against the file size BEFORE any resize, or a
+  // forged header would trigger a huge allocation and crash instead of a clean
+  // Result. (Regression guard for the header-count bounds check.)
+  {
+    const std::string path = TempBfdb("boguscount");
+    auto put_u32 = [](std::string& s, uint32_t v) {
+      for (int i = 0; i < 4; ++i) {
+        s.push_back(static_cast<char>((v >> (8 * i)) & 0xFF));
+      }
+    };
+    std::string buf;
+    buf.append("BFDB", 4);
+    put_u32(buf, bf::BfdbCache::kFormatVersion);
+    put_u32(buf, 2601);        // cycle
+    put_u32(buf, 20260112);    // build
+    put_u32(buf, 0xFFFFFFFF);  // v: absurd vertex count
+    put_u32(buf, 0);           // e
+    put_u32(buf, 0);           // airway_count
+    put_u32(buf, 0);           // msa_count
+    put_u32(buf, 0);           // first_airport_vertex
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+    f.close();
+    bf::Result<bf::BfdbImage> r = bf::BfdbCache::Read(path);
+    CHECK_FALSE(r);
+    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    std::remove(path.c_str());
+  }
 }

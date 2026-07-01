@@ -69,16 +69,15 @@ std::string SerializeSegment(const CifpData& data) {
   return out;
 }
 
-std::optional<CifpData> DeserializeSegment(const std::string& bytes) {
-  ByteReader r(bytes.data(), bytes.size());
+std::optional<CifpData> DeserializeSegment(const char* data, size_t size) {
+  ByteReader r(data, size);
   const uint32_t pool_len = r.U32();
   if (!r.ok() || pool_len > r.remaining()) {
     return std::nullopt;
   }
-  const std::string blob = bytes.substr(sizeof(uint32_t), pool_len);
+  const std::string blob(data + sizeof(uint32_t), pool_len);
   // Advance the reader past the pool to the body.
-  ByteReader br(bytes.data() + sizeof(uint32_t) + pool_len,
-                bytes.size() - sizeof(uint32_t) - pool_len);
+  ByteReader br(data + sizeof(uint32_t) + pool_len, size - sizeof(uint32_t) - pool_len);
 
   bool refs_ok = true;
   auto ref = [&](std::string& s) {
@@ -87,21 +86,31 @@ std::optional<CifpData> DeserializeSegment(const std::string& bytes) {
     s = ResolveRef(blob, off, len, refs_ok);
   };
 
-  CifpData data;
+  // Minimum on-disk bytes per record, used to reject an absurd count before
+  // resizing (ByteReader still guards the actual reads, but this stops a forged
+  // count from forcing a huge allocation): a procedure is >= 33 B (type 1 +
+  // route_type 4 + 3 string refs 24 + leg count 4), a leg >= 42 B (2 refs 16 +
+  // path_term 1 + course 8 + distance 8 + alt kind 1 + alt1 4 + alt2 4), a
+  // runway >= 28 B (ident ref 8 + lat 8 + lon 8 + elevation 4).
+  auto count_fits = [&](uint32_t count, size_t per_record) {
+    return static_cast<size_t>(count) <= br.remaining() / per_record;
+  };
+
+  CifpData data_out;
   const uint32_t proc_count = br.U32();
-  if (!br.ok() || proc_count > br.remaining()) {
+  if (!br.ok() || !count_fits(proc_count, 33)) {
     return std::nullopt;
   }
-  data.procedures.resize(proc_count);
+  data_out.procedures.resize(proc_count);
   for (uint32_t i = 0; i < proc_count; ++i) {
-    Procedure& p = data.procedures[i];
+    Procedure& p = data_out.procedures[i];
     p.type = static_cast<ProcedureType>(br.U8());
     p.route_type = br.I32();
     ref(p.name);
     ref(p.transition_ident);
     ref(p.runway);
     const uint32_t leg_count = br.U32();
-    if (!br.ok() || leg_count > br.remaining()) {
+    if (!br.ok() || !count_fits(leg_count, 42)) {
       return std::nullopt;
     }
     p.legs.resize(leg_count);
@@ -118,12 +127,12 @@ std::optional<CifpData> DeserializeSegment(const std::string& bytes) {
     }
   }
   const uint32_t rwy_count = br.U32();
-  if (!br.ok() || rwy_count > br.remaining()) {
+  if (!br.ok() || !count_fits(rwy_count, 28)) {
     return std::nullopt;
   }
-  data.runways.resize(rwy_count);
+  data_out.runways.resize(rwy_count);
   for (uint32_t i = 0; i < rwy_count; ++i) {
-    Runway& rwy = data.runways[i];
+    Runway& rwy = data_out.runways[i];
     ref(rwy.ident);
     rwy.threshold.latitude = br.F64();
     rwy.threshold.longitude = br.F64();
@@ -133,7 +142,7 @@ std::optional<CifpData> DeserializeSegment(const std::string& bytes) {
   if (!br.ok() || !refs_ok) {
     return std::nullopt;
   }
-  return data;
+  return data_out;
 }
 
 }  // namespace
@@ -237,25 +246,26 @@ Result<uint32_t> CifpCache::Build(const std::string& data_dir, const std::string
 }
 
 Result<CifpArchive> CifpCache::Open(const std::string& path) {
-  std::ifstream f(path, std::ios::binary);
+  std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open()) {
     return Result<CifpArchive>::Err(
         Error(ErrorCode::kDataMissing, "cannot open CIFP cache: " + path));
   }
-  // Read the whole header+directory region. We don't know its exact length up
-  // front, so read the entire file's leading portion up to the segment area is
-  // awkward; instead read the full file header lazily by reading enough bytes.
-  // The directory is small relative to segments, so read the entire file's
-  // prefix by first reading a generous chunk, then re-reading if needed. Simpler
-  // and robust: read the full file into memory only for the header+directory by
-  // reading incrementally. Here we read the whole file prefix by streaming.
+  // Total size, used as an allocation ceiling below: every length/count read
+  // from the (possibly corrupt) header or directory must fit within the file,
+  // so a forged field cannot trigger a huge resize and a bad_alloc that would
+  // bypass Result.
+  const std::streamoff file_size = f.tellg();
+  f.seekg(0);
+
   auto bad = [&](const char* why) {
     return Result<CifpArchive>::Err(
         Error(ErrorCode::kDataMissing, std::string(why) + "; run bf build to regenerate"));
   };
 
-  // Read a bounded prefix large enough for header + directory. We first read the
-  // fixed header fields to learn airport_count, then the directory precisely.
+  // Read the fixed header to learn the entry count, then read the directory rows
+  // and string pool exactly; the per-airport segments stay on disk and are read
+  // lazily by Fetch. The directory is small relative to the segments.
   char magic[4];
   f.read(magic, 4);
   if (!f || std::memcmp(magic, kMagic, 4) != 0) {
@@ -273,6 +283,11 @@ Result<CifpArchive> CifpCache::Open(const std::string& path) {
   auto readInline = [&](std::string& s) {
     uint32_t len = 0;
     if (!readU32(len)) {
+      return false;
+    }
+    // Bound the length by the file size before resizing (contrast with the
+    // earlier code, which resized on an untrusted length).
+    if (static_cast<std::streamoff>(len) > file_size) {
       return false;
     }
     s.resize(len);
@@ -297,6 +312,12 @@ Result<CifpArchive> CifpCache::Open(const std::string& path) {
   uint32_t airport_count = 0;
   if (!readU32(archive.cycle_) || !readU32(archive.build_) || !readU32(airport_count)) {
     return bad("corrupt CIFP cache header");
+  }
+  // A directory row is 24 bytes on disk (icao off+len 8, seg offset 8, seg len
+  // 4, ... = 4+4+8+4); reject a count that could not fit before allocating.
+  constexpr std::streamoff kRowBytes = 4 + 4 + 8 + 4;
+  if (static_cast<std::streamoff>(airport_count) > file_size / kRowBytes) {
+    return bad("corrupt CIFP cache: directory count exceeds file size");
   }
 
   // Read the directory rows, then the directory string pool.
@@ -325,6 +346,9 @@ Result<CifpArchive> CifpCache::Open(const std::string& path) {
   if (!readU32(dir_pool_len)) {
     return bad("corrupt CIFP cache directory");
   }
+  if (static_cast<std::streamoff>(dir_pool_len) > file_size) {
+    return bad("corrupt CIFP cache: directory pool exceeds file size");
+  }
   std::string dir_pool(dir_pool_len, '\0');
   if (dir_pool_len > 0) {
     f.read(dir_pool.data(), dir_pool_len);
@@ -337,6 +361,14 @@ Result<CifpArchive> CifpCache::Open(const std::string& path) {
   for (const Row& row : rows) {
     if (static_cast<size_t>(row.icao_off) + row.icao_len > dir_pool.size()) {
       return bad("corrupt CIFP cache: ICAO reference out of range");
+    }
+    // Cross-check each segment against the file bounds now, so Fetch/FetchAll can
+    // allocate seg_len without re-validating (offset is u64, len is u32; the sum
+    // cannot overflow size_t on a 64-bit target). A corrupt directory makes the
+    // whole cache untrustworthy, so reject rather than skip the row.
+    if (row.seg_off > static_cast<uint64_t>(file_size) ||
+        row.seg_len > static_cast<uint64_t>(file_size) - row.seg_off) {
+      return bad("corrupt CIFP cache: segment reference out of range");
     }
     std::string icao = dir_pool.substr(row.icao_off, row.icao_len);
     archive.index_.emplace(std::move(icao), std::make_pair(row.seg_off, row.seg_len));
@@ -368,7 +400,8 @@ std::unordered_map<std::string, CifpData> CifpArchive::FetchAll() const {
     if (offset + length > buf.size()) {
       continue;
     }
-    std::optional<CifpData> data = DeserializeSegment(buf.substr(offset, length));
+    // Deserialize directly from the in-memory file buffer, no per-segment copy.
+    std::optional<CifpData> data = DeserializeSegment(buf.data() + offset, length);
     if (data.has_value()) {
       out.emplace(entry.first, std::move(*data));
     }
@@ -395,7 +428,7 @@ std::optional<CifpData> CifpArchive::Fetch(const std::string& icao) const {
   if (!f) {
     return std::nullopt;
   }
-  return DeserializeSegment(bytes);
+  return DeserializeSegment(bytes.data(), bytes.size());
 }
 
 }  // namespace bf
