@@ -16,6 +16,20 @@ enum class ConnectionKind {
                   // link, but this is a real procedure situation, not missing data
 };
 
+// The stable token form of a connection kind, as used in JSON output and any
+// other machine-readable representation.
+inline const char* ToString(ConnectionKind k) {
+  switch (k) {
+    case ConnectionKind::kProcedure:
+      return "procedure";
+    case ConnectionKind::kDirect:
+      return "direct";
+    case ConnectionKind::kRadarVectors:
+      return "radar_vectors";
+  }
+  return "direct";
+}
+
 // A single leg of a computed route: a segment from one point to the next via a
 // named airway (or "DCT" for a direct leg).
 struct RouteLeg {

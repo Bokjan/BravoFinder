@@ -1,0 +1,72 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "core/routing/route.h"
+
+namespace bf {
+
+// Serialize a Route as a JSON object into any RapidJSON-style Writer (the
+// Writer streams directly to its buffer -- no intermediate DOM -- and escapes
+// strings correctly). This is a header-only template so it adds no dependency
+// to bf::core; callers link RapidJSON themselves and pass a Writer.
+//
+// The template only names Writer's duck-typed methods (StartObject, Key,
+// String, Double, StartArray, ...), so it works with rapidjson::Writer,
+// PrettyWriter, or any compatible sink. Sizes are passed as unsigned, matching
+// rapidjson::SizeType, so no RapidJSON header is needed here.
+template <class Writer>
+void WriteRouteJson(Writer& writer, const Route& route) {
+  auto str = [&](const std::string& s) {
+    writer.String(s.c_str(), static_cast<unsigned>(s.size()));
+  };
+  auto key_str = [&](const char* k, const std::string& s) {
+    writer.Key(k);
+    str(s);
+  };
+  auto key_str_array = [&](const char* k, const std::vector<std::string>& items) {
+    writer.Key(k);
+    writer.StartArray();
+    for (const std::string& s : items) {
+      str(s);
+    }
+    writer.EndArray();
+  };
+
+  writer.StartObject();
+  key_str("route", route.route_string);
+  writer.Key("total_distance_nm");
+  writer.Double(route.total_distance_nm);
+  key_str("sid", route.sid);
+  key_str("dep_runway", route.dep_runway);
+  key_str_array("sid_options", route.sid_options);
+  key_str("star", route.star);
+  key_str("arr_runway", route.arr_runway);
+  key_str_array("star_options", route.star_options);
+  writer.Key("dep_connection");
+  writer.String(ToString(route.dep_connection));
+  writer.Key("arr_connection");
+  writer.String(ToString(route.arr_connection));
+
+  writer.Key("legs");
+  writer.StartArray();
+  for (const RouteLeg& leg : route.legs) {
+    writer.StartObject();
+    key_str("from", leg.from);
+    key_str("to", leg.to);
+    key_str("via", leg.via);
+    // Only concurrency legs carry the full designator list; omit the key for
+    // ordinary single-airway or DCT legs to keep the output lean.
+    if (!leg.concurrent_airways.empty()) {
+      key_str_array("concurrent_airways", leg.concurrent_airways);
+    }
+    writer.Key("distance_nm");
+    writer.Double(leg.distance_nm);
+    writer.EndObject();
+  }
+  writer.EndArray();
+  writer.EndObject();
+}
+
+}  // namespace bf

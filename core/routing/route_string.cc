@@ -1,6 +1,6 @@
 #include "core/routing/route_string.h"
 
-#include <set>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -8,30 +8,33 @@ namespace bf {
 
 namespace {
 
-// Split an airway designator field into its set of route names. A concurrency
+// Split an airway designator field into its list of route names. A concurrency
 // is encoded "A593-Y592"; a single airway is just "Y592"; "DCT" yields {"DCT"}.
 // Real ATS route designators are letter+number with no internal hyphen, so '-'
-// is an unambiguous separator.
-std::set<std::string> SplitDesignators(const std::string& via) {
-  std::set<std::string> out;
+// is an unambiguous separator. Source order is preserved (the sets are tiny --
+// at most ~10 designators -- so a vector beats a tree here).
+std::vector<std::string> SplitDesignators(const std::string& via) {
+  std::vector<std::string> out;
   size_t start = 0;
   while (start <= via.size()) {
     const size_t dash = via.find('-', start);
     if (dash == std::string::npos) {
-      out.insert(via.substr(start));
+      out.push_back(via.substr(start));
       break;
     }
-    out.insert(via.substr(start, dash - start));
+    out.push_back(via.substr(start, dash - start));
     start = dash + 1;
   }
   return out;
 }
 
-std::set<std::string> Intersect(const std::set<std::string>& a, const std::set<std::string>& b) {
-  std::set<std::string> out;
+// Keep the names in `a` that also appear in `b`, preserving a's order.
+std::vector<std::string> Intersect(const std::vector<std::string>& a,
+                                   const std::vector<std::string>& b) {
+  std::vector<std::string> out;
   for (const std::string& s : a) {
-    if (b.count(s) != 0) {
-      out.insert(s);
+    if (std::find(b.begin(), b.end(), s) != b.end()) {
+      out.push_back(s);
     }
   }
   return out;
@@ -52,29 +55,28 @@ std::string BuildRouteString(const std::string& first_point, std::vector<RouteLe
       continue;
     }
 
-    // Grow a group of consecutive legs whose designator sets keep a non-empty
+    // Grow a group of consecutive legs whose designator lists keep a non-empty
     // running intersection (i.e. they stay on a shared physical airway).
-    std::set<std::string> running = SplitDesignators(legs[i].via);
+    std::vector<std::string> running = SplitDesignators(legs[i].via);
     size_t j = i;
     while (j + 1 < legs.size() && legs[j + 1].via != "DCT") {
-      const std::set<std::string> next = SplitDesignators(legs[j + 1].via);
-      const std::set<std::string> inter = Intersect(running, next);
+      std::vector<std::string> inter = Intersect(running, SplitDesignators(legs[j + 1].via));
       if (inter.empty()) {
         break;
       }
-      running = inter;
+      running = std::move(inter);
       ++j;
     }
 
     // The chosen designator is valid on every leg in the group (it lies in the
-    // running intersection, which is contained in each leg's set); the smallest
-    // survivor gives a deterministic pick when the group never narrows to one.
-    const std::string& chosen = *running.begin();
+    // running intersection, which is contained in each leg's list). Order is
+    // irrelevant, so the first survivor is a fine deterministic pick.
+    const std::string& chosen = running.front();
     for (size_t k = i; k <= j; ++k) {
-      const std::set<std::string> set = SplitDesignators(legs[k].via);
+      std::vector<std::string> names = SplitDesignators(legs[k].via);
       legs[k].via = chosen;
-      if (set.size() > 1) {
-        legs[k].concurrent_airways.assign(set.begin(), set.end());
+      if (names.size() > 1) {
+        legs[k].concurrent_airways = std::move(names);
       } else {
         legs[k].concurrent_airways.clear();
       }

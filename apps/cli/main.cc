@@ -12,24 +12,12 @@
 
 #include "core/result.h"
 #include "core/routing/route.h"
+#include "core/routing/route_json.h"
 #include "core/routing/route_request.h"
 #include "core/version.h"
 #include "io/nav_database.h"
 
 namespace {
-
-// The JSON/token form of a connection kind.
-const char* ConnectionKindStr(bf::ConnectionKind k) {
-  switch (k) {
-    case bf::ConnectionKind::kProcedure:
-      return "procedure";
-    case bf::ConnectionKind::kDirect:
-      return "direct";
-    case bf::ConnectionKind::kRadarVectors:
-      return "radar_vectors";
-  }
-  return "direct";
-}
 
 // Print a route in human-readable text form.
 void PrintText(const bf::Route& route) {
@@ -87,66 +75,6 @@ void PrintText(const bf::Route& route) {
     }
     std::cout << leg.from << '\t' << leg.to << '\t' << via << '\t' << leg.distance_nm << '\n';
   }
-}
-
-// Serialize one route into a rapidjson Writer. The Writer streams directly to
-// the buffer (no intermediate DOM) and escapes strings correctly.
-template <class Writer>
-void WriteRouteJson(Writer& writer, const bf::Route& route) {
-  auto string_array = [&](const std::vector<std::string>& items) {
-    writer.StartArray();
-    for (const std::string& s : items) {
-      writer.String(s.c_str(), static_cast<rapidjson::SizeType>(s.size()));
-    }
-    writer.EndArray();
-  };
-
-  writer.StartObject();
-  writer.Key("route");
-  writer.String(route.route_string.c_str(),
-                static_cast<rapidjson::SizeType>(route.route_string.size()));
-  writer.Key("total_distance_nm");
-  writer.Double(route.total_distance_nm);
-  writer.Key("sid");
-  writer.String(route.sid.c_str(), static_cast<rapidjson::SizeType>(route.sid.size()));
-  writer.Key("dep_runway");
-  writer.String(route.dep_runway.c_str(),
-                static_cast<rapidjson::SizeType>(route.dep_runway.size()));
-  writer.Key("sid_options");
-  string_array(route.sid_options);
-  writer.Key("star");
-  writer.String(route.star.c_str(), static_cast<rapidjson::SizeType>(route.star.size()));
-  writer.Key("arr_runway");
-  writer.String(route.arr_runway.c_str(),
-                static_cast<rapidjson::SizeType>(route.arr_runway.size()));
-  writer.Key("star_options");
-  string_array(route.star_options);
-  writer.Key("dep_connection");
-  writer.String(ConnectionKindStr(route.dep_connection));
-  writer.Key("arr_connection");
-  writer.String(ConnectionKindStr(route.arr_connection));
-  writer.Key("legs");
-  writer.StartArray();
-  for (const bf::RouteLeg& leg : route.legs) {
-    writer.StartObject();
-    writer.Key("from");
-    writer.String(leg.from.c_str(), static_cast<rapidjson::SizeType>(leg.from.size()));
-    writer.Key("to");
-    writer.String(leg.to.c_str(), static_cast<rapidjson::SizeType>(leg.to.size()));
-    writer.Key("via");
-    writer.String(leg.via.c_str(), static_cast<rapidjson::SizeType>(leg.via.size()));
-    // Only concurrency legs carry the full designator list; omit the key for
-    // ordinary single-airway or DCT legs to keep the output lean.
-    if (!leg.concurrent_airways.empty()) {
-      writer.Key("concurrent_airways");
-      string_array(leg.concurrent_airways);
-    }
-    writer.Key("distance_nm");
-    writer.Double(leg.distance_nm);
-    writer.EndObject();
-  }
-  writer.EndArray();
-  writer.EndObject();
 }
 
 // Print the candidate routes as a JSON array.

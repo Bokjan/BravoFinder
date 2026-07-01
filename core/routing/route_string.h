@@ -15,10 +15,10 @@ namespace bf {
 // "A593-Y592" in the source) are handled by intersecting the designator sets of
 // consecutive legs: a non-empty running intersection means the legs stay on a
 // shared route and fold together; an empty one is a genuine airway change and
-// breaks the group at that fix. The chosen designator is the lexicographically
-// smallest survivor of the intersection (deterministic, and valid on every leg
-// in the group since the intersection is contained in each). "DCT" legs never
-// fold, so every direct-leg fix is listed.
+// breaks the group at that fix. The chosen designator is the first survivor of
+// the intersection (deterministic, and valid on every leg in the group since
+// the intersection is contained in each). "DCT" legs never fold, so every
+// direct-leg fix is listed.
 //
 // Side effect on `legs`: each leg's `via` is rewritten to the single chosen
 // designator, and `concurrent_airways` is set to all designators on that leg
