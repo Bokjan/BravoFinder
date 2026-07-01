@@ -37,10 +37,13 @@ A single loaded database is safe to query concurrently from multiple threads.
   terminators), terminal-area MSA, procedure-based airport connection, procedures
   surfaced in the route and CLI output.
 - **M4 (in progress)** — done: a procedure exposes every on-network fix it passes
-  as a candidate connection (with an along-track seed), and the K-shortest search
-  spans different connection fixes / procedures rather than one fixed pair.
-  Remaining: equivalent modeling of heading/arc/altitude legs, and a compact
-  `.bfdb` cache for instant startup.
+  as a candidate connection (with an along-track seed); the K-shortest search
+  spans different connection fixes / procedures rather than one fixed pair; and
+  radar-vectored departures are flagged distinctly instead of looking like
+  missing data. A full-corpus review showed the originally-planned "equivalent
+  modeling of heading/arc/altitude legs" is not needed for routing (procedures
+  already attach via definite fixes; the rest is distance-less and belongs to the
+  later geometry work). Remaining: a compact `.bfdb` cache for instant startup.
 
 Not planned for the first phase: Web API, map visualization.
 
