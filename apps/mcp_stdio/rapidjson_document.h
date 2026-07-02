@@ -9,7 +9,11 @@
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#if defined(__has_warning)
+#if __has_warning("-Wnontrivial-memcall")
 #pragma clang diagnostic ignored "-Wnontrivial-memcall"
+#endif
+#endif
 #endif
 
 #ifdef __GNUC__

@@ -45,11 +45,11 @@
     },
     {
       "name": "windows-debug",
-      "displayName": "Windows Debug (MSVC /W4 /WX /EHsc, no sanitizers)",
+      "displayName": "Windows Debug (MSVC /W3 /WX /EHsc, no sanitizers)",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS": "/W4 /WX /EHsc"
+        "CMAKE_CXX_FLAGS": "/W3 /WX /EHsc"
       }
     },
     {
