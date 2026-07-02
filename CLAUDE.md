@@ -61,6 +61,18 @@ ctest --preset <debug|release|tsan>
 ```
 依赖纯 CMake + FetchContent（Catch2 v3 / CLI11 / RapidJSON），不 vendor、不 vcpkg。
 
+### 按改动范围选测试范围（省时间，见「测试」节的 scope 原则）
+ctest 每个 case 独立进程；缓存 round-trip 测试（`bfdb:` / `cifp cache:` 共 12 个）各 20–40s，
+是墙钟大头，仅在**动缓存磁盘布局 / 序列化**时才需跑。日常按改动挑 preset：
+```
+ctest --preset unit    # 纯逻辑单测（~1.4s）：只改算法/约束/纯函数
+ctest --preset quick   # 排除 cache 测试（~12s）：改路由/查询/约束但没碰缓存布局
+ctest --preset debug   # 全量（~56s）：改了缓存布局/序列化，或发布前
+ctest --preset tsan    # 改并发相关代码后必跑（契约 B）
+```
+（unit/quick 均基于 debug 配置，带 ASan/UBSan；只是用 `filter` 排掉慢的 cache 测试。）
+
+
 ## Git
 - commit 用英文 **Conventional Commits**；body 段落内不换行；保留 Claude 署名。
 - 复杂里程碑**先对齐再动手**；每轮大任务收尾做文档 / memory 沉淀。

@@ -101,6 +101,38 @@
       }
     },
     {
+      "name": "quick",
+      "displayName": "Quick (debug, excludes slow cache round-trip tests)",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 0
+      },
+      "filter": {
+        "exclude": {
+          "name": "^bfdb:|^cifp cache:"
+        }
+      }
+    },
+    {
+      "name": "unit",
+      "displayName": "Unit only (debug, no [integration] cases, pure logic)",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 0
+      },
+      "filter": {
+        "exclude": {
+          "name": "^bfdb:|^cifp cache:|^query:|^real data:"
+        }
+      }
+    },
+    {
       "name": "release",
       "configurePreset": "release",
       "output": {
