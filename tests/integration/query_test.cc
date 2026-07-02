@@ -6,23 +6,19 @@
 #include <thread>
 #include <vector>
 
-#include "core/env.h"
 #include "io/nav_database.h"
+#include "test_db.h"
 
 namespace {
 
-std::string NavDataDir() {
-  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
-    return env;
-  }
-  return "navdata";
-}
+using bf::test::NavDataDir;
 
 // Share one opened database across cases (read-only after Open; lookups are
-// const). Returns nullptr when data is absent so callers SKIP.
+// const). Prefers a prebuilt cache for fast startup. Returns nullptr when data
+// is absent so callers SKIP.
 const bf::NavDatabase* SharedDb() {
   static const std::string dir = NavDataDir();
-  static bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb(dir);
   return db ? &db.value() : nullptr;
 }
 

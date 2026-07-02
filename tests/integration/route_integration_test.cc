@@ -8,22 +8,14 @@
 #include <thread>
 #include <vector>
 
-#include "core/env.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/nav_database.h"
+#include "test_db.h"
 
 namespace {
 
-// Resolve the navigation data directory: BRAVOFINDER_NAVDATA if set, else the
-// repository's navdata/ folder. Real Navigraph/Jeppesen data is not committed,
-// so these tests SKIP (rather than fail) when the data is absent.
-std::string NavDataDir() {
-  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
-    return env;
-  }
-  return "navdata";
-}
+using bf::test::NavDataDir;
 
 bool HasCifp(const std::string& dir, const std::string& icao) {
   std::ifstream f(dir + "/CIFP/" + icao + ".dat");
@@ -32,12 +24,13 @@ bool HasCifp(const std::string& dir, const std::string& icao) {
 
 // Open the navigation database once and share it across all integration cases.
 // NavDatabase is read-only after Open and FindRoutes is const, so a single
-// instance is safe to reuse; this avoids re-parsing ~20 MB of data (and
-// rebuilding the graph) per case, which dominated the suite's run time.
-// Returns nullptr when the data directory has no usable data, so callers SKIP.
+// instance is safe to reuse; this avoids re-loading ~20 MB of data per case,
+// which dominated the suite's run time. Prefers a prebuilt cache for fast
+// startup. Returns nullptr when the data directory has no usable data, so
+// callers SKIP.
 const bf::NavDatabase* SharedDb() {
   static const std::string dir = NavDataDir();
-  static bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
+  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb(dir);
   return db ? &db.value() : nullptr;
 }
 
