@@ -115,7 +115,8 @@ Tools exposed (each maps 1:1 to a CLI subcommand):
 
 | Tool | Description |
 |------|-------------|
-| `find_routes` | Route between two endpoints; same options as `bf route` (`level`, `k`, `cruise_fl`, runways, SID/STAR). |
+| `find_routes` | Route between two endpoints; same options as `bf route` (`level`, `k`, `min_fl`/`max_fl`, runways, SID/STAR, avoid, forced points, seed). |
+| `parse_route` | Validate and expand a filed route string (reverse of `find_routes`). |
 | `lookup_waypoints` | Batch-look-up waypoints by ident. |
 | `lookup_airports` | Batch-look-up airports by ICAO. |
 | `lookup_procedures` | Batch-look-up SID/STAR/approach by airport ICAO. |
@@ -163,8 +164,10 @@ bf route KJFK KLAX --db navdata/nav.bfdb --cifp-db other_cifp.bfdb
 # best for servers / batch routing)
 bf route KJFK KLAX --db navdata/nav.bfdb --cifp-load eager
 
-# Constrain by cruise altitude (enables altitude-band and MORA filtering)
+# Constrain by cruise altitude (enables altitude-band and MORA filtering).
+# A single level or an inclusive range (any level in the band is acceptable).
 bf route KJFK KLAX --alt 350
+bf route KJFK KLAX --alt 300-400
 
 # Prefer high (Jet) or low (Victor) airways; ask for several candidates
 bf route KJFK KLAX --level high -k 3
@@ -176,6 +179,24 @@ bf route KJFK KLAX --rwy-dep RW31L
 # NAME.TRANSITION pins the transition). An unknown name is a clean error.
 bf route KJFK KLAX --sid DEEZZ5
 bf route KJFK KLAX --star LENDY6.HAAYS
+
+# Force the route through waypoints, in order (via points); ident or IDENT/REGION.
+bf route KJFK KLAX --via DBL
+bf route KJFK KLAX --via PSB --via DBL
+
+# Route around waypoints or airways. A bare ident avoids all its regional
+# matches; an airway designator also blocks its concurrency segments.
+bf route KJFK KLAX --avoid-wpt CANDR
+bf route KJFK KLAX --avoid-awy J60
+
+# Diversify the route reproducibly: the same seed always yields the same route,
+# different seeds explore alternative (still valid) routes.
+bf route KJFK KLAX --seed 42
+
+# Validate and expand a filed route string (the reverse of route): checks that
+# each airway connects its bracketing fixes, expands airways to their
+# intermediate points, and totals the distance. Errors name the bad token.
+bf parse-route "KJFK DEEZZ5 CANDR Q480 HOTEE J80 MCI ... KLAX" --db navdata/nav.bfdb
 
 # Look up navigation data: waypoints, airports, procedures, or airways. Each
 # accepts one or more ids (a batch), and --format json emits an array parallel
