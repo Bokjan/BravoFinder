@@ -50,6 +50,13 @@ A single loaded database is safe to query concurrently from multiple threads.
   altitude legs" is not needed for routing (procedures already attach via
   definite fixes; the rest is distance-less and belongs to the later geometry
   work).
+- **M5 (done)** — route planning closure toward RFinder parity, all on existing
+  data: a cruise altitude *range* (`--alt 300-400`), avoid waypoints/airways
+  (`--avoid-wpt` / `--avoid-awy`, matched by designator so concurrencies are
+  covered), reproducible route diversity from a seed (`--seed`), forced "via"
+  points (`--via`, with K-shortest support), and `bf parse-route` to validate
+  and expand a filed route string (the reverse of `route`). Also fixed airway
+  lookup to resolve each designator of a concurrency.
 
 Not planned for the first phase: Web API, map visualization.
 
