@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "io/nav_database.h"
-#include "rapidjson/document.h"
+#include "rapidjson_document.h"
 
 namespace bf::mcp {
 

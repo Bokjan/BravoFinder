@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml)
 
-A flight route finder written in modern C++, **version 3.0.0 — a complete rewrite**.
+A flight route finder written in modern C++, **v3 — a complete rewrite**.
 
 ## About
 
@@ -15,7 +15,7 @@ procedures.
 
 ## Status
 
-v3.0.0 is the first release. Everything below is implemented and tested; the CLI
+v3 is the first release of the rewrite. Everything below is implemented and tested; the CLI
 (`bf build` / `bf route`) is usable end to end against real X-Plane 12 data.
 
 The tool loads X-Plane 12 navigation data, builds a directed graph honoring airway

@@ -17,7 +17,7 @@
 #include "core/routing/route.h"
 #include "core/routing/route_json.h"
 #include "core/routing/route_request.h"
-#include "rapidjson/document.h"
+#include "rapidjson_document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 

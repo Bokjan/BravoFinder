@@ -1,3 +1,4 @@
+#include "core/version.h"
 #include "io/cache/cifp_cache.h"
 
 #include <atomic>
@@ -65,13 +66,14 @@ TEST_CASE("cifp cache: a fetched segment matches direct file parsing", "[integra
   }
   const std::string cifp_path = TempPath("seg_nav_cifp.bfdb");
   bf::Result<uint32_t> n =
-      bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112, "3.0.0");
+      bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112,
+                       bf::kBravoFinderVersion);
   REQUIRE(n);
 
   bf::Result<bf::CifpArchive> archive = bf::CifpCache::Open(cifp_path);
   REQUIRE(archive);
   CHECK(archive.value().source_loader() == "xplane");
-  CHECK(archive.value().program_semver() == "3.0.0");
+  CHECK(archive.value().program_semver() == bf::kBravoFinderVersion);
   CHECK(archive.value().cycle() == 2601);
 
   // KJFK direct parse vs archive fetch: procedures and legs must match.
@@ -280,7 +282,8 @@ TEST_CASE("cifp cache: concurrent fetches on one archive are race-free", "[integ
   }
   const std::string cifp_path = TempPath("concurrent_nav_cifp.bfdb");
   bf::Result<uint32_t> n =
-      bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112, "3.0.0");
+      bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112,
+                       bf::kBravoFinderVersion);
   REQUIRE(n);
   bf::Result<bf::CifpArchive> archive = bf::CifpCache::Open(cifp_path);
   REQUIRE(archive);
