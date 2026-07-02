@@ -242,6 +242,23 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
   return {buffer.GetString(), false};
 }
 
+// The parse_route handler: validate & expand a filed route string.
+std::pair<std::string, bool> ParseRouteHandler(const rapidjson::Value& args,
+                                               const NavDatabase& db) {
+  if (!args.HasMember("route") || !args["route"].IsString()) {
+    return {R"({"error":"route (string) is required"})", true};
+  }
+  bf::Result<bf::Route> result = db.ParseRoute(args["route"].GetString());
+  if (!result) {
+    return {R"({"error":")" + result.error().message + R"("})", true};
+  }
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.SetMaxDecimalPlaces(2);
+  bf::WriteRouteJson(writer, result.value());
+  return {buffer.GetString(), false};
+}
+
 const std::vector<Tool>& AllTools() {
   // Lazily build the tool list once. We emplace (move) rather than use an
   // initializer list, because Tool holds a rapidjson::Document, which is
@@ -250,7 +267,7 @@ const std::vector<Tool>& AllTools() {
   if (!tools.empty()) {
     return tools;
   }
-  tools.reserve(5);
+  tools.reserve(6);
 
   tools.emplace_back(
       "find_routes",
@@ -275,6 +292,18 @@ const std::vector<Tool>& AllTools() {
           R"("forced_points":{"type":"array","items":{"type":"string"},"description":"Ordered waypoints the route must pass through (via points), each an ident (PSB) or IDENT/REGION (PSB/K6). The response echoes them resolved as IDENT/REGION."}},)"
           R"("required":["departure","arrival"]})"),
       FindRoutesHandler);
+
+  tools.emplace_back(
+      "parse_route",
+      "Validate and expand a filed-flight-plan route string (the reverse of "
+      "find_routes). Given \"[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]\", "
+      "checks that each airway connects its bracketing fixes, expands airways to "
+      "their intermediate points, totals the distance, and returns the resolved "
+      "route. Errors name the offending token when the route is invalid.",
+      ParseSchema(R"({"type":"object","properties":{)"
+                  R"("route":{"type":"string","description":"Filed route string, e.g. 'KJFK DEEZZ5 CANDR J60 PSB ... KLAX'."}},)"
+                  R"("required":["route"]})"),
+      ParseRouteHandler);
 
   tools.push_back(MakeWaypointLookupTool(
       "lookup_waypoints",

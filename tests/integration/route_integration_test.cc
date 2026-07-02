@@ -670,4 +670,60 @@ TEST_CASE("real data: concurrent FindRoutes on one shared database is race-free"
   CHECK(after);
 }
 
+TEST_CASE("real data: ParseRoute round-trips a computed route", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  bf::Result<std::vector<bf::Route>> routed = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(routed);
+  REQUIRE_FALSE(routed.value().empty());
+  const std::string route_str = routed.value().front().route_string;
+
+  // Feeding a computed route string back into ParseRoute must validate and
+  // reproduce the same canonical route string.
+  bf::Result<bf::Route> parsed = db->ParseRoute(route_str);
+  REQUIRE(parsed);
+  CHECK(parsed.value().route_string == route_str);
+  CHECK(parsed.value().total_distance_nm > 2000.0);
+}
+
+TEST_CASE("real data: ParseRoute expands an airway's intermediate fixes", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // MCI J24 SLN is a short enroute hop; J24 threads at least one intermediate
+  // fix between them, which must appear as expanded points.
+  bf::Result<bf::Route> r = db->ParseRoute("MCI J24 SLN");
+  if (!r) {
+    SKIP("J24 MCI->SLN not present in this AIRAC cycle");
+  }
+  CHECK(r.value().points.size() >= 3);  // MCI, >=1 intermediate, SLN
+  CHECK(r.value().total_distance_nm > 0.0);
+  for (const bf::RouteLeg& leg : r.value().legs) {
+    CHECK(leg.via == "J24");
+  }
+}
+
+TEST_CASE("real data: ParseRoute reports a disconnected airway", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // J24 does not connect MCI to an arbitrary far fix; expect an error, not a
+  // silently wrong route.
+  bf::Result<bf::Route> r = db->ParseRoute("MCI J24 SEA");
+  CHECK_FALSE(r);
+}
+
+TEST_CASE("real data: ParseRoute rejects an unknown fix", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  bf::Result<bf::Route> r = db->ParseRoute("MCI DCT ZZZQ");
+  CHECK_FALSE(r);
+}
+
 }  // namespace

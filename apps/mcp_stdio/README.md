@@ -96,7 +96,8 @@ JSON（对象或数组），直接解析即可。
 
 | Tool | 必填参数 | 可选参数 | 返回 |
 |------|---------|---------|------|
-| `find_routes` | `departure`, `arrival` | `min_fl`, `max_fl`, `level`, `k`, `departure_runway`, `arrival_runway`, `departure_sid`, `arrival_star` | 候选航路数组（见下） |
+| `find_routes` | `departure`, `arrival` | `min_fl`, `max_fl`, `level`, `k`, `departure_runway`, `arrival_runway`, `departure_sid`, `arrival_star`, `avoid_waypoints`, `avoid_airways`, `random_seed`, `forced_points` | 候选航路数组（见下） |
+| `parse_route` | `route` (string) | — | 校验并展开后的单条航路对象 |
 | `lookup_waypoints` | `ids` (string[]) | — | 与 `ids` 平行的数组，元素为 waypoint 对象或 `null` |
 | `lookup_airports` | `ids` (string[]) | — | 同上，airport 对象或 `null` |
 | `lookup_procedures` | `ids` (string[]) | — | 同上，procedures 对象或 `null` |
@@ -112,11 +113,22 @@ JSON（对象或数组），直接解析即可。
 - `k`：返回的候选航路数（Yen K-shortest），默认 1，需 ≥ 1。
 - `departure_runway` / `arrival_runway`：限制所用 SID / STAR 的跑道，如 `RW31L`；空 = 任意。
 - `departure_sid` / `arrival_star`：指定 SID / STAR 名称（如 `DEEZZ5` 或 `DEEZZ5.TOWIN` 钉死过渡段）；空 = 自动选。
+- `avoid_waypoints`：要绕开的航路点数组，每项为 ident（`BOTON`）或 `IDENT/REGION`（`BOTON/LF`）；裸 ident 绕开该 ident 的全部 region 匹配。
+- `avoid_airways`：要绕开的航路代号数组，如 `J60`；同时屏蔽以 `J60-V123` 形式记录的并发航段。
+- `random_seed`：可复现的航路多样化种子；同一 seed 恒定产生同一航路，不同 seed 探索不同的合规航路；不给则返回最优航路。
+- `forced_points`：必经点（via）数组，按顺序，每项为 ident（`PSB`）或 `IDENT/REGION`（`PSB/K6`）；返回结果里以 `IDENT/REGION` 回显消歧后的选择。
 
 返回数组每个元素字段：`route`（ICAO 申报式航路串）、`total_distance_nm`、`sid`、
-`dep_runway`、`sid_options`、`star`、`arr_runway`、`star_options`、
+`dep_runway`、`sid_options`、`star`、`arr_runway`、`star_options`、`forced_points`（若有）、
 `dep_connection` / `arr_connection`（`procedure` / `radar_vectors` 等）、`legs`
 （每段的 `from` / `to` / `via` / `distance_nm`，并发航段额外带 `concurrent_airways`）。
+
+### `parse_route`
+
+`route` 为 ICAO 申报式航路串（`[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]`）。校验各
+航段：航路代号必须真正连接其两端 fix（沿该航路在图上展开中间途经点），否则报错并指出出错
+的 token。命名 SID/STAR 会核对端点机场确实发布该程序、并作为单条连接段呈现（不逐 leg 展开）。
+返回与 `find_routes` 同构的单条航路对象（`route` / `total_distance_nm` / `legs` 等）。
 
 ### lookup 系列
 

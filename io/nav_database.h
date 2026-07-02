@@ -81,6 +81,16 @@ class NavDatabase {
   // endpoint is unknown or no route exists.
   Result<std::vector<Route>> FindRoutes(const RouteRequest& request) const;
 
+  // Parse and validate a filed-flight-plan route string -- the reverse of
+  // FindRoutes. Given "[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]", verify
+  // each airway actually connects its bracketing fixes, expand the airways to
+  // their intermediate points, and total the great-circle distance. Returns the
+  // resolved Route (points / legs / route_string / total_distance_nm) or an
+  // Error naming the offending token and why it failed. A named SID/STAR is
+  // validated against the endpoint airport's procedures and shown as a single
+  // connection leg, not expanded leg-by-leg.
+  Result<Route> ParseRoute(const std::string& route_str) const;
+
   // The minimum sector altitudes published for `icao` (terminal-area MSA), or
   // an empty span if none. Case-insensitive on the ICAO code.
   std::vector<MsaSector> MsaForAirport(const std::string& icao) const;

@@ -338,6 +338,26 @@ int main(int argc, char** argv) {
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
 
+  // --- parse-route: validate & expand a filed route string. ---
+  CLI::App* parse = app.add_subcommand(
+      "parse-route", "Validate and expand a filed route string (reverse of route)");
+  std::string parse_route_str;
+  std::string parse_data_dir = "navdata";
+  std::string parse_db_path;
+  std::string parse_cifp_db_path;
+  std::string parse_format = "text";
+  parse->add_option("route", parse_route_str,
+                    "Filed route string, e.g. \"KJFK DEEZZ5 CANDR J60 PSB ... KLAX\"")
+      ->required();
+  parse->add_option("--data", parse_data_dir, "Directory of X-Plane navigation data")
+      ->capture_default_str();
+  parse->add_option("--db", parse_db_path, "Prebuilt .bfdb cache to load (skips parsing)");
+  parse->add_option("--cifp-db", parse_cifp_db_path,
+                    "CIFP procedure cache to load (default: <db-stem>_cifp.bfdb next to --db)");
+  parse->add_option("--format", parse_format, "Output format: text or json")
+      ->capture_default_str()
+      ->check(CLI::IsMember({"text", "json"}));
+
   CLI11_PARSE(app, argc, argv);
 
   if (*build) {
@@ -448,6 +468,27 @@ int main(int argc, char** argv) {
     // wholly failed lookup; a partial hit still succeeds.
     if (not_found == static_cast<int>(query_ids.size())) {
       return EXIT_FAILURE;
+    }
+  }
+
+  if (*parse) {
+    bf::Result<bf::NavDatabase> db =
+        parse_db_path.empty()
+            ? bf::NavDatabase::Open(parse_data_dir)
+            : bf::NavDatabase::OpenCached(parse_db_path, parse_data_dir, parse_cifp_db_path);
+    if (!db) {
+      std::cerr << "error: " << db.error().message << "\n";
+      return EXIT_FAILURE;
+    }
+    bf::Result<bf::Route> result = db.value().ParseRoute(parse_route_str);
+    if (!result) {
+      std::cerr << "error: " << result.error().message << "\n";
+      return EXIT_FAILURE;
+    }
+    if (parse_format == "json") {
+      PrintRoutesJson({result.value()});
+    } else {
+      PrintText(result.value());
     }
   }
 

@@ -4,6 +4,7 @@ add_library(bf_core
             domain/procedure.cc
             graph/astar.cc
             graph/yen_kshortest.cc
+            routing/route_parser.cc
             routing/route_string.cc)
 
 # Generate version.h from the project version (single source of truth). It lands
