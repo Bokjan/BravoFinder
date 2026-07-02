@@ -49,7 +49,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS": "/W3 /WX /EHsc"
+        "CMAKE_CXX_FLAGS": "/MP /W3 /WX /EHsc"
       }
     },
     {
@@ -58,7 +58,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_FLAGS": "/O2 /W3 /EHsc"
+        "CMAKE_CXX_FLAGS": "/MP /O2 /W3 /EHsc"
       }
     }
   ],
