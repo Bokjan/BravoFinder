@@ -6,7 +6,10 @@ add_library(bf_io
             cache/bfdb_cache.cc
             cache/cifp_cache.cc
             graph_builder.cc
-            nav_database.cc)
+            nav_database.cc
+            nav_database_routing.cc
+            nav_database_parse.cc
+            nav_database_query.cc)
 
 target_include_directories(bf_io PUBLIC ${PROJECT_SOURCE_DIR})
 
