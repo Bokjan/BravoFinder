@@ -6,10 +6,10 @@
 // database to an McpServer, which owns the stdio JSON-RPC loop. The protocol
 // lives in mcp_server.cc; the capabilities live in tools.cc.
 
-#include <cstdlib>
 #include <memory>
 #include <string>
 
+#include "core/env.h"
 #include "io/nav_database.h"
 #include "mcp_server.h"
 
@@ -26,7 +26,7 @@ struct StartupOpts {
 // "--flag=value" forms.
 StartupOpts ParseStartupArgs(int argc, char** argv) {
   StartupOpts opts;
-  const char* env = std::getenv("BRAVOFINDER_NAVDATA");
+  const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA");
   opts.data_dir = env ? env : "navdata";
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];

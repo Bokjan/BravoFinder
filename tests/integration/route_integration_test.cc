@@ -2,13 +2,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <cstdlib>
 #include <fstream>
 #include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "core/env.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/nav_database.h"
@@ -19,7 +19,7 @@ namespace {
 // repository's navdata/ folder. Real Navigraph/Jeppesen data is not committed,
 // so these tests SKIP (rather than fail) when the data is absent.
 std::string NavDataDir() {
-  if (const char* env = std::getenv("BRAVOFINDER_NAVDATA")) {
+  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
     return env;
   }
   return "navdata";

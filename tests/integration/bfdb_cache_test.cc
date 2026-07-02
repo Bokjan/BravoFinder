@@ -1,9 +1,9 @@
+#include "core/env.h"
 #include "io/cache/bfdb_cache.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -18,7 +18,7 @@ namespace {
 // repository's navdata/ folder. Real data is not committed, so these tests SKIP
 // (rather than fail) when it is absent.
 std::string NavDataDir() {
-  if (const char* env = std::getenv("BRAVOFINDER_NAVDATA")) {
+  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
     return env;
   }
   return "navdata";

@@ -1,3 +1,4 @@
+#include "core/env.h"
 #include "core/version.h"
 #include "io/cache/cifp_cache.h"
 
@@ -5,7 +6,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -20,7 +20,7 @@
 namespace {
 
 std::string NavDataDir() {
-  if (const char* env = std::getenv("BRAVOFINDER_NAVDATA")) {
+  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
     return env;
   }
   return "navdata";

@@ -1,17 +1,17 @@
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
-#include <cstdlib>
 #include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "core/env.h"
 #include "io/nav_database.h"
 
 namespace {
 
 std::string NavDataDir() {
-  if (const char* env = std::getenv("BRAVOFINDER_NAVDATA")) {
+  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
     return env;
   }
   return "navdata";
