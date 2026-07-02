@@ -6,6 +6,11 @@
 // under full warning coverage — only the rapidjson header itself is silenced.
 #pragma once
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4996)  // std::iterator deprecated in C++17
+#endif
+
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -25,6 +30,10 @@
 #endif
 
 #include "rapidjson/document.h"
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #ifdef __clang__
 #pragma clang diagnostic pop
