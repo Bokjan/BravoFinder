@@ -1,6 +1,10 @@
 # BravoFinder
 
 [![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases)
+[![license](https://img.shields.io/github/license/Bokjan/BravoFinder)](LICENSE)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)
+![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
 
 A flight route finder written in modern C++, **v3 — a complete rewrite**.
 
