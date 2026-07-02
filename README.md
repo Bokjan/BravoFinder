@@ -58,6 +58,20 @@ cmake --build --preset debug      # parallel build (use --preset, not the path f
 ctest --preset debug              # unit tests run always; integration tests need data
 ```
 
+Build only what you need with `--target`:
+
+| Target | What it builds |
+|---|---|
+| `bf` | CLI tool (`apps/cli/`) |
+| `bf_mcp_stdio` | MCP stdio server (`apps/mcp_stdio/`) |
+| `bf_tests` | Test runner |
+| `bf_core` / `bf_io` | Libraries only |
+
+```bash
+cmake --build --preset debug --target bf_mcp_stdio    # just the MCP server
+cmake --build --preset debug --target bf bf_mcp_stdio # both binaries
+```
+
 A `tsan` preset (ThreadSanitizer) is available to verify concurrency safety:
 
 ```bash

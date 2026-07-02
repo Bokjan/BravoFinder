@@ -15,8 +15,15 @@ set_target_properties(bf_mcp_stdio PROPERTIES OUTPUT_NAME "bf-mcp-stdio")
 # -Wdeprecated-declarations, both under -Werror with a modern libc++. The
 # behaviors are benign and there is no newer tagged release to move to, so
 # narrow off just these warnings for this target (no-ops where warnings are not
-# active, e.g. release).
-target_compile_options(bf_mcp_stdio PRIVATE
-  -fno-sanitize=pointer-overflow
-  -Wno-error=nontrivial-memcall
-  -Wno-error=deprecated-declarations)
+# active, e.g. release, or when the compiler is not GCC/Clang).
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag("-Wnontrivial-memcall" HAS_WNONTRIVIAL_MEMCALL)
+
+  target_compile_options(bf_mcp_stdio PRIVATE
+    -fno-sanitize=pointer-overflow
+    -Wno-error=deprecated-declarations)
+  if(HAS_WNONTRIVIAL_MEMCALL)
+    target_compile_options(bf_mcp_stdio PRIVATE -Wno-error=nontrivial-memcall)
+  endif()
+endif()

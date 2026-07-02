@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [v3, v2, main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+        preset: [debug, release, tsan]
+        exclude:
+          # MSVC does not support -fsanitize; windows-debug replaces debug below.
+          - os: windows-latest
+            preset: debug
+          - os: windows-latest
+            preset: tsan
+        include:
+          - os: windows-latest
+            preset: windows-debug
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # -- ccache (Linux & macOS only; skipped on Windows) ------------------
+      - name: Install ccache (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ccache
+
+      - name: Install ccache (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ccache
+
+      - name: Cache ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-${{ matrix.preset }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-${{ matrix.preset }}-${{ github.ref }}-
+            ccache-linux-${{ matrix.preset }}-
+
+      - name: Cache ccache (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-macos-${{ matrix.preset }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-${{ matrix.preset }}-${{ github.ref }}-
+            ccache-macos-${{ matrix.preset }}-
+
+      # -- Configure / Build / Test ----------------------------------------
+      - name: Configure
+        run: >
+          cmake --preset ${{ matrix.preset }}
+          ${{ runner.os != 'Windows' && '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache' || '' }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}

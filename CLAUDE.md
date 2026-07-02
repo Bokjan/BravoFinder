@@ -7,7 +7,7 @@
 > **文档地图**（各司其职，别混）：
 > - `README.md` — 面向使用者：项目是什么、如何构建、CLI 用法、数据合规。
 > - `CLAUDE.md`（本文件）— 面向 AI agent：开发硬约定、不变量、雷区。
-> - `.notes/DESIGN.md` — 完整设计稿（本地，gitignore，不自动加载；需要背景时手动读）。
+> - `.notes/` — 本地工作文档（gitignore，不入库）：`README.md` 是目录索引，`DESIGN.md` 是完整设计稿，`plans/`/`records/`/`research/` 是历史计划与记录。需要背景时从 README 入手。
 > - `docs/` — 面向他人的公开文档（CONTRIBUTING、算法说明等，入库）。
 
 一句话背景（细节看 README / DESIGN）：真实/合规航路引擎，解析 X-Plane 12 native 导航

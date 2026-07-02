@@ -42,6 +42,15 @@
         "CMAKE_CXX_FLAGS": "-O1 -g -Wall -Wextra -fsanitize=thread -fno-omit-frame-pointer",
         "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"
       }
+    },
+    {
+      "name": "windows-debug",
+      "displayName": "Windows Debug (MSVC /W4 /WX, no sanitizers)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "/W4 /WX"
+      }
     }
   ],
   "buildPresets": [
@@ -58,6 +67,11 @@
     {
       "name": "tsan",
       "configurePreset": "tsan",
+      "jobs": 0
+    },
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-debug",
       "jobs": 0
     }
   ],
@@ -85,6 +99,13 @@
     {
       "name": "tsan",
       "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-debug",
       "output": {
         "outputOnFailure": true
       }
