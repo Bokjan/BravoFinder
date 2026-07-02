@@ -1,5 +1,11 @@
 # The bf command-line tool.
-add_executable(bf main.cc)
+add_executable(bf
+               main.cc
+               cli_common.cc
+               cmd_build.cc
+               cmd_route.cc
+               cmd_query.cc
+               cmd_parse_route.cc)
 
 target_link_libraries(bf PRIVATE bf::io CLI11::CLI11 rapidjson::rapidjson)
 
