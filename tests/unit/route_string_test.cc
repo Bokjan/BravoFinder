@@ -1,9 +1,8 @@
 #include "core/routing/route_string.h"
 
+#include <catch2/catch_test_macros.hpp>
 #include <string>
 #include <vector>
-
-#include <catch2/catch_test_macros.hpp>
 
 namespace {
 
@@ -17,8 +16,7 @@ bf::RouteLeg Leg(const std::string& from, const std::string& to, const std::stri
   return leg;
 }
 
-TEST_CASE("consecutive legs on one airway list it once and omit through-fixes",
-          "[route_string]") {
+TEST_CASE("consecutive legs on one airway list it once and omit through-fixes", "[route_string]") {
   std::vector<bf::RouteLeg> legs{
       Leg("A", "B", "Y28"),
       Leg("B", "C", "Y28"),
@@ -33,8 +31,7 @@ TEST_CASE("consecutive legs on one airway list it once and omit through-fixes",
   }
 }
 
-TEST_CASE("a concurrency flanked by a single airway converges to that airway",
-          "[route_string]") {
+TEST_CASE("a concurrency flanked by a single airway converges to that airway", "[route_string]") {
   // The RJTT->ZSPD case: Y28, then V28-Y28 concurrency, then Y28 again. The
   // running intersection stays {Y28}, so no spurious hand-off fixes appear.
   std::vector<bf::RouteLeg> legs{
@@ -69,8 +66,7 @@ TEST_CASE("a concurrency that never narrows picks the lexicographically smallest
   CHECK(legs[1].concurrent_airways == std::vector<std::string>{"G325", "J133"});
 }
 
-TEST_CASE("a genuine airway change breaks the group at the hand-off fix",
-          "[route_string]") {
+TEST_CASE("a genuine airway change breaks the group at the hand-off fix", "[route_string]") {
   std::vector<bf::RouteLeg> legs{
       Leg("A", "B", "V28"),
       Leg("B", "C", "V28-Y28"),

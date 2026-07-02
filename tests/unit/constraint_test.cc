@@ -61,7 +61,7 @@ TEST_CASE("altitude band: range overlapping the band is usable", "[constraint]")
 TEST_CASE("altitude band: range entirely outside the band is blocked", "[constraint]") {
   bf::AltitudeBandConstraint c;
   bf::EdgeContext ctx{MakeEdge(180, 450, true), bf::Coordinate{}};
-  CHECK_FALSE(c.Evaluate(ctx, WithAltitudeRange(50, 170)).allowed);    // wholly below
+  CHECK_FALSE(c.Evaluate(ctx, WithAltitudeRange(50, 170)).allowed);   // wholly below
   CHECK_FALSE(c.Evaluate(ctx, WithAltitudeRange(460, 600)).allowed);  // wholly above
 }
 
@@ -102,8 +102,8 @@ TEST_CASE("MORA: range cleared when its top reaches the floor", "[constraint]") 
   bf::EdgeContext ctx{MakeEdge(0, 0, false), bf::Coordinate{40.5, -73.5}};
   // Range top at/above MORA is allowed even if the bottom is below it: the
   // aircraft can hold a level within the range that clears terrain.
-  CHECK(c.Evaluate(ctx, WithAltitudeRange(80, 120)).allowed);   // top clears
-  CHECK(c.Evaluate(ctx, WithAltitudeRange(90, 100)).allowed);   // top at MORA
+  CHECK(c.Evaluate(ctx, WithAltitudeRange(80, 120)).allowed);       // top clears
+  CHECK(c.Evaluate(ctx, WithAltitudeRange(90, 100)).allowed);       // top at MORA
   CHECK_FALSE(c.Evaluate(ctx, WithAltitudeRange(60, 90)).allowed);  // whole range below
 }
 
@@ -171,10 +171,10 @@ TEST_CASE("randomize: penalty is deterministic, non-negative, and bounded", "[co
   const bf::EdgeVerdict v1 = c.Evaluate(ctx, r);
   const bf::EdgeVerdict v2 = c.Evaluate(ctx, r);
 
-  CHECK(v1.allowed);                              // never a hard filter
-  CHECK(v1.extra_cost == v2.extra_cost);          // deterministic
-  CHECK(v1.extra_cost >= 0.0);                    // non-negative (admissible)
-  CHECK(v1.extra_cost <= 100.0 * 0.05 + 1e-9);    // bounded by eps * distance
+  CHECK(v1.allowed);                            // never a hard filter
+  CHECK(v1.extra_cost == v2.extra_cost);        // deterministic
+  CHECK(v1.extra_cost >= 0.0);                  // non-negative (admissible)
+  CHECK(v1.extra_cost <= 100.0 * 0.05 + 1e-9);  // bounded by eps * distance
 }
 
 TEST_CASE("randomize: different seeds generally differ; same seed matches", "[constraint]") {

@@ -1,5 +1,3 @@
-#include "commands.h"
-
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -9,6 +7,7 @@
 #include <vector>
 
 #include "cli_common.h"
+#include "commands.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/nav_database.h"
@@ -49,8 +48,9 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
   route->add_option("--cifp-db", a->cifp_db_path,
                     "CIFP procedure cache to load (default: <db-stem>_cifp.bfdb "
                     "next to --db, if present)");
-  route->add_option("--cifp-load", a->cifp_load,
-                    "CIFP cache load mode: on-demand (default) or eager")
+  route
+      ->add_option("--cifp-load", a->cifp_load,
+                   "CIFP cache load mode: on-demand (default) or eager")
       ->capture_default_str()
       ->check(CLI::IsMember({"on-demand", "eager"}));
   route->add_option("--format", a->format, "Output format: text or json")
@@ -88,8 +88,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     // build from the data directory. --data still locates CIFP files for
     // on-demand procedure parsing; --cifp-db (or a sibling <stem>_cifp.bfdb)
     // supplies procedures from a cache instead.
-    Result<NavDatabase> db =
-        OpenForRead(a->db_path, a->data_dir, a->cifp_db_path, a->cifp_load);
+    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_db_path, a->cifp_load);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
       exit_code = EXIT_FAILURE;

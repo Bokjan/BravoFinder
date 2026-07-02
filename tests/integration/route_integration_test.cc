@@ -326,7 +326,7 @@ TEST_CASE("real data: forced via points appear in order", "[integration]") {
   CHECK(via_present);
   REQUIRE(r.forced_points.size() == 1);
   CHECK(r.forced_points.front().rfind("DBL/", 0) == 0);  // echoed as DBL/REGION
-  CHECK(r.total_distance_nm >= base_dist - 1e-6);         // a detour is not shorter
+  CHECK(r.total_distance_nm >= base_dist - 1e-6);        // a detour is not shorter
 }
 
 TEST_CASE("real data: forced via points with k>1 returns distinct ordered routes",
@@ -483,8 +483,7 @@ TEST_CASE("real data: a bare SID name pins the procedure but leaves transitions 
   }
 }
 
-TEST_CASE("real data: an unknown SID name is an error, not a silent fallback",
-          "[integration]") {
+TEST_CASE("real data: an unknown SID name is an error, not a silent fallback", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");

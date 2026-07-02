@@ -1,5 +1,3 @@
-#include "core/env.h"
-#include "core/version.h"
 #include "io/cache/cifp_cache.h"
 
 #include <atomic>
@@ -12,8 +10,10 @@
 #include <thread>
 #include <vector>
 
+#include "core/env.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
+#include "core/version.h"
 #include "io/loaders/xplane/cifp/cifp_parser.h"
 #include "io/nav_database.h"
 
@@ -65,9 +65,8 @@ TEST_CASE("cifp cache: a fetched segment matches direct file parsing", "[integra
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   const std::string cifp_path = TempPath("seg_nav_cifp.bfdb");
-  bf::Result<uint32_t> n =
-      bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112,
-                       bf::kBravoFinderVersion);
+  bf::Result<uint32_t> n = bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112,
+                                                bf::kBravoFinderVersion);
   REQUIRE(n);
 
   bf::Result<bf::CifpArchive> archive = bf::CifpCache::Open(cifp_path);
@@ -281,9 +280,8 @@ TEST_CASE("cifp cache: concurrent fetches on one archive are race-free", "[integ
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   const std::string cifp_path = TempPath("concurrent_nav_cifp.bfdb");
-  bf::Result<uint32_t> n =
-      bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112,
-                       bf::kBravoFinderVersion);
+  bf::Result<uint32_t> n = bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112,
+                                                bf::kBravoFinderVersion);
   REQUIRE(n);
   bf::Result<bf::CifpArchive> archive = bf::CifpCache::Open(cifp_path);
   REQUIRE(archive);

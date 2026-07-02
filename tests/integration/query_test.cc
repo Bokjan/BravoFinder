@@ -129,8 +129,7 @@ TEST_CASE("query: concurrent airway is found by each of its designators", "[inte
     SKIP("expected concurrency A1-G581 not present in this AIRAC cycle");
   }
   auto same_leg = [](const bf::AirwayLeg& x, const bf::AirwayLeg& y) {
-    return x.from == y.from && x.to == y.to &&
-           std::abs(x.distance_nm - y.distance_nm) < 1e-3;
+    return x.from == y.from && x.to == y.to && std::abs(x.distance_nm - y.distance_nm) < 1e-3;
   };
   bool shared = false;
   for (const bf::AirwayLeg& a : by_a1[0]->segments) {

@@ -1,5 +1,3 @@
-#include "commands.h"
-
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -10,6 +8,7 @@
 #include <vector>
 
 #include "cli_common.h"
+#include "commands.h"
 #include "core/query/query_json.h"
 #include "io/nav_database.h"
 

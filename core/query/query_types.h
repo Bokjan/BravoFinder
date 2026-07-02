@@ -48,8 +48,8 @@ struct AirportProcedures {
 
 // One directed segment of an airway: a hop between two consecutive fixes.
 struct AirwayLeg {
-  std::string from;   // fix ident
-  std::string to;     // fix ident
+  std::string from;  // fix ident
+  std::string to;    // fix ident
   double distance_nm = 0.0;
   bool high = false;  // Jet (high) airway segment; false = Victor (low)
   int base_fl = 0;    // lowest usable flight level (0 = no limit)

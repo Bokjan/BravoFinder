@@ -1,11 +1,10 @@
-#include "commands.h"
-
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
 
+#include "commands.h"
 #include "io/nav_database.h"
 
 namespace bf::cli {

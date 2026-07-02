@@ -21,8 +21,8 @@ namespace bf::mcp {
 // A tool handler: given the parsed "arguments" object and a read-only database,
 // returns {json_text, is_error}. json_text is a JSON value (object or array)
 // that the server wraps in a single text content block.
-using ToolHandler = std::function<std::pair<std::string, bool>(
-    const rapidjson::Value& args, const bf::NavDatabase& db)>;
+using ToolHandler = std::function<std::pair<std::string, bool>(const rapidjson::Value& args,
+                                                               const bf::NavDatabase& db)>;
 
 struct Tool {
   std::string name;
@@ -38,8 +38,8 @@ struct Tool {
   // Construct a Tool from a parsed schema Document. schema_store takes ownership
   // of the Document (and thus the allocator); input_schema is then copied into
   // that same allocator so the two stay coupled for the Tool's lifetime.
-  Tool(std::string tool_name, std::string tool_description,
-       rapidjson::Document schema, ToolHandler tool_handler);
+  Tool(std::string tool_name, std::string tool_description, rapidjson::Document schema,
+       ToolHandler tool_handler);
 };
 
 // Every tool the server exposes, in display order. Defined in tools.cc.

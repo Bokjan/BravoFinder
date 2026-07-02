@@ -27,12 +27,12 @@ struct BfdbImage {
   int first_airport_vertex = 0;
   std::string data_dir;  // the data dir used at build time (route default)
 
-  std::vector<Coordinate> coords;  // per-vertex position, size V
-  std::vector<int> offsets;        // CSR row offsets, size V + 1
-  std::vector<GraphEdge> edges;    // CSR edge array, size E
-  std::vector<bool> on_network;    // per-vertex airway membership, size V
-  std::vector<Ident> idents;       // per-vertex (ident, region), size V
-  std::vector<WaypointKind> kinds; // per-vertex kind (fix/VOR/NDB/DME), size V
+  std::vector<Coordinate> coords;   // per-vertex position, size V
+  std::vector<int> offsets;         // CSR row offsets, size V + 1
+  std::vector<GraphEdge> edges;     // CSR edge array, size E
+  std::vector<bool> on_network;     // per-vertex airway membership, size V
+  std::vector<Ident> idents;        // per-vertex (ident, region), size V
+  std::vector<WaypointKind> kinds;  // per-vertex kind (fix/VOR/NDB/DME), size V
   std::vector<std::string> airway_names;
   MoraGrid mora;
   std::vector<MsaSector> msa;

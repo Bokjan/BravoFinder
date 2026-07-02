@@ -1,11 +1,10 @@
-#include "commands.h"
-
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
 
 #include "cli_common.h"
+#include "commands.h"
 #include "core/routing/route.h"
 #include "io/nav_database.h"
 
@@ -23,8 +22,9 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
 
   CLI::App* parse = app.add_subcommand(
       "parse-route", "Validate and expand a filed route string (reverse of route)");
-  parse->add_option("route", a->route_str,
-                    "Filed route string, e.g. \"KJFK DEEZZ5 CANDR J60 PSB ... KLAX\"")
+  parse
+      ->add_option("route", a->route_str,
+                   "Filed route string, e.g. \"KJFK DEEZZ5 CANDR J60 PSB ... KLAX\"")
       ->required();
   parse->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();

@@ -1,8 +1,7 @@
 #include "core/routing/route_json.h"
 
-#include <string>
-
 #include <catch2/catch_test_macros.hpp>
+#include <string>
 
 namespace {
 
@@ -21,8 +20,7 @@ struct StubWriter {
   void Double(double) { out += "#"; }
 };
 
-TEST_CASE("WriteRouteJson emits concurrent_airways only on concurrency legs",
-          "[route_json]") {
+TEST_CASE("WriteRouteJson emits concurrent_airways only on concurrency legs", "[route_json]") {
   bf::Route route;
   route.route_string = "A Y28 C";
   route.dep_connection = bf::ConnectionKind::kProcedure;

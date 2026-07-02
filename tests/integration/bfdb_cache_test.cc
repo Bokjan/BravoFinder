@@ -1,4 +1,3 @@
-#include "core/env.h"
 #include "io/cache/bfdb_cache.h"
 
 #include <catch2/catch_approx.hpp>
@@ -8,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "core/env.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/nav_database.h"
@@ -122,8 +122,7 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
   // be a navaid kind -- proving the field is populated, not defaulted to kFix.
   bool has_navaid = false;
   for (bf::WaypointKind k : im.kinds) {
-    if (k == bf::WaypointKind::kVor || k == bf::WaypointKind::kNdb ||
-        k == bf::WaypointKind::kDme) {
+    if (k == bf::WaypointKind::kVor || k == bf::WaypointKind::kNdb || k == bf::WaypointKind::kDme) {
       has_navaid = true;
       break;
     }

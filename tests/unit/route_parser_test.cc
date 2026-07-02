@@ -1,6 +1,6 @@
-#include <catch2/catch_test_macros.hpp>
-
 #include "core/routing/route_parser.h"
+
+#include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("tokenize: splits on whitespace and upper-cases", "[route_parser]") {
   const auto t = bf::TokenizeRoute("kjfk deezz5 candr J60 psb klax");

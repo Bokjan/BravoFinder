@@ -17,9 +17,9 @@
 #include "core/routing/route.h"
 #include "core/routing/route_json.h"
 #include "core/routing/route_request.h"
-#include "rapidjson_document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "rapidjson_document.h"
 
 namespace bf::mcp {
 
@@ -300,9 +300,10 @@ const std::vector<Tool>& AllTools() {
       "checks that each airway connects its bracketing fixes, expands airways to "
       "their intermediate points, totals the distance, and returns the resolved "
       "route. Errors name the offending token when the route is invalid.",
-      ParseSchema(R"({"type":"object","properties":{)"
-                  R"("route":{"type":"string","description":"Filed route string, e.g. 'KJFK DEEZZ5 CANDR J60 PSB ... KLAX'."}},)"
-                  R"("required":["route"]})"),
+      ParseSchema(
+          R"({"type":"object","properties":{)"
+          R"("route":{"type":"string","description":"Filed route string, e.g. 'KJFK DEEZZ5 CANDR J60 PSB ... KLAX'."}},)"
+          R"("required":["route"]})"),
       ParseRouteHandler);
 
   tools.push_back(MakeWaypointLookupTool(

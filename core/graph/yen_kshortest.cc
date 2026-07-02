@@ -322,8 +322,8 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
       // Single-source (the spur node) -> any goal. The spur node's own seed is
       // irrelevant here; CostOfPathMulti re-applies the true source seed from the
       // stitched path's first vertex.
-      const ShortestPath spur = FindShortestPathMulti(
-          graph, {SeededEndpoint{spur_node, 0.0}}, goals, spur_opts, heuristic);
+      const ShortestPath spur = FindShortestPathMulti(graph, {SeededEndpoint{spur_node, 0.0}},
+                                                      goals, spur_opts, heuristic);
       add_candidate(root, spur, /*deviation=*/i);
     }
 
