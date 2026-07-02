@@ -73,6 +73,12 @@ class GraphBuilder {
   // The airway name for an edge's airway_id, or "DCT" for synthetic edges.
   const std::string& AirwayName(int airway_id) const;
 
+  // The full airway-name table, indexed by airway_id (entry 0 is "DCT"). A name
+  // may be a concurrency ("A593-Y592") holding several designators. Callers that
+  // match by designator (avoid, lookup) split each entry themselves and map back
+  // to the airway_id. Exposed read-only so the immutable graph stays immutable.
+  const std::vector<std::string>& AirwayNames() const { return airway_names_; }
+
   // Vertex metadata for result construction.
   const Ident& IdentOf(int vertex) const { return idents_[vertex]; }
 

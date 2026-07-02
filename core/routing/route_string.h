@@ -7,6 +7,13 @@
 
 namespace bf {
 
+// Split an airway designator field into its list of route names. A concurrency
+// (two or more designators sharing one physical leg) is encoded "A593-Y592" in
+// the source; a single airway is just "Y592"; "DCT" yields {"DCT"}. Real ATS
+// route designators are letter+number with no internal hyphen, so '-' is an
+// unambiguous separator. Source order is preserved.
+std::vector<std::string> SplitDesignators(const std::string& designator_field);
+
 // Fold an ordered list of route legs into an ICAO-style filed-flight-plan route
 // string ("DEP SID FIX AWY FIX STAR ARR"), listing an airway only where it is
 // joined or left and omitting the fixes passed through in between.

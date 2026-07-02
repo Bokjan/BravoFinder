@@ -2,6 +2,7 @@
 #include <rapidjson/writer.h>
 
 #include <CLI/CLI.hpp>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
@@ -58,6 +59,14 @@ void PrintText(const bf::Route& route) {
         std::cout << route.star_options[i] << (i + 1 < route.star_options.size() ? ", " : "");
       }
       std::cout << "]";
+    }
+    std::cout << "\n";
+  }
+
+  if (!route.forced_points.empty()) {
+    std::cout << "Via: ";
+    for (size_t i = 0; i < route.forced_points.size(); ++i) {
+      std::cout << route.forced_points[i] << (i + 1 < route.forced_points.size() ? ", " : "");
     }
     std::cout << "\n";
   }
@@ -194,6 +203,35 @@ int RunQuery(const bf::NavDatabase& db, const std::string& kind,
   return not_found;
 }
 
+// Parse an --alt spec into an inclusive flight-level range. Accepts a single
+// level ("350" -> {350, 350}) or a hyphenated range ("300-400" -> {300, 400}).
+// Returns nullopt on malformed input or an inverted range (min > max).
+std::optional<bf::FlRange> ParseAltSpec(const std::string& spec) {
+  const size_t dash = spec.find('-');
+  auto to_int = [](const std::string& s, int& out) -> bool {
+    if (s.empty()) return false;
+    try {
+      size_t pos = 0;
+      out = std::stoi(s, &pos);
+      return pos == s.size() && out >= 0;
+    } catch (...) {
+      return false;
+    }
+  };
+  if (dash == std::string::npos) {
+    int fl = 0;
+    if (!to_int(spec, fl)) return std::nullopt;
+    return bf::FlRange{fl, fl};
+  }
+  int lo = 0;
+  int hi = 0;
+  if (!to_int(spec.substr(0, dash), lo) || !to_int(spec.substr(dash + 1), hi)) {
+    return std::nullopt;
+  }
+  if (lo > hi) return std::nullopt;
+  return bf::FlRange{lo, hi};
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -225,7 +263,7 @@ int main(int argc, char** argv) {
   std::string cifp_load = "on-demand";
   std::string format = "text";
   std::string level = "none";
-  std::optional<int> cruise_fl;
+  std::string alt_spec;
   std::string rwy_dep;
   std::string rwy_arr;
   int k = 1;
@@ -245,8 +283,9 @@ int main(int argc, char** argv) {
   route->add_option("--format", format, "Output format: text or json")
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
-  route->add_option("--alt", cruise_fl,
-                    "Cruise flight level, e.g. 350 (enables altitude/MORA filters)");
+  route->add_option("--alt", alt_spec,
+                    "Cruise flight level or range, e.g. 350 or 300-400 (enables "
+                    "altitude/MORA filters)");
   route->add_option("--level", level, "Airway level preference: none, low, high")
       ->capture_default_str()
       ->check(CLI::IsMember({"none", "low", "high"}));
@@ -263,6 +302,19 @@ int main(int argc, char** argv) {
                     "Select a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN (default: auto)");
   route->add_option("--star", star,
                     "Select a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS (default: auto)");
+  std::vector<std::string> avoid_wpt;
+  std::vector<std::string> avoid_awy;
+  route->add_option("--avoid-wpt", avoid_wpt,
+                    "Waypoint(s) to avoid; ident or IDENT/REGION. Repeatable.");
+  route->add_option("--avoid-awy", avoid_awy,
+                    "Airway designator(s) to avoid, e.g. J60. Repeatable.");
+  std::optional<uint32_t> seed;
+  route->add_option("--seed", seed,
+                    "Randomize routing with this seed for reproducible route diversity");
+  std::vector<std::string> via;
+  route->add_option("--via", via,
+                    "Force the route through these waypoint(s), in order; ident or "
+                    "IDENT/REGION. Repeatable.");
 
   // --- query: look up waypoints / airports / procedures / airways. ---
   CLI::App* query = app.add_subcommand(
@@ -336,12 +388,24 @@ int main(int argc, char** argv) {
     bf::RouteRequest request;
     request.departure = departure;
     request.arrival = arrival;
-    request.cruise_fl = cruise_fl;
+    if (!alt_spec.empty()) {
+      std::optional<bf::FlRange> range = ParseAltSpec(alt_spec);
+      if (!range) {
+        std::cerr << "error: invalid --alt '" << alt_spec
+                  << "' (expected a level like 350 or a range like 300-400)\n";
+        return EXIT_FAILURE;
+      }
+      request.altitude = range;
+    }
     request.k = k;
     request.departure_runway = rwy_dep;
     request.arrival_runway = rwy_arr;
     request.departure_sid = sid;
     request.arrival_star = star;
+    request.avoid_waypoints = avoid_wpt;
+    request.avoid_airways = avoid_awy;
+    request.random_seed = seed;
+    request.forced_points = via;
     if (level == "low") {
       request.level = bf::LevelPreference::kLow;
     } else if (level == "high") {

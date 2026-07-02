@@ -5,12 +5,17 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <queue>
+#include <set>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "core/constraints/altitude_constraints.h"
+#include "core/constraints/avoid_constraint.h"
 #include "core/constraints/mora_constraint.h"
+#include "core/constraints/randomize_constraint.h"
 #include "core/graph/yen_kshortest.h"
 #include "core/routing/route_string.h"
 #include "core/version.h"
@@ -188,6 +193,234 @@ void SelectProcedures(const EndpointPlan& plan, int fix_vertex, std::string& nam
     }
     break;
   }
+}
+
+// Resolve the request's avoid_waypoints to the set of vertices to block. A full
+// "IDENT/REGION" key resolves to that single vertex; a bare "IDENT" resolves to
+// every region's match (idents are not globally unique, so "avoid X" avoids all
+// X). Unknown idents contribute nothing (avoiding something absent is a no-op).
+std::unordered_set<int> ResolveAvoidVertices(const GraphBuilder& builder,
+                                             const std::vector<std::string>& avoid_waypoints) {
+  std::unordered_set<int> out;
+  for (const std::string& raw : avoid_waypoints) {
+    const std::string up = ToUpper(raw);
+    const size_t slash = up.find('/');
+    if (slash != std::string::npos) {
+      const int v = builder.VertexByIdent(Ident(up.substr(0, slash), up.substr(slash + 1)));
+      if (v >= 0) {
+        out.insert(v);
+      }
+    } else {
+      for (const int v : builder.VerticesByIdent(up)) {
+        out.insert(v);
+      }
+    }
+  }
+  return out;
+}
+
+// Resolve the request's avoid_airways (by designator) to the set of airway_ids
+// to block. Because a stored airway name may be a concurrency ("J60-V123"), an
+// airway_id is included when any of its designators is in the avoid set -- so
+// avoiding "J60" also blocks segments recorded under "J60-V123".
+std::unordered_set<uint16_t> ResolveAvoidAirwayIds(const GraphBuilder& builder,
+                                                   const std::vector<std::string>& avoid_airways) {
+  std::unordered_set<std::string> wanted;
+  for (const std::string& a : avoid_airways) {
+    wanted.insert(ToUpper(a));
+  }
+  std::unordered_set<uint16_t> out;
+  if (wanted.empty()) {
+    return out;
+  }
+  const std::vector<std::string>& names = builder.AirwayNames();
+  for (size_t id = 1; id < names.size(); ++id) {  // id 0 = "DCT", never avoided
+    for (const std::string& designator : SplitDesignators(names[id])) {
+      if (wanted.count(designator) != 0) {
+        out.insert(static_cast<uint16_t>(id));
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+// Resolve one forced ("via") point token to a graph vertex. A full
+// "IDENT/REGION" key resolves exactly; a bare ident with several regional
+// matches picks the one adding the least detour to the dep->arr great circle
+// (deterministic and explainable). Airports are rejected (a via point is an
+// enroute fix, and airports are barred as transit nodes anyway). On success,
+// writes the resolved "IDENT/REGION" to `echo`. Returns the vertex, or -1 if no
+// non-airport match exists (the caller reports an unknown-forced-point error).
+int ResolveForcedPoint(const GraphBuilder& builder, const std::string& token,
+                       const Coordinate& from, const Coordinate& to, std::string& echo,
+                       bool& is_airport) {
+  is_airport = false;
+  const std::string up = ToUpper(token);
+  const size_t slash = up.find('/');
+  if (slash != std::string::npos) {
+    const Ident id(up.substr(0, slash), up.substr(slash + 1));
+    const int v = builder.VertexByIdent(id);
+    if (v < 0) {
+      return -1;
+    }
+    if (builder.IsAirport(v)) {
+      is_airport = true;
+      return -1;
+    }
+    echo = id.ident + "/" + id.region;
+    return v;
+  }
+  // Bare ident: choose the non-airport match minimizing the added detour
+  // d(from,v) + d(v,to) - d(from,to). Ties break on the lowest vertex index for
+  // determinism.
+  int best = -1;
+  double best_detour = 0.0;
+  bool saw_airport = false;
+  for (const int v : builder.VerticesByIdent(up)) {
+    if (builder.IsAirport(v)) {
+      saw_airport = true;
+      continue;
+    }
+    const Coordinate c = builder.graph().CoordOf(v);
+    const double detour = from.DistanceTo(c) + c.DistanceTo(to);
+    if (best < 0 || detour < best_detour) {
+      best = v;
+      best_detour = detour;
+    }
+  }
+  if (best < 0) {
+    is_airport = saw_airport;  // only matches were airports
+    return -1;
+  }
+  echo = builder.IdentOf(best).ident + "/" + builder.IdentOf(best).region;
+  return best;
+}
+
+// Stitch a route through an ordered list of forced ("via") vertices. The route
+// is searched in hops -- sources -> F1, Fi -> Fi+1 for each interior pair, then
+// Fn -> goals -- and concatenated. Only the first hop carries the real source
+// seeds and only the last the real goal seeds; interior forced vertices are
+// seeded at 0 so their cost is not double counted at the seams. Every hop
+// honors all constraints and node/edge bans in `options`.
+//
+// Up to `k` whole routes are returned, ordered by total (segment-sum) cost.
+// Each hop is expanded into up to `k` alternatives via K-shortest; the best K
+// end-to-end combinations are then selected by a "sum of per-segment costs"
+// best-first merge over the Cartesian product (a lazy K-way merge that touches
+// O(k * hops) combinations, not the full product). A combination whose stitched
+// path repeats a vertex (a cycle at some seam) is skipped -- forced routing is
+// order-sensitive, so a repeated fix is not a valid simple route.
+//
+// A returned path's distance_nm/cost include both endpoint seeds, matching the
+// non-forced path so downstream MakeRoute treats them identically.
+std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
+                                          const std::vector<SeededEndpoint>& sources,
+                                          const std::vector<SeededEndpoint>& goals,
+                                          const std::vector<int>& forced, int k,
+                                          const SearchOptions& options) {
+  std::vector<ShortestPath> results;
+  if (k <= 0 || forced.empty()) {
+    return results;
+  }
+
+  // Build each hop's endpoint sets, then its up-to-k candidate paths.
+  const size_t hops = forced.size() + 1;
+  std::vector<std::vector<ShortestPath>> segments;
+  segments.reserve(hops);
+  for (size_t h = 0; h < hops; ++h) {
+    const std::vector<SeededEndpoint> hop_sources =
+        (h == 0) ? sources : std::vector<SeededEndpoint>{SeededEndpoint{forced[h - 1], 0.0}};
+    const std::vector<SeededEndpoint> hop_goals =
+        (h + 1 == hops) ? goals : std::vector<SeededEndpoint>{SeededEndpoint{forced[h], 0.0}};
+    std::vector<ShortestPath> cands = FindKShortestPathsMulti(graph, hop_sources, hop_goals, k, options);
+    if (cands.empty()) {
+      return results;  // a hop is unroutable -> no forced route exists
+    }
+    segments.push_back(std::move(cands));
+  }
+
+  // Stitch one combination (one candidate index per segment) into a full path.
+  // Returns found=false if the segments do not meet or the result has a cycle.
+  auto stitch = [&](const std::vector<int>& pick) -> ShortestPath {
+    ShortestPath out;
+    std::vector<int> path;
+    double dist = 0.0;
+    double cost = 0.0;
+    for (size_t h = 0; h < hops; ++h) {
+      const ShortestPath& seg = segments[h][pick[h]];
+      if (seg.vertices.empty()) {
+        return out;
+      }
+      if (path.empty()) {
+        path = seg.vertices;
+      } else {
+        if (path.back() != seg.vertices.front()) {
+          return out;  // seam mismatch (should not happen: seam == forced fix)
+        }
+        path.insert(path.end(), seg.vertices.begin() + 1, seg.vertices.end());
+      }
+      dist += seg.distance_nm;
+      cost += seg.cost;
+    }
+    std::unordered_set<int> seen;
+    seen.reserve(path.size());
+    for (const int v : path) {
+      if (!seen.insert(v).second) {
+        return out;  // cycle at a seam -> not a simple route
+      }
+    }
+    out.vertices = std::move(path);
+    out.distance_nm = dist;
+    out.cost = cost;
+    out.found = true;
+    return out;
+  };
+
+  // Lazy K-way merge over the Cartesian product of segment candidates, ordered
+  // by the sum of per-segment costs. Start from the all-best pick and expand a
+  // neighbor per segment (increment one index) each time a pick is popped.
+  auto combo_cost = [&](const std::vector<int>& pick) {
+    double c = 0.0;
+    for (size_t h = 0; h < hops; ++h) {
+      c += segments[h][pick[h]].cost;
+    }
+    return c;
+  };
+  struct HeapItem {
+    double cost;
+    std::vector<int> pick;
+    bool operator>(const HeapItem& o) const { return cost > o.cost; }
+  };
+  std::priority_queue<HeapItem, std::vector<HeapItem>, std::greater<>> heap;
+  std::set<std::vector<int>> queued;
+
+  std::vector<int> start(hops, 0);
+  heap.push({combo_cost(start), start});
+  queued.insert(start);
+
+  while (!heap.empty() && static_cast<int>(results.size()) < k) {
+    const std::vector<int> pick = heap.top().pick;
+    heap.pop();
+
+    const ShortestPath stitched = stitch(pick);
+    if (stitched.found) {
+      results.push_back(stitched);
+    }
+
+    // Enqueue the neighbors that advance one segment's candidate index.
+    for (size_t h = 0; h < hops; ++h) {
+      if (pick[h] + 1 < static_cast<int>(segments[h].size())) {
+        std::vector<int> next = pick;
+        next[h] += 1;
+        if (queued.insert(next).second) {
+          heap.push({combo_cost(next), next});
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 }  // namespace
@@ -412,14 +645,29 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   AltitudeBandConstraint altitude_band;
   MoraConstraint mora(mora_);
   LevelPreferenceConstraint level_pref;
+  // Resolve avoid sets once; the constraint holds them for the whole search
+  // (and every Yen spur), so it must outlive the calls below. The vertex set is
+  // also used to prune seeded endpoints (below): AvoidConstraint only blocks
+  // edges entering a vertex, but a source/goal fix is seeded, not entered, so an
+  // avoided connection fix must be removed from the endpoint sets directly.
+  const std::unordered_set<int> avoid_vertices =
+      ResolveAvoidVertices(*builder_, request.avoid_waypoints);
+  AvoidConstraint avoid(avoid_vertices, ResolveAvoidAirwayIds(*builder_, request.avoid_airways));
+  RandomizeConstraint randomize(request.random_seed.value_or(0));
   SearchOptions options;
   options.request = &request;
-  if (request.cruise_fl.has_value()) {
+  if (request.altitude.has_value()) {
     options.constraints.push_back(&altitude_band);
     options.constraints.push_back(&mora);
   }
   if (request.level != LevelPreference::kNone) {
     options.constraints.push_back(&level_pref);
+  }
+  if (!request.avoid_waypoints.empty() || !request.avoid_airways.empty()) {
+    options.constraints.push_back(&avoid);
+  }
+  if (request.random_seed.has_value()) {
+    options.constraints.push_back(&randomize);
   }
   // Airports must not be transit nodes: their synthetic DCT links would let the
   // search cut through an unrelated airport (e.g. ...MIE DCT KMIE SNKPT...).
@@ -429,8 +677,60 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   options.node_blocked = [builder_ptr](int v) { return builder_ptr->IsAirport(v); };
 
   const NavGraph& graph = builder_->graph();
-  const std::vector<SeededEndpoint> sources = ProcedureConnector::ToEndpoints(dep.connections);
-  const std::vector<SeededEndpoint> goals = ProcedureConnector::ToEndpoints(arr.connections);
+  std::vector<SeededEndpoint> sources = ProcedureConnector::ToEndpoints(dep.connections);
+  std::vector<SeededEndpoint> goals = ProcedureConnector::ToEndpoints(arr.connections);
+  // Drop any seeded connection fix the request asks to avoid: it would otherwise
+  // slip through as a search start/end, which AvoidConstraint cannot catch.
+  if (!avoid_vertices.empty()) {
+    auto drop_avoided = [&](std::vector<SeededEndpoint>& eps) {
+      eps.erase(std::remove_if(eps.begin(), eps.end(),
+                               [&](const SeededEndpoint& e) {
+                                 return avoid_vertices.count(e.vertex) != 0;
+                               }),
+                eps.end());
+    };
+    drop_avoided(sources);
+    drop_avoided(goals);
+    if (sources.empty() || goals.empty()) {
+      return Result<Routes>::Err(
+          Error(ErrorCode::kNoRoute, "no route between endpoints (avoided all connection fixes)"));
+    }
+  }
+
+  // Resolve forced ("via") points to an ordered vertex list. Disambiguation of a
+  // bare ident uses the dep->arr great circle: pick the match adding the least
+  // detour. Endpoint coordinates come from the airport vertex when there is one,
+  // else from the first seeded connection fix.
+  std::vector<int> forced;
+  std::vector<std::string> forced_echo;
+  if (!request.forced_points.empty()) {
+    const int dep_apt = builder_->VertexByAirport(ToUpper(request.departure));
+    const int arr_apt = builder_->VertexByAirport(ToUpper(request.arrival));
+    const Coordinate dep_coord =
+        dep_apt >= 0 ? graph.CoordOf(dep_apt) : graph.CoordOf(sources.front().vertex);
+    const Coordinate arr_coord =
+        arr_apt >= 0 ? graph.CoordOf(arr_apt) : graph.CoordOf(goals.front().vertex);
+    forced.reserve(request.forced_points.size());
+    forced_echo.reserve(request.forced_points.size());
+    for (const std::string& token : request.forced_points) {
+      std::string echo;
+      bool is_airport = false;
+      const int v =
+          ResolveForcedPoint(*builder_, token, dep_coord, arr_coord, echo, is_airport);
+      if (v < 0) {
+        const std::string why =
+            is_airport ? "' is an airport, not an enroute waypoint" : "' is not a known waypoint";
+        return Result<Routes>::Err(
+            Error(ErrorCode::kNoRoute, "forced point '" + token + why));
+      }
+      if (avoid_vertices.count(v) != 0) {
+        return Result<Routes>::Err(
+            Error(ErrorCode::kNoRoute, "forced point '" + token + "' is also in the avoid list"));
+      }
+      forced.push_back(v);
+      forced_echo.push_back(echo);
+    }
+  }
 
   // Find up to k candidate routes. Unlike the earlier scheme that fixed a single
   // best connection-fix pair and only varied the enroute portion between them,
@@ -439,7 +739,12 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   // Both forms report distance_nm with both seed costs already included.
   const int k = std::max(1, request.k);
   std::vector<ShortestPath> paths;
-  if (k == 1) {
+  if (!forced.empty()) {
+    // Forced points: search each hop (sources -> F1 -> ... -> Fn -> goals) with
+    // K-shortest and merge the best end-to-end combinations. Returns up to k
+    // whole routes through the forced points, in cost order.
+    paths = FindForcedPaths(graph, sources, goals, forced, k, options);
+  } else if (k == 1) {
     const ShortestPath best = FindShortestPathMulti(graph, sources, goals, options);
     if (best.found && !best.vertices.empty()) {
       paths.push_back(best);
@@ -509,6 +814,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     route.star_options = star_options;
     route.dep_connection = dep_kind;
     route.arr_connection = arr_kind;
+    route.forced_points = forced_echo;
     routes.push_back(std::move(route));
   }
   return Result<Routes>::Ok(std::move(routes));
@@ -537,12 +843,18 @@ void NavDatabase::BuildAirwayIndex() {
         continue;  // synthetic DCT edge, not a named airway
       }
       const std::string& name = builder_->AirwayName(e->airway_id);
-      AirwayInfo& info = airway_index_[name];
-      if (info.name.empty()) {
-        info.name = name;
+      const AirwayLeg leg{builder_->IdentOf(u).ident, builder_->IdentOf(e->to).ident,
+                          e->distance_nm, EdgeIsHigh(*e), e->base_fl, e->top_fl};
+      // A stored name may be a concurrency ("A593-Y592"): register the segment
+      // under each designator so a lookup by any of them finds it. A single
+      // airway splits to itself, so this is a no-op for the common case.
+      for (const std::string& designator : SplitDesignators(name)) {
+        AirwayInfo& info = airway_index_[designator];
+        if (info.name.empty()) {
+          info.name = designator;
+        }
+        info.segments.push_back(leg);
       }
-      info.segments.push_back(AirwayLeg{builder_->IdentOf(u).ident, builder_->IdentOf(e->to).ident,
-                                        e->distance_nm, EdgeIsHigh(*e), e->base_fl, e->top_fl});
     }
   }
 }

@@ -26,3 +26,4 @@ _deps/
 .vscode/
 *.swp
 compile_commands.json
+.cache/

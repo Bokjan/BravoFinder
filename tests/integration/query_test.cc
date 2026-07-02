@@ -1,5 +1,6 @@
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <thread>
@@ -115,6 +116,37 @@ TEST_CASE("query: airway lookup returns directed segments", "[integration][query
     CHECK(s.distance_nm > 0.0);
   }
   CHECK_FALSE(r[1].has_value());
+}
+
+TEST_CASE("query: concurrent airway is found by each of its designators", "[integration][query]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  // "A1-G581" is a real concurrency in AIRAC data: one physical segment carrying
+  // both A1 and G581. Before the designator-split fix, LookupAirways("A1") missed
+  // it (the index was keyed on the whole "A1-G581" string). Both designators must
+  // now resolve, and must share at least one identical physical segment.
+  auto by_a1 = db->LookupAirways({"A1"});
+  auto by_g581 = db->LookupAirways({"G581"});
+  if (!by_a1[0].has_value() || !by_g581[0].has_value()) {
+    SKIP("expected concurrency A1-G581 not present in this AIRAC cycle");
+  }
+  auto same_leg = [](const bf::AirwayLeg& x, const bf::AirwayLeg& y) {
+    return x.from == y.from && x.to == y.to &&
+           std::abs(x.distance_nm - y.distance_nm) < 1e-3;
+  };
+  bool shared = false;
+  for (const bf::AirwayLeg& a : by_a1[0]->segments) {
+    for (const bf::AirwayLeg& g : by_g581[0]->segments) {
+      if (same_leg(a, g)) {
+        shared = true;
+        break;
+      }
+    }
+    if (shared) break;
+  }
+  CHECK(shared);
 }
 
 TEST_CASE("query: concurrent lookups on one database are race-free", "[integration][query]") {

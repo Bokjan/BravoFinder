@@ -8,6 +8,20 @@ namespace bf {
 
 namespace {
 
+// Keep the names in `a` that also appear in `b`, preserving a's order.
+std::vector<std::string> Intersect(const std::vector<std::string>& a,
+                                   const std::vector<std::string>& b) {
+  std::vector<std::string> out;
+  for (const std::string& s : a) {
+    if (std::find(b.begin(), b.end(), s) != b.end()) {
+      out.push_back(s);
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
 // Split an airway designator field into its list of route names. A concurrency
 // is encoded "A593-Y592"; a single airway is just "Y592"; "DCT" yields {"DCT"}.
 // Real ATS route designators are letter+number with no internal hyphen, so '-'
@@ -27,20 +41,6 @@ std::vector<std::string> SplitDesignators(const std::string& via) {
   }
   return out;
 }
-
-// Keep the names in `a` that also appear in `b`, preserving a's order.
-std::vector<std::string> Intersect(const std::vector<std::string>& a,
-                                   const std::vector<std::string>& b) {
-  std::vector<std::string> out;
-  for (const std::string& s : a) {
-    if (std::find(b.begin(), b.end(), s) != b.end()) {
-      out.push_back(s);
-    }
-  }
-  return out;
-}
-
-}  // namespace
 
 std::string BuildRouteString(const std::string& first_point, std::vector<RouteLeg>& legs) {
   std::string rs = first_point;

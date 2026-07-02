@@ -4,23 +4,24 @@
 
 namespace bf {
 
-// Hard filter: when a cruise altitude is given, an airway segment is usable
-// only if that flight level falls within the segment's [base_fl, top_fl] band.
+// Hard filter: when a cruise altitude range is given, an airway segment is
+// usable only if that range overlaps the segment's [base_fl, top_fl] band.
 // Segments with no altitude limits recorded (base_fl == 0 && top_fl == 0, e.g.
 // synthetic DCT edges) are exempt. With no cruise altitude set, this constraint
 // allows everything.
 class AltitudeBandConstraint : public Constraint {
  public:
   EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest& request) const override {
-    if (!request.cruise_fl.has_value()) {
+    if (!request.altitude.has_value()) {
       return EdgeVerdict::Allow();
     }
     const GraphEdge& e = ctx.edge;
     if (e.base_fl == 0 && e.top_fl == 0) {
       return EdgeVerdict::Allow();  // no recorded band (e.g. DCT)
     }
-    const int fl = *request.cruise_fl;
-    if (fl < e.base_fl || fl > e.top_fl) {
+    const FlRange& r = *request.altitude;
+    // Two inclusive ranges are disjoint iff one lies entirely below the other.
+    if (r.max_fl < e.base_fl || r.min_fl > e.top_fl) {
       return EdgeVerdict::Block();
     }
     return EdgeVerdict::Allow();

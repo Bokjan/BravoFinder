@@ -174,8 +174,20 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
   }
   request.departure = args["departure"].GetString();
   request.arrival = args["arrival"].GetString();
-  if (args.HasMember("cruise_fl") && args["cruise_fl"].IsInt()) {
-    request.cruise_fl = args["cruise_fl"].GetInt();
+  // Altitude is an inclusive flight-level range. min_fl/max_fl may be given
+  // together for a band, or either alone (the other defaults to it) for a
+  // single level. Absent => no altitude/MORA filtering.
+  {
+    const bool has_min = args.HasMember("min_fl") && args["min_fl"].IsInt();
+    const bool has_max = args.HasMember("max_fl") && args["max_fl"].IsInt();
+    if (has_min || has_max) {
+      const int min_fl = has_min ? args["min_fl"].GetInt() : args["max_fl"].GetInt();
+      const int max_fl = has_max ? args["max_fl"].GetInt() : args["min_fl"].GetInt();
+      if (min_fl > max_fl) {
+        return {R"({"error":"min_fl must not exceed max_fl"})", true};
+      }
+      request.altitude = bf::FlRange{min_fl, max_fl};
+    }
   }
   if (args.HasMember("level") && args["level"].IsString()) {
     const std::string level = args["level"].GetString();
@@ -199,6 +211,18 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
   }
   if (args.HasMember("arrival_star") && args["arrival_star"].IsString()) {
     request.arrival_star = args["arrival_star"].GetString();
+  }
+  if (auto v = ParseIdList(args, "avoid_waypoints")) {
+    request.avoid_waypoints = std::move(*v);
+  }
+  if (auto v = ParseIdList(args, "avoid_airways")) {
+    request.avoid_airways = std::move(*v);
+  }
+  if (args.HasMember("random_seed") && args["random_seed"].IsUint()) {
+    request.random_seed = args["random_seed"].GetUint();
+  }
+  if (auto v = ParseIdList(args, "forced_points")) {
+    request.forced_points = std::move(*v);
   }
 
   bf::Result<std::vector<bf::Route>> result = db.FindRoutes(request);
@@ -237,13 +261,18 @@ const std::vector<Tool>& AllTools() {
           R"({"type":"object","properties":{)"
           R"("departure":{"type":"string","description":"Departure airport ICAO or waypoint ident."},)"
           R"("arrival":{"type":"string","description":"Arrival airport ICAO or waypoint ident."},)"
-          R"("cruise_fl":{"type":"integer","description":"Cruise flight level in hundreds of feet, e.g. 350 for FL350. Setting it enables altitude/MORA constraint filtering."},)"
+          R"("min_fl":{"type":"integer","description":"Lower bound of the cruise flight-level range, in hundreds of feet (e.g. 300 for FL300). May be given alone for a single level. Setting min_fl and/or max_fl enables altitude/MORA constraint filtering."},)"
+          R"("max_fl":{"type":"integer","description":"Upper bound of the cruise flight-level range, in hundreds of feet (e.g. 400 for FL400). May be given alone for a single level."},)"
           R"("level":{"type":"string","enum":["none","low","high"],"description":"Preferred airway level: none=no preference (default), low=prefer Victor low airways, high=prefer Jet high airways."},)"
           R"("k":{"type":"integer","minimum":1,"description":"Number of candidate routes to return (Yen K-shortest). Defaults to 1."},)"
           R"("departure_runway":{"type":"string","description":"Restrict the SID to this departure runway, e.g. RW31L. Empty=any."},)"
           R"("arrival_runway":{"type":"string","description":"Restrict the STAR to this arrival runway, e.g. RW25L. Empty=any."},)"
           R"("departure_sid":{"type":"string","description":"Pin a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN. Empty=auto."},)"
-          R"("arrival_star":{"type":"string","description":"Pin a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS. Empty=auto."}},)"
+          R"("arrival_star":{"type":"string","description":"Pin a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS. Empty=auto."},)"
+          R"("avoid_waypoints":{"type":"array","items":{"type":"string"},"description":"Waypoints to route around, each an ident (BOTON) or IDENT/REGION (BOTON/LF). A bare ident avoids all regions' matches."},)"
+          R"("avoid_airways":{"type":"array","items":{"type":"string"},"description":"Airway designators to route around, e.g. J60. Also blocks concurrency segments recorded as J60-V123."},)"
+          R"("random_seed":{"type":"integer","minimum":0,"description":"Seed for reproducible route diversity. The same seed always yields the same route; different seeds explore alternatives. Omit for the plain optimal route."},)"
+          R"("forced_points":{"type":"array","items":{"type":"string"},"description":"Ordered waypoints the route must pass through (via points), each an ident (PSB) or IDENT/REGION (PSB/K6). The response echoes them resolved as IDENT/REGION."}},)"
           R"("required":["departure","arrival"]})"),
       FindRoutesHandler);
 

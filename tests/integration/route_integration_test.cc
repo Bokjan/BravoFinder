@@ -177,12 +177,208 @@ TEST_CASE("real data: high cruise altitude still finds a route", "[integration]"
   }
 
   bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
-  req.cruise_fl = 350;  // FL350: enables altitude-band and MORA filtering
+  req.altitude = bf::FlRange{350, 350};  // FL350: enables altitude-band and MORA filtering
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
   // The altitude-constrained route should still be a sane length.
   CHECK(routes.value().front().total_distance_nm > 2144.0);
+}
+
+TEST_CASE("real data: avoiding a waypoint routes around it", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+
+  bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(baseline);
+  REQUIRE_FALSE(baseline.value().empty());
+  const bf::Route& base = baseline.value().front();
+
+  // Pick an interior enroute point of the baseline route to avoid. Skip the
+  // first and last points (the airports / connection fixes).
+  REQUIRE(base.points.size() > 3);
+  const std::string victim = base.points[base.points.size() / 2].ident;
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.avoid_waypoints = {victim};
+  bf::Result<std::vector<bf::Route>> avoided = db->FindRoutes(req);
+  REQUIRE(avoided);
+  REQUIRE_FALSE(avoided.value().empty());
+  const bf::Route& r = avoided.value().front();
+
+  // The avoided waypoint must not appear as an interior point of the new route.
+  for (size_t i = 1; i + 1 < r.points.size(); ++i) {
+    CHECK(r.points[i].ident != victim);
+  }
+  // Routing around a point cannot be shorter than the unconstrained optimum.
+  CHECK(r.total_distance_nm >= base.total_distance_nm - 1e-6);
+}
+
+TEST_CASE("real data: avoiding a SID connection fix picks another entry", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
+    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
+  }
+
+  bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(baseline);
+  REQUIRE_FALSE(baseline.value().empty());
+  const bf::Route& base = baseline.value().front();
+
+  // The first enroute point after the departure airport is the SID connection
+  // fix -- a seeded search source, which AvoidConstraint alone cannot block.
+  // Avoiding it must still work (via endpoint pruning), yielding a route that
+  // enters the network through a different fix.
+  REQUIRE(base.points.size() > 2);
+  const std::string connection_fix = base.points[1].ident;
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.avoid_waypoints = {connection_fix};
+  bf::Result<std::vector<bf::Route>> avoided = db->FindRoutes(req);
+  REQUIRE(avoided);
+  REQUIRE_FALSE(avoided.value().empty());
+  for (const bf::RoutePoint& p : avoided.value().front().points) {
+    CHECK(p.ident != connection_fix);
+  }
+}
+
+TEST_CASE("real data: a seeded route is reproducible", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.random_seed = 42u;
+  bf::Result<std::vector<bf::Route>> a = db->FindRoutes(req);
+  bf::Result<std::vector<bf::Route>> b = db->FindRoutes(req);
+  REQUIRE(a);
+  REQUIRE(b);
+  REQUIRE_FALSE(a.value().empty());
+  REQUIRE_FALSE(b.value().empty());
+  // Same seed => byte-identical route string (reproducible / no mutable state).
+  CHECK(a.value().front().route_string == b.value().front().route_string);
+  // A seeded route must still be a valid, plausible route.
+  CHECK(a.value().front().total_distance_nm > 2000.0);
+}
+
+TEST_CASE("real data: avoiding an airway keeps it out of the route", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+
+  bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(baseline);
+  REQUIRE_FALSE(baseline.value().empty());
+  const bf::Route& base = baseline.value().front();
+
+  // Find a named enroute airway used by the baseline route to avoid. Skip the
+  // leading/trailing legs (their `via` is the SID/STAR name, not an airway) and
+  // any DCT legs.
+  std::string victim_awy;
+  for (size_t i = 1; i + 1 < base.legs.size(); ++i) {
+    const std::string& via = base.legs[i].via;
+    if (via != "DCT" && !via.empty() && via != base.sid && via != base.star) {
+      victim_awy = via;
+      break;
+    }
+  }
+  if (victim_awy.empty()) {
+    SKIP("baseline route uses no named enroute airway to avoid");
+  }
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.avoid_airways = {victim_awy};
+  bf::Result<std::vector<bf::Route>> avoided = db->FindRoutes(req);
+  REQUIRE(avoided);
+  REQUIRE_FALSE(avoided.value().empty());
+  for (const bf::RouteLeg& leg : avoided.value().front().legs) {
+    CHECK(leg.via != victim_awy);
+  }
+}
+
+TEST_CASE("real data: forced via points appear in order", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+
+  bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(baseline);
+  REQUIRE_FALSE(baseline.value().empty());
+  const double base_dist = baseline.value().front().total_distance_nm;
+
+  // Force the route through an off-track fix (DBL, Colorado). It must appear in
+  // the point list, be echoed with its region, and not shorten the route.
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.forced_points = {"DBL"};
+  bf::Result<std::vector<bf::Route>> forced = db->FindRoutes(req);
+  REQUIRE(forced);
+  REQUIRE_FALSE(forced.value().empty());
+  const bf::Route& r = forced.value().front();
+
+  bool via_present = false;
+  for (const bf::RoutePoint& p : r.points) {
+    if (p.ident == "DBL") {
+      via_present = true;
+      break;
+    }
+  }
+  CHECK(via_present);
+  REQUIRE(r.forced_points.size() == 1);
+  CHECK(r.forced_points.front().rfind("DBL/", 0) == 0);  // echoed as DBL/REGION
+  CHECK(r.total_distance_nm >= base_dist - 1e-6);         // a detour is not shorter
+}
+
+TEST_CASE("real data: forced via points with k>1 returns distinct ordered routes",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.forced_points = {"DBL"};
+  req.k = 3;
+  bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+  REQUIRE(r);
+  REQUIRE_FALSE(r.value().empty());
+  const std::vector<bf::Route>& routes = r.value();
+
+  // Every returned candidate still honors the forced point and is distinct, and
+  // the candidates are ordered by non-decreasing distance.
+  std::set<std::string> seen_strings;
+  double prev = 0.0;
+  for (const bf::Route& route : routes) {
+    bool via_present = false;
+    for (const bf::RoutePoint& p : route.points) {
+      if (p.ident == "DBL") {
+        via_present = true;
+        break;
+      }
+    }
+    CHECK(via_present);
+    CHECK(seen_strings.insert(route.route_string).second);  // distinct
+    CHECK(route.total_distance_nm >= prev - 1e-6);          // non-decreasing
+    prev = route.total_distance_nm;
+  }
+}
+
+TEST_CASE("real data: an unknown forced point is an error", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.forced_points = {"ZZZZQ"};
+  bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+  CHECK_FALSE(r);
 }
 
 TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {

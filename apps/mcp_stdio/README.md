@@ -96,7 +96,7 @@ JSON（对象或数组），直接解析即可。
 
 | Tool | 必填参数 | 可选参数 | 返回 |
 |------|---------|---------|------|
-| `find_routes` | `departure`, `arrival` | `cruise_fl`, `level`, `k`, `departure_runway`, `arrival_runway`, `departure_sid`, `arrival_star` | 候选航路数组（见下） |
+| `find_routes` | `departure`, `arrival` | `min_fl`, `max_fl`, `level`, `k`, `departure_runway`, `arrival_runway`, `departure_sid`, `arrival_star` | 候选航路数组（见下） |
 | `lookup_waypoints` | `ids` (string[]) | — | 与 `ids` 平行的数组，元素为 waypoint 对象或 `null` |
 | `lookup_airports` | `ids` (string[]) | — | 同上，airport 对象或 `null` |
 | `lookup_procedures` | `ids` (string[]) | — | 同上，procedures 对象或 `null` |
@@ -107,7 +107,7 @@ JSON（对象或数组），直接解析即可。
 参数语义：
 
 - `departure` / `arrival`：机场 ICAO 或 waypoint ident（大小写不敏感）。
-- `cruise_fl`：巡航飞行高度层（百英尺），如 `350` 表示 FL350；设置后启用高度带 / MORA 约束过滤。
+- `min_fl` / `max_fl`：巡航飞行高度层区间（百英尺），如 `min_fl=300, max_fl=400` 表示 FL300–FL400；只给其一则视为单一高度层（如仅 `min_fl=350` 即 FL350）。设置后启用高度带 / MORA 约束过滤。
 - `level`：`none`（默认）| `low`（优先 Victor 低空航路）| `high`（优先 Jet 高空航路）。
 - `k`：返回的候选航路数（Yen K-shortest），默认 1，需 ≥ 1。
 - `departure_runway` / `arrival_runway`：限制所用 SID / STAR 的跑道，如 `RW31L`；空 = 任意。

@@ -78,6 +78,11 @@ struct Route {
   // The route was computed once for the shared fix rather than per procedure.
   std::vector<std::string> sid_options;
   std::vector<std::string> star_options;
+
+  // The forced ("via") points the route was routed through, in order, echoed as
+  // resolved "IDENT/REGION" keys. This makes the disambiguation visible when a
+  // bare ident matched several regions. Empty when no forced points were given.
+  std::vector<std::string> forced_points;
 };
 
 }  // namespace bf

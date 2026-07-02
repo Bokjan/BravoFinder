@@ -44,6 +44,9 @@ void WriteRouteJson(Writer& writer, const Route& route) {
   key_str("star", route.star);
   key_str("arr_runway", route.arr_runway);
   key_str_array("star_options", route.star_options);
+  if (!route.forced_points.empty()) {
+    key_str_array("forced_points", route.forced_points);
+  }
   writer.Key("dep_connection");
   writer.String(ToString(route.dep_connection));
   writer.Key("arr_connection");
