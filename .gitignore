@@ -1,29 +1,26 @@
-# ── 本地工作文档（不入库）────────────────────────────────────
-# .notes/ = Claude 与本地工作稿（DESIGN.md 等）；公开文档将放 docs/（入库）
-# CLAUDE.md（项目协作规范）现已入库，不再忽略
+# Local working documents (not committed)
 .notes/
 .claude/
 
-# 本地 MCP 客户端配置（含本机构建路径，不入库）
+# Local MCP client config (contains machine-specific build paths)
 .mcp.json
 
-# ── 导航数据合规（Jeppesen 版权，禁止再分发）──────────────────
-# 真实 X-Plane / Navigraph 数据与其衍生缓存绝不入库
+# Real X-Plane / Navigraph data and derived caches (Jeppesen copyright)
 /navdata/
 *.dat
 *.bfdb
 *.sqlite
 
-# ── 构建产物 ──────────────────────────────────────────────
+# Build artifacts
 /build*/
 /cmake-build-*/
 CMakeUserPresets.json
 
-# ── FetchContent / 第三方缓存 ────────────────────────────────
+# FetchContent / third-party cache
 /third_party/
 _deps/
 
-# ── 编辑器 / 系统 ────────────────────────────────────────────
+# Editor / OS
 .DS_Store
 .idea/
 .vscode/
