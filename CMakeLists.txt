@@ -48,7 +48,7 @@ if(NOT rapidjson_POPULATED)
   FetchContent_Populate(rapidjson)
 endif()
 add_library(rapidjson INTERFACE)
-target_include_directories(rapidjson INTERFACE ${rapidjson_SOURCE_DIR}/include)
+target_include_directories(rapidjson INTERFACE SYSTEM ${rapidjson_SOURCE_DIR}/include)
 add_library(rapidjson::rapidjson ALIAS rapidjson)
 
 if(BRAVOFINDER_BUILD_TESTS)

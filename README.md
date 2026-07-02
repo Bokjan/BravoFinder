@@ -1,5 +1,7 @@
 # BravoFinder
 
+[![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml)
+
 A flight route finder written in modern C++, **version 3.0.0 — a complete rewrite**.
 
 ## About

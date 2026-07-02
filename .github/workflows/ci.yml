@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [v3, v2, main]
+    branches: [v3]
   pull_request:
 
 jobs:
@@ -13,14 +13,19 @@ jobs:
         os: [ubuntu-24.04, macos-latest, windows-latest]
         preset: [debug, release, tsan]
         exclude:
-          # MSVC does not support -fsanitize; windows-debug replaces debug below.
+          # MSVC does not support -fsanitize or the GCC/Clang flags in the
+          # regular presets; replace with Windows-specific presets below.
           - os: windows-latest
             preset: debug
+          - os: windows-latest
+            preset: release
           - os: windows-latest
             preset: tsan
         include:
           - os: windows-latest
             preset: windows-debug
+          - os: windows-latest
+            preset: windows-release
 
     runs-on: ${{ matrix.os }}
 

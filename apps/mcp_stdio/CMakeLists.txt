@@ -9,21 +9,31 @@ target_link_libraries(bf_mcp_stdio PRIVATE bf::io rapidjson::rapidjson)
 # target keeps the snake_case name required by Google Style.
 set_target_properties(bf_mcp_stdio PROPERTIES OUTPUT_NAME "bf-mcp-stdio")
 
-# Same benign rapidjson pointer-overflow suppression as the CLI target, plus
-# two more: rapidjson 1.1.0's internal memcpy over GenericValue trips
-# -Wnontrivial-memcall, and its use of the deprecated std::iterator trips
-# -Wdeprecated-declarations, both under -Werror with a modern libc++. The
-# behaviors are benign and there is no newer tagged release to move to, so
-# narrow off just these warnings for this target (no-ops where warnings are not
-# active, e.g. release, or when the compiler is not GCC/Clang).
+# rapidjson 1.1.0 (latest tagged release, 2016) triggers two warnings under
+# -Werror that are benign but can't be fixed without a newer release:
+#   -Wnontrivial-memcall (Clang) / -Wclass-memaccess (GCC)
+#     — internal memcpy over GenericValue types
+#   -Wdeprecated-declarations
+#     — internal use of std::iterator
+# These fire from template instantiations in the user's translation unit, so
+# SYSTEM includes don't help. Probe each flag and apply when available.
+# Additionally, rapidjson computes `nullPtr + offset` on first stack use,
+# tripping UBSan's pointer-overflow check — narrow off just that sub-check.
+# All are GCC/Clang only; MSVC does not recognise these flags.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   include(CheckCXXCompilerFlag)
-  check_cxx_compiler_flag("-Wnontrivial-memcall" HAS_WNONTRIVIAL_MEMCALL)
 
   target_compile_options(bf_mcp_stdio PRIVATE
     -fno-sanitize=pointer-overflow
-    -Wno-error=deprecated-declarations)
+    -Wno-deprecated-declarations)
+
+  check_cxx_compiler_flag("-Wnontrivial-memcall" HAS_WNONTRIVIAL_MEMCALL)
   if(HAS_WNONTRIVIAL_MEMCALL)
-    target_compile_options(bf_mcp_stdio PRIVATE -Wno-error=nontrivial-memcall)
+    target_compile_options(bf_mcp_stdio PRIVATE -Wno-nontrivial-memcall)
+  endif()
+
+  check_cxx_compiler_flag("-Wclass-memaccess" HAS_WCLASS_MEMACCESS)
+  if(HAS_WCLASS_MEMACCESS)
+    target_compile_options(bf_mcp_stdio PRIVATE -Wno-class-memaccess)
   endif()
 endif()

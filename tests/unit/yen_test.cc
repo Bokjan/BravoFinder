@@ -90,7 +90,7 @@ TEST_CASE("Yen on unreachable goal returns empty", "[yen]") {
 // goal G through a shared midpoint M. Each entry sits one degree out on either
 // side, so a route can join through either one at nearly equal cost.
 //
-//   S1 --Q1--\
+//   S1 --Q1--
 //             M --Q3--> G
 //   S2 --Q2--/
 //

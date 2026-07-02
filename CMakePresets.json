@@ -45,11 +45,20 @@
     },
     {
       "name": "windows-debug",
-      "displayName": "Windows Debug (MSVC /W4 /WX, no sanitizers)",
+      "displayName": "Windows Debug (MSVC /W4 /WX /EHsc, no sanitizers)",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS": "/W4 /WX"
+        "CMAKE_CXX_FLAGS": "/W4 /WX /EHsc"
+      }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows Release (MSVC /O2 /W3)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_FLAGS": "/O2 /W3"
       }
     }
   ],
@@ -72,6 +81,11 @@
     {
       "name": "windows-debug",
       "configurePreset": "windows-debug",
+      "jobs": 0
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
       "jobs": 0
     }
   ],
@@ -106,6 +120,13 @@
     {
       "name": "windows-debug",
       "configurePreset": "windows-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
       "output": {
         "outputOnFailure": true
       }
