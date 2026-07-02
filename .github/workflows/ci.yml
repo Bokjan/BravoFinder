@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v4.3.0
 
       # -- ccache (Linux & macOS only; skipped on Windows) ------------------
       - name: Install ccache (Linux)
@@ -45,7 +45,7 @@ jobs:
 
       - name: Cache ccache (Linux)
         if: runner.os == 'Linux'
-        uses: actions/cache@v4.0.2
+        uses: actions/cache@v4.3.0
         with:
           path: ~/.cache/ccache
           key: ccache-linux-${{ matrix.preset }}-${{ github.ref }}-${{ github.sha }}
@@ -55,7 +55,7 @@ jobs:
 
       - name: Cache ccache (macOS)
         if: runner.os == 'macOS'
-        uses: actions/cache@v4.0.2
+        uses: actions/cache@v4.3.0
         with:
           path: ~/Library/Caches/ccache
           key: ccache-macos-${{ matrix.preset }}-${{ github.ref }}-${{ github.sha }}
