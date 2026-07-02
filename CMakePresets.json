@@ -54,11 +54,11 @@
     },
     {
       "name": "windows-release",
-      "displayName": "Windows Release (MSVC /O2 /W3)",
+      "displayName": "Windows Release (MSVC /O2 /W3 /EHsc)",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_FLAGS": "/O2 /W3"
+        "CMAKE_CXX_FLAGS": "/O2 /W3 /EHsc"
       }
     }
   ],
