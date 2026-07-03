@@ -2,6 +2,9 @@
 .notes/
 .claude/
 
+# Navigraph FMS Data Manager downloads (copyright, machine-local)
+.navigraph/
+
 # Local MCP client config (contains machine-specific build paths)
 .mcp.json
 
