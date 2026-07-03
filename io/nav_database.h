@@ -15,6 +15,7 @@
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/cache/cifp_cache.h"
+#include "io/cache/nav_detail_cache.h"
 #include "io/loaders/xplane/cifp/cifp_parser.h"
 
 namespace bf {
@@ -81,6 +82,13 @@ class NavDatabase {
   Result<uint32_t> WriteCifpCache(const std::string& out_path,
                                   const std::string& source_loader) const;
 
+  // Serialize the navaid detail + hold archive to a `nav_..._detail.bfdb` side
+  // cache. `source_loader` is recorded as provenance. Returns an Error if the
+  // database has no detail archive (e.g. opened from a cache without one) or the
+  // file cannot be written.
+  Result<void> WriteDetailCache(const std::string& out_path,
+                                const std::string& source_loader) const;
+
   // Find up to request.k candidate routes, ordered best-first, honoring the
   // request's altitude/level constraints. Endpoints resolve as airport ICAO
   // first, then waypoint ident; case-insensitive. Returns an Error if an
@@ -129,6 +137,16 @@ class NavDatabase {
   // that name. nullopt when no segment uses the name.
   std::vector<std::optional<AirwayInfo>> LookupAirways(const std::vector<std::string>& names) const;
 
+  // Navaid detail attributes (freq/range/elev/heading) by ident. Returns all
+  // region matches per ident (empty inner vector when not found or no detail
+  // cache was loaded). Requires a detail cache opened via OpenCached.
+  std::vector<std::vector<NavaidDetailInfo>> LookupNavaidDetails(
+      const std::vector<std::string>& idents) const;
+
+  // Holding patterns by fix ident. Returns all holds at that fix across all
+  // regions and airports (empty inner vector when not found or no detail cache).
+  std::vector<std::vector<HoldInfo>> LookupHolds(const std::vector<std::string>& fix_idents) const;
+
  private:
   // Load (and cache) an airport's CIFP procedures on demand. Returns nullptr if
   // the airport has no CIFP file. The cache accumulates across queries so a
@@ -160,6 +178,9 @@ class NavDatabase {
   // from it instead of parsing CIFP/<ICAO>.dat files. Immutable after Open, so
   // it needs no lock (its Fetch opens an independent ifstream per call).
   std::optional<CifpArchive> cifp_archive_;
+  // Optional navaid detail + hold cache, loaded eagerly at Open.
+  // Immutable after Open; FindNavaids/FindHolds are const and lock-free.
+  std::optional<NavDetailArchive> detail_archive_;
   // When true, procedure_cache_ was fully populated at Open and is frozen: reads
   // hit existing entries only, so ProceduresFor skips the lock entirely (no
   // insert => no rehash => no data race). When false (on-demand), the cache is

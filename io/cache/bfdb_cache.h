@@ -15,11 +15,11 @@ namespace bf {
 
 // A flat, self-contained snapshot of everything a NavDatabase needs to answer
 // queries, decoupled from GraphBuilder's internal indexing. BfdbCache reads and
-// writes this image; GraphBuilder converts to/from it. The three lookup maps
-// are NOT part of the image: they are rebuilt from `idents` on load (an
+// writes this archive; GraphBuilder converts to/from it. The three lookup maps
+// are NOT part of the archive: they are rebuilt from `idents` on load (an
 // unordered_map is not portably serializable and costs more in RAM than the
 // arrays it indexes).
-struct BfdbImage {
+struct GraphArchive {
   uint32_t cycle = 0;
   uint32_t build = 0;
   std::string program_semver;  // bf version that built this cache
@@ -52,7 +52,7 @@ struct BfdbHeader {
   std::string source_loader;   // loader that produced the data, e.g. "xplane"
 };
 
-// Binary serialization of a BfdbImage to and from a `.bfdb` file.
+// Binary serialization of a GraphArchive to and from a `.bfdb` file.
 //
 // The format is explicit, fixed-width, little-endian, and uses IEEE-754 bit
 // patterns for floats, so a file produced on one platform (x86-64, ARM) reads
@@ -72,13 +72,13 @@ class BfdbCache {
   //     new per-vertex field is one more field in the vertex record.
   static constexpr uint32_t kFormatVersion = 3;
 
-  // Serialize `image` to `path`. Returns an error if the file cannot be written
-  // or the image exceeds format limits (e.g. > 65535 airway names).
-  static Result<void> Write(const std::string& path, const BfdbImage& image);
+  // Serialize `archive` to `path`. Returns an error if the file cannot be written
+  // or the archive exceeds format limits (e.g. > 65535 airway names).
+  static Result<void> Write(const std::string& path, const GraphArchive& archive);
 
-  // Read a `.bfdb` file into a BfdbImage. Returns kDataMissing if the file is
+  // Read a `.bfdb` file into a GraphArchive. Returns kDataMissing if the file is
   // absent, malformed, truncated, or of an incompatible format version.
-  static Result<BfdbImage> Read(const std::string& path);
+  static Result<GraphArchive> Read(const std::string& path);
 
   // Read only the header (magic, version, cycle/build, provenance strings)
   // without deserializing the graph body, so a directory of caches can be

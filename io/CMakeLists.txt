@@ -7,6 +7,7 @@ add_library(bf_io
             cache/bfdb_inventory.cc
             cache/bfdb_naming.cc
             cache/cifp_cache.cc
+            cache/nav_detail_cache.cc
             graph_builder.cc
             nav_database.cc
             nav_database_routing.cc

@@ -123,10 +123,10 @@ bf-mcp-stdio --db-dir /path/to/caches
 ```
 
 Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the
-`lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways`
-batch lookups (mirroring `bf query`), and `list_cycles`. See
-[apps/mcp_stdio/README.md](apps/mcp_stdio/README.md) for the full tool reference,
-argument semantics, and client configuration.
+`lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways` /
+`lookup_navaid_detail` / `lookup_holds` batch lookups (mirroring `bf query`), and
+`list_cycles`. See [apps/mcp_stdio/README.md](apps/mcp_stdio/README.md) for the
+full tool reference, argument semantics, and client configuration.
 
 `bf build` (cache creation) remains a CLI concern and is not exposed as a tool.
 
@@ -190,13 +190,17 @@ bf route KJFK KLAX --seed 42
 # intermediate points, and totals the distance. Errors name the bad token.
 bf parse-route "KJFK DEEZZ5 CANDR Q480 HOTEE J80 MCI ... KLAX" --db navdata/nav_2601_20260112.bfdb
 
-# Look up navigation data: waypoints, airports, procedures, or airways. Each
-# accepts one or more ids (a batch), and --format json emits an array parallel
-# to the input (a not-found id becomes null).
+# Look up navigation data: waypoints, airports, procedures, airways, navaid
+# details, or holds. Each accepts one or more ids (a batch), and --format json
+# emits an array parallel to the input (a not-found id becomes null).
 bf query waypoint --db navdata/nav_2601_20260112.bfdb NINOX DGC
 bf query airport  --db navdata/nav_2601_20260112.bfdb KJFK KLAX
 bf query procedure --db navdata/nav_2601_20260112.bfdb KJFK
 bf query airway   --db navdata/nav_2601_20260112.bfdb Y28 --format json
+# navaid_detail: frequency, service range, elevation, station variation/bearing.
+bf query navaid_detail --db navdata/nav_2601_20260112.bfdb SEA DGC
+# hold: holding-pattern parameters (inbound course, leg length, turn, altitude).
+bf query hold --db navdata/nav_2601_20260112.bfdb AE701
 
 # Print the program version
 bf --version
@@ -208,10 +212,11 @@ the interchangeable procedures that share the same connection fix).
 
 The `.bfdb` caches are portable, little-endian binary snapshots (the graph cache
 holds the graph; its `_cifp.bfdb` companion holds per-airport procedures, loaded
-on demand). The canonical name is `nav_<cycle>_<build>.bfdb`, encoding the AIRAC
-provenance so a directory can hold several cycles. They are derived from
-Navigraph/Jeppesen data and, like the source data, must not be redistributed
-(they are git-ignored).
+on demand; its `_detail.bfdb` companion holds radio-navaid attributes and holding
+patterns for the `navaid_detail` / `hold` lookups). The canonical name is
+`nav_<cycle>_<build>.bfdb`, encoding the AIRAC provenance so a directory can hold
+several cycles. They are derived from Navigraph/Jeppesen data and, like the source
+data, must not be redistributed (they are git-ignored).
 
 ## Navigation Data
 

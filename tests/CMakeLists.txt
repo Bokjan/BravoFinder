@@ -12,6 +12,7 @@ add_executable(bf_tests
                unit/route_json_test.cc
                unit/small_vec_test.cc
                unit/bfdb_naming_test.cc
+               unit/nav_detail_cache_test.cc
                integration/route_integration_test.cc
                integration/query_test.cc
                integration/bfdb_cache_test.cc

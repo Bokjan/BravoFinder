@@ -13,18 +13,18 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// A minimal valid BfdbImage: an empty graph carrying AIRAC provenance. Enough
+// A minimal valid GraphArchive: an empty graph carrying AIRAC provenance. Enough
 // for OpenCached to build a (trivial) NavDatabase; the registry only cares that
 // it opens.
-bf::BfdbImage TinyImage(uint32_t cycle, uint32_t build) {
-  bf::BfdbImage img;
-  img.cycle = cycle;
-  img.build = build;
-  img.program_semver = "3.2.0";
-  img.source_loader = "test";
-  img.first_airport_vertex = 0;
-  img.offsets = {0};
-  return img;
+bf::GraphArchive TinyArchive(uint32_t cycle, uint32_t build) {
+  bf::GraphArchive arc;
+  arc.cycle = cycle;
+  arc.build = build;
+  arc.program_semver = "3.2.0";
+  arc.source_loader = "test";
+  arc.first_airport_vertex = 0;
+  arc.offsets = {0};
+  return arc;
 }
 
 fs::path TempDir(const std::string& tag) {
@@ -37,7 +37,7 @@ fs::path TempDir(const std::string& tag) {
 
 void WriteCache(const fs::path& dir, uint32_t cycle, uint32_t build) {
   const std::string path = (dir / bf::FormatBfdbName(cycle, build)).string();
-  REQUIRE(bf::BfdbCache::Write(path, TinyImage(cycle, build)));
+  REQUIRE(bf::BfdbCache::Write(path, TinyArchive(cycle, build)));
 }
 
 bf::mcp::NavDatabaseRegistry MakeRegistry(const fs::path& dir) {

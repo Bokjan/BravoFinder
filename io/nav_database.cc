@@ -13,6 +13,7 @@
 #include "core/version.h"
 #include "io/cache/bfdb_cache.h"
 #include "io/cache/cifp_cache.h"
+#include "io/cache/nav_detail_cache.h"
 #include "io/graph_builder.h"
 #include "io/loaders/xplane/cifp/cifp_parser.h"
 #include "io/loaders/xplane/xplane_loader.h"
@@ -36,6 +37,9 @@ Result<NavDatabase> NavDatabase::Open(const std::string& data_dir) {
   db.mora_ = std::move(data.value().mora);
   db.msa_ = std::move(data.value().msa);
   db.builder_ = std::make_unique<GraphBuilder>(data.value());
+  // Build the detail archive from the same parse (navaid_details/hold_fixes are
+  // still in `data`; mora/msa were moved out above but those two were not).
+  db.detail_archive_ = NavDetailArchive::FromData(data.value());
   db.BuildAirwayIndex();
   return Result<NavDatabase>::Ok(std::move(db));
 }
@@ -43,19 +47,19 @@ Result<NavDatabase> NavDatabase::Open(const std::string& data_dir) {
 Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path,
                                             const std::string& data_dir,
                                             const std::string& cifp_db_path, CifpLoad cifp_load) {
-  Result<BfdbImage> image = BfdbCache::Read(bfdb_path);
-  if (!image) {
-    return Result<NavDatabase>::Err(std::move(image).error());
+  Result<GraphArchive> archive = BfdbCache::Read(bfdb_path);
+  if (!archive) {
+    return Result<NavDatabase>::Err(std::move(archive).error());
   }
-  BfdbImage& img = image.value();
+  GraphArchive& arc = archive.value();
   NavDatabase db;
   // The CIFP directory: an explicit override wins, else the build-time dir.
-  db.data_dir_ = data_dir.empty() ? img.data_dir : data_dir;
-  db.cycle_ = img.cycle;
-  db.build_ = img.build;
-  db.mora_ = std::move(img.mora);
-  db.msa_ = std::move(img.msa);
-  db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromImage(std::move(img)));
+  db.data_dir_ = data_dir.empty() ? arc.data_dir : data_dir;
+  db.cycle_ = arc.cycle;
+  db.build_ = arc.build;
+  db.mora_ = std::move(arc.mora);
+  db.msa_ = std::move(arc.msa);
+  db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromArchive(std::move(arc)));
 
   // Resolve the CIFP procedure cache: an explicit path wins; otherwise look for
   // a sibling "<stem>_cifp.bfdb" next to the graph cache. Either being absent is
@@ -90,6 +94,21 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path,
       db.cifp_archive_ = std::move(archive).value();
     }
   }
+
+  // Look for a sibling "<stem>_detail.bfdb" next to the graph cache. Absence is fine.
+  {
+    std::filesystem::path p(bfdb_path);
+    const std::string detail_path =
+        (p.parent_path() / (p.stem().string() + "_detail.bfdb")).string();
+    if (std::filesystem::exists(detail_path)) {
+      Result<NavDetailArchive> detail = NavDetailCache::Open(detail_path);
+      if (!detail) {
+        return Result<NavDatabase>::Err(std::move(detail).error());
+      }
+      db.detail_archive_ = std::move(detail).value();
+    }
+  }
+
   db.BuildAirwayIndex();
   return Result<NavDatabase>::Ok(std::move(db));
 }
@@ -98,17 +117,34 @@ Result<void> NavDatabase::WriteCache(const std::string& out_path) const {
   if (!builder_) {
     return Result<void>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
-  BfdbImage image = builder_->ToImage(data_dir_, cycle_, build_);
-  image.program_semver = kBravoFinderVersion;
-  image.source_loader = "xplane";  // the only loader today; recorded as provenance
-  image.mora = mora_;
-  image.msa = msa_;
-  return BfdbCache::Write(out_path, image);
+  GraphArchive archive = builder_->ToArchive(data_dir_, cycle_, build_);
+  archive.program_semver = kBravoFinderVersion;
+  archive.source_loader = "xplane";  // the only loader today; recorded as provenance
+  archive.mora = mora_;
+  archive.msa = msa_;
+  return BfdbCache::Write(out_path, archive);
 }
 
 Result<uint32_t> NavDatabase::WriteCifpCache(const std::string& out_path,
                                              const std::string& source_loader) const {
-  return CifpCache::Build(data_dir_, out_path, source_loader, cycle_, build_, kBravoFinderVersion);
+  // Parse the full CIFP set on demand (heavy, ~100 MB), then hand the parsed
+  // per-airport data to the source-agnostic cache writer. Keeping the parse here
+  // (not in CifpCache) means the cache layer never depends on X-Plane's on-disk
+  // layout, so a future loader can feed CifpCache::Build the same way.
+  Result<std::vector<AirportProcedureData>> procedures = XPlaneLoader::LoadProcedures(data_dir_);
+  if (!procedures) {
+    return Result<uint32_t>::Err(std::move(procedures).error());
+  }
+  return CifpCache::Build(procedures.value(), out_path, source_loader, cycle_, build_,
+                          kBravoFinderVersion);
+}
+
+Result<void> NavDatabase::WriteDetailCache(const std::string& out_path,
+                                           const std::string& source_loader) const {
+  if (!detail_archive_.has_value()) {
+    return Result<void>::Err(Error(ErrorCode::kDataMissing, "no navaid detail archive to write"));
+  }
+  return NavDetailCache::Build(out_path, *detail_archive_, source_loader, kBravoFinderVersion);
 }
 
 const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {

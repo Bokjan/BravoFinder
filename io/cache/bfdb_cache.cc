@@ -14,20 +14,20 @@ constexpr char kMagic[4] = {'B', 'F', 'D', 'B'};
 
 }  // namespace
 
-Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
-  const size_t v = image.coords.size();
-  const size_t e = image.edges.size();
-  if (image.airway_names.size() > 0xFFFF) {
+Result<void> BfdbCache::Write(const std::string& path, const GraphArchive& archive) {
+  const size_t v = archive.coords.size();
+  const size_t e = archive.edges.size();
+  if (archive.airway_names.size() > 0xFFFF) {
     return Result<void>::Err(
         Error(ErrorCode::kParseError, "too many airway names to serialize (> 65535)"));
   }
-  if (image.offsets.size() != v + 1 || image.idents.size() != v || image.on_network.size() != v ||
-      image.kinds.size() != v) {
-    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent image array sizes"));
+  if (archive.offsets.size() != v + 1 || archive.idents.size() != v ||
+      archive.on_network.size() != v || archive.kinds.size() != v) {
+    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent archive array sizes"));
   }
-  const size_t airport_count = v - static_cast<size_t>(image.first_airport_vertex);
-  if (image.first_airport_vertex < 0 || static_cast<size_t>(image.first_airport_vertex) > v ||
-      image.airport_elevations_ft.size() != airport_count) {
+  const size_t airport_count = v - static_cast<size_t>(archive.first_airport_vertex);
+  if (archive.first_airport_vertex < 0 || static_cast<size_t>(archive.first_airport_vertex) > v ||
+      archive.airport_elevations_ft.size() != airport_count) {
     return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent airport array size"));
   }
 
@@ -48,10 +48,10 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
   //   flags      : U8  (bit 0 = on_network)
   //   kind       : U8  (WaypointKind)
   for (size_t i = 0; i < v; ++i) {
-    const Coordinate& c = image.coords[i];
+    const Coordinate& c = archive.coords[i];
     w.F64(c.latitude);
     w.F64(c.longitude);
-    const Ident& id = image.idents[i];
+    const Ident& id = archive.idents[i];
     const auto ir = pool.Add(id.ident);
     const auto rr = pool.Add(id.region);
     w.U32(ir.first);
@@ -59,27 +59,27 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
     w.U32(rr.first);
     w.U32(rr.second);
     uint8_t flags = 0;
-    if (image.on_network[i]) {
+    if (archive.on_network[i]) {
       flags |= 0x01;
     }
     w.U8(flags);
-    w.U8(static_cast<uint8_t>(image.kinds[i]));
+    w.U8(static_cast<uint8_t>(archive.kinds[i]));
   }
 
   // Airport records: one per airport vertex, in vertex order. Airport-only
   // attributes live here so they do not bloat the V vertex records.
   //   elevation_ft : I32
-  for (int elev : image.airport_elevations_ft) {
+  for (int elev : archive.airport_elevations_ft) {
     w.I32(elev);
   }
 
   // CSR graph structure (not per-vertex attributes, kept as flat arrays):
   // offsets: (V + 1) * int32
-  for (int off : image.offsets) {
+  for (int off : archive.offsets) {
     w.I32(off);
   }
   // edges: E * GraphEdge (16 bytes each, field by field)
-  for (const GraphEdge& ed : image.edges) {
+  for (const GraphEdge& ed : archive.edges) {
     w.I32(ed.to);
     w.F32(ed.distance_nm);
     w.U16(ed.airway_id);
@@ -88,17 +88,17 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
     w.U8(ed.flags);
   }
   // airways: count * name_ref
-  for (const std::string& name : image.airway_names) {
+  for (const std::string& name : archive.airway_names) {
     const auto nr = pool.Add(name);
     w.U32(nr.first);
     w.U32(nr.second);
   }
   // mora: populated implied; 64800 int16 cells
-  for (int16_t cell : image.mora.cells()) {
+  for (int16_t cell : archive.mora.cells()) {
     w.I16(cell);
   }
   // msa: count * sector
-  for (const MsaSector& s : image.msa) {
+  for (const MsaSector& s : archive.msa) {
     const auto ci = pool.Add(s.center.ident);
     const auto cr = pool.Add(s.center.region);
     const auto ai = pool.Add(s.airport_icao);
@@ -121,22 +121,22 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
   ByteWriter hw(out);
   out.append(kMagic, 4);
   hw.U32(kFormatVersion);
-  hw.U32(image.cycle);
-  hw.U32(image.build);
+  hw.U32(archive.cycle);
+  hw.U32(archive.build);
   hw.U32(static_cast<uint32_t>(v));
   hw.U32(static_cast<uint32_t>(e));
-  hw.U32(static_cast<uint32_t>(image.airway_names.size()));
-  hw.U32(static_cast<uint32_t>(image.msa.size()));
-  hw.U32(static_cast<uint32_t>(image.first_airport_vertex));
+  hw.U32(static_cast<uint32_t>(archive.airway_names.size()));
+  hw.U32(static_cast<uint32_t>(archive.msa.size()));
+  hw.U32(static_cast<uint32_t>(archive.first_airport_vertex));
   // Header strings are stored inline (length-prefixed) rather than in the pool,
   // since the pool is a trailing section but these are read from the header.
   auto write_inline = [&](const std::string& s) {
     hw.U32(static_cast<uint32_t>(s.size()));
     out.append(s);
   };
-  write_inline(image.program_semver);
-  write_inline(image.source_loader);
-  write_inline(image.data_dir);
+  write_inline(archive.program_semver);
+  write_inline(archive.source_loader);
+  write_inline(archive.data_dir);
   hw.U32(static_cast<uint32_t>(pool.blob().size()));
 
   out.append(sections);
@@ -215,24 +215,25 @@ Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
   return Result<BfdbHeader>::Ok(std::move(header));
 }
 
-Result<BfdbImage> BfdbCache::Read(const std::string& path) {
+Result<GraphArchive> BfdbCache::Read(const std::string& path) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open()) {
-    return Result<BfdbImage>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
+    return Result<GraphArchive>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
   }
   const std::streamsize size = f.tellg();
   if (size < 4) {
-    return Result<BfdbImage>::Err(Error(ErrorCode::kDataMissing, "truncated .bfdb: " + path));
+    return Result<GraphArchive>::Err(Error(ErrorCode::kDataMissing, "truncated .bfdb: " + path));
   }
   std::string buf(static_cast<size_t>(size), '\0');
   f.seekg(0);
   f.read(buf.data(), size);
   if (!f) {
-    return Result<BfdbImage>::Err(Error(ErrorCode::kDataMissing, "failed reading .bfdb: " + path));
+    return Result<GraphArchive>::Err(
+        Error(ErrorCode::kDataMissing, "failed reading .bfdb: " + path));
   }
 
   auto bad = [&](const char* why) {
-    return Result<BfdbImage>::Err(
+    return Result<GraphArchive>::Err(
         Error(ErrorCode::kDataMissing, std::string(why) + "; run bf build to regenerate"));
   };
 
@@ -245,14 +246,14 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
     return bad("incompatible .bfdb format version");
   }
 
-  BfdbImage img;
-  img.cycle = r.U32();
-  img.build = r.U32();
+  GraphArchive arc;
+  arc.cycle = r.U32();
+  arc.build = r.U32();
   const uint32_t v = r.U32();
   const uint32_t e = r.U32();
   const uint32_t airway_count = r.U32();
   const uint32_t msa_count = r.U32();
-  img.first_airport_vertex = static_cast<int>(r.U32());
+  arc.first_airport_vertex = static_cast<int>(r.U32());
 
   // Sanity-check the header counts against the bytes actually present BEFORE any
   // resize, so a corrupt or forged header cannot trigger a huge allocation (and
@@ -267,11 +268,11 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
   // first_airport_vertex must lie in [0, v]; the airport record section then
   // holds (v - first_airport_vertex) elevations. An out-of-range value is
   // rejected here rather than clamped, so the airport count below is trustworthy.
-  if (!r.ok() || img.first_airport_vertex < 0 ||
-      static_cast<uint32_t>(img.first_airport_vertex) > v) {
+  if (!r.ok() || arc.first_airport_vertex < 0 ||
+      static_cast<uint32_t>(arc.first_airport_vertex) > v) {
     return bad("corrupt .bfdb: first_airport_vertex out of range");
   }
-  const uint32_t airport_count = v - static_cast<uint32_t>(img.first_airport_vertex);
+  const uint32_t airport_count = v - static_cast<uint32_t>(arc.first_airport_vertex);
   const size_t avail = r.remaining();
   auto count_fits = [&](uint32_t count, size_t per_elem) {
     return static_cast<size_t>(count) <= avail / per_elem;
@@ -293,8 +294,8 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
     }
     return true;
   };
-  if (!read_inline(img.program_semver) || !read_inline(img.source_loader) ||
-      !read_inline(img.data_dir)) {
+  if (!read_inline(arc.program_semver) || !read_inline(arc.source_loader) ||
+      !read_inline(arc.data_dir)) {
     return bad("corrupt .bfdb header");
   }
   const uint32_t pool_len = r.U32();
@@ -304,34 +305,34 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
   struct IdentRef {
     uint32_t io, il, ro, rl;
   };
-  img.coords.resize(v);
-  img.on_network.assign(v, false);
-  img.kinds.resize(v);
+  arc.coords.resize(v);
+  arc.on_network.assign(v, false);
+  arc.kinds.resize(v);
   std::vector<IdentRef> ident_refs(v);
   for (uint32_t i = 0; i < v; ++i) {
-    img.coords[i].latitude = r.F64();
-    img.coords[i].longitude = r.F64();
+    arc.coords[i].latitude = r.F64();
+    arc.coords[i].longitude = r.F64();
     ident_refs[i].io = r.U32();
     ident_refs[i].il = r.U32();
     ident_refs[i].ro = r.U32();
     ident_refs[i].rl = r.U32();
     const uint8_t flags = r.U8();
-    img.on_network[i] = (flags & 0x01) != 0;
-    img.kinds[i] = static_cast<WaypointKind>(r.U8());
+    arc.on_network[i] = (flags & 0x01) != 0;
+    arc.kinds[i] = static_cast<WaypointKind>(r.U8());
   }
   // Airport records: elevation per airport vertex, in vertex order.
   // airport_count was validated against the file size in the header fuse above.
-  img.airport_elevations_ft.resize(airport_count);
+  arc.airport_elevations_ft.resize(airport_count);
   for (uint32_t i = 0; i < airport_count; ++i) {
-    img.airport_elevations_ft[i] = r.I32();
+    arc.airport_elevations_ft[i] = r.I32();
   }
   // offsets
-  img.offsets.resize(static_cast<size_t>(v) + 1);
+  arc.offsets.resize(static_cast<size_t>(v) + 1);
   for (uint32_t i = 0; i <= v; ++i) {
-    img.offsets[i] = r.I32();
+    arc.offsets[i] = r.I32();
   }
   // edges
-  img.edges.resize(e);
+  arc.edges.resize(e);
   for (uint32_t i = 0; i < e; ++i) {
     GraphEdge ed;
     ed.to = r.I32();
@@ -340,7 +341,7 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
     ed.base_fl = r.I16();
     ed.top_fl = r.I16();
     ed.flags = r.U8();
-    img.edges[i] = ed;
+    arc.edges[i] = ed;
   }
   // airways
   struct NameRef {
@@ -390,30 +391,30 @@ Result<BfdbImage> BfdbCache::Read(const std::string& path) {
 
   // Resolve all references against the pool.
   bool refs_ok = true;
-  img.idents.resize(v);
+  arc.idents.resize(v);
   for (uint32_t i = 0; i < v; ++i) {
     const IdentRef& ir = ident_refs[i];
-    img.idents[i].ident = ResolveRef(blob, ir.io, ir.il, refs_ok);
-    img.idents[i].region = ResolveRef(blob, ir.ro, ir.rl, refs_ok);
+    arc.idents[i].ident = ResolveRef(blob, ir.io, ir.il, refs_ok);
+    arc.idents[i].region = ResolveRef(blob, ir.ro, ir.rl, refs_ok);
   }
-  img.airway_names.resize(airway_count);
+  arc.airway_names.resize(airway_count);
   for (uint32_t i = 0; i < airway_count; ++i) {
-    img.airway_names[i] = ResolveRef(blob, airway_refs[i].o, airway_refs[i].l, refs_ok);
+    arc.airway_names[i] = ResolveRef(blob, airway_refs[i].o, airway_refs[i].l, refs_ok);
   }
-  img.mora = MoraGrid::FromCells(std::move(cells));
-  img.msa.resize(msa_count);
+  arc.mora = MoraGrid::FromCells(std::move(cells));
+  arc.msa.resize(msa_count);
   for (uint32_t i = 0; i < msa_count; ++i) {
     MsaRef& m = msa_refs[i];
-    img.msa[i].center.ident = ResolveRef(blob, m.cio, m.cil, refs_ok);
-    img.msa[i].center.region = ResolveRef(blob, m.cro, m.crl, refs_ok);
-    img.msa[i].airport_icao = ResolveRef(blob, m.aio, m.ail, refs_ok);
-    img.msa[i].arcs = std::move(m.arcs);
+    arc.msa[i].center.ident = ResolveRef(blob, m.cio, m.cil, refs_ok);
+    arc.msa[i].center.region = ResolveRef(blob, m.cro, m.crl, refs_ok);
+    arc.msa[i].airport_icao = ResolveRef(blob, m.aio, m.ail, refs_ok);
+    arc.msa[i].arcs = std::move(m.arcs);
   }
 
   if (!r.ok() || !refs_ok) {
     return bad("corrupt .bfdb: field or reference out of range");
   }
-  return Result<BfdbImage>::Ok(std::move(img));
+  return Result<GraphArchive>::Ok(std::move(arc));
 }
 
 }  // namespace bf

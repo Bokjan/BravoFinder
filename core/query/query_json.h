@@ -130,4 +130,45 @@ void WriteAirwayJson(Writer& w, const AirwayInfo& a) {
   w.EndObject();
 }
 
+template <class Writer>
+void WriteNavaidDetailJson(Writer& w, const NavaidDetailInfo& d) {
+  w.StartObject();
+  detail::WriteKeyStr(w, "ident", d.ident);
+  detail::WriteKeyStr(w, "region", d.region);
+  w.Key("kind");
+  w.String(ToString(d.kind));
+  w.Key("elev_ft");
+  w.Int(d.elev_ft);
+  w.Key("freq_raw");
+  w.Int(d.freq_raw);
+  w.Key("range_nm");
+  w.Double(d.range_nm);
+  w.Key("heading");
+  w.Double(d.heading);
+  w.EndObject();
+}
+
+template <class Writer>
+void WriteHoldJson(Writer& w, const HoldInfo& h) {
+  w.StartObject();
+  detail::WriteKeyStr(w, "fix_ident", h.fix_ident);
+  detail::WriteKeyStr(w, "fix_region", h.fix_region);
+  detail::WriteKeyStr(w, "airport_icao", h.airport_icao);
+  w.Key("inbound_course");
+  w.Double(h.inbound_course);
+  w.Key("leg_time_min");
+  w.Double(h.leg_time_min);
+  w.Key("leg_dist_nm");
+  w.Double(h.leg_dist_nm);
+  w.Key("turn_dir");
+  w.String(h.turn_dir == 'L' ? "L" : "R");
+  w.Key("min_alt_ft");
+  w.Int(h.min_alt_ft);
+  w.Key("max_alt_ft");
+  w.Int(h.max_alt_ft);
+  w.Key("speed_limit_kt");
+  w.Int(h.speed_limit_kt);
+  w.EndObject();
+}
+
 }  // namespace bf

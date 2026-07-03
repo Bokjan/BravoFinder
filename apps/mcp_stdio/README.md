@@ -127,6 +127,8 @@ row below.
 | `lookup_airports` | `ids` (string[]) | — | Array parallel to `ids`; airport object or `null` |
 | `lookup_procedures` | `ids` (string[]) | — | Array parallel to `ids`; procedures object or `null` |
 | `lookup_airways` | `ids` (string[]) | — | Array parallel to `ids`; airway object or `null` |
+| `lookup_navaid_detail` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of region matches (empty if none) |
+| `lookup_holds` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of holds at that fix (empty if none) |
 | `list_cycles` | — | — | Array of `{cycle, build}`, newest first |
 
 ### `find_routes`
@@ -175,9 +177,19 @@ route object with the same shape as `find_routes` (`route` / `total_distance_nm`
 ### lookup tools
 
 `ids` is a string array; the result array is **parallel to `ids`**, with `null`
-(or an empty inner array for `lookup_waypoints`) where an id is not found.
+(or an empty inner array for the grouped lookups) where an id is not found.
 `lookup_procedures` takes airport ICAO codes; the others match by ident /
 designator.
+
+`lookup_navaid_detail` and `lookup_holds` are grouped lookups (like
+`lookup_waypoints`): an ident maps to an array of matches. They require the
+graph cache to have a sibling `_detail.bfdb` (built automatically by `bf build`);
+without it they return empty arrays. `lookup_navaid_detail` returns each navaid's
+`ident`, `region`, `kind`, `elev_ft`, `freq_raw` (kHz for NDBs, MHz×100 for
+VOR/DME/ILS), `range_nm`, and `heading`. `lookup_holds` returns each hold's
+`fix_ident`, `fix_region`, `airport_icao` (`ENRT` for enroute holds),
+`inbound_course`, `leg_time_min`, `leg_dist_nm`, `turn_dir`, `min_alt_ft`,
+`max_alt_ft`, and `speed_limit_kt`.
 
 ### `list_cycles`
 

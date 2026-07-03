@@ -64,6 +64,22 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
       }
       std::cout << "wrote " << cifp_out << " (" << n.value() << " airports)\n";
     }
+
+    // Build the navaid-detail + hold side cache: <stem>_detail.bfdb. Small
+    // (~3 MB) and always written, so navaid_detail / hold queries work off a
+    // cache. NavDatabase::OpenCached auto-discovers it by this name.
+    {
+      const std::filesystem::path p(out);
+      const std::string detail_out =
+          (p.parent_path() / (p.stem().string() + "_detail.bfdb")).string();
+      Result<void> d = db.value().WriteDetailCache(detail_out, args->loader);
+      if (!d) {
+        std::cerr << "error: " << d.error().message << "\n";
+        exit_code = EXIT_FAILURE;
+        return;
+      }
+      std::cout << "wrote " << detail_out << "\n";
+    }
   });
 }
 

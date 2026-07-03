@@ -15,6 +15,7 @@
 #include "core/routing/route_request.h"
 #include "core/version.h"
 #include "io/loaders/xplane/cifp/cifp_parser.h"
+#include "io/loaders/xplane/xplane_loader.h"
 #include "io/nav_database.h"
 
 namespace {
@@ -42,6 +43,18 @@ bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
   return r;
 }
 
+// Parse the full CIFP set from real data and write it to `cifp_path`, mirroring
+// what NavDatabase::WriteCifpCache does. Returns the airport count Result.
+bf::Result<uint32_t> BuildCifpCache(const std::string& cifp_path) {
+  bf::Result<std::vector<bf::AirportProcedureData>> procs =
+      bf::XPlaneLoader::LoadProcedures(NavDataDir());
+  if (!procs) {
+    return bf::Result<uint32_t>::Err(std::move(procs).error());
+  }
+  return bf::CifpCache::Build(procs.value(), cifp_path, "xplane", 2601, 20260112,
+                              bf::kBravoFinderVersion);
+}
+
 // Build both caches (graph + CIFP) from real data into a temp dir, returning the
 // graph cache path (empty on SKIP). The CIFP cache is the sibling *_cifp.bfdb.
 std::string BuildBothCaches(const std::string& tag) {
@@ -65,8 +78,7 @@ TEST_CASE("cifp cache: a fetched segment matches direct file parsing", "[integra
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   const std::string cifp_path = TempPath("seg_nav_cifp.bfdb");
-  bf::Result<uint32_t> n = bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112,
-                                                bf::kBravoFinderVersion);
+  bf::Result<uint32_t> n = BuildCifpCache(cifp_path);
   REQUIRE(n);
 
   bf::Result<bf::CifpArchive> archive = bf::CifpCache::Open(cifp_path);
@@ -280,8 +292,7 @@ TEST_CASE("cifp cache: concurrent fetches on one archive are race-free", "[integ
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   const std::string cifp_path = TempPath("concurrent_nav_cifp.bfdb");
-  bf::Result<uint32_t> n = bf::CifpCache::Build(NavDataDir(), cifp_path, "xplane", 2601, 20260112,
-                                                bf::kBravoFinderVersion);
+  bf::Result<uint32_t> n = BuildCifpCache(cifp_path);
   REQUIRE(n);
   bf::Result<bf::CifpArchive> archive = bf::CifpCache::Open(cifp_path);
   REQUIRE(archive);

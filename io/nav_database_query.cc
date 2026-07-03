@@ -92,4 +92,28 @@ std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
   return out;
 }
 
+std::vector<std::vector<NavaidDetailInfo>> NavDatabase::LookupNavaidDetails(
+    const std::vector<std::string>& idents) const {
+  std::vector<std::vector<NavaidDetailInfo>> out(idents.size());
+  if (!detail_archive_.has_value()) {
+    return out;
+  }
+  for (size_t i = 0; i < idents.size(); ++i) {
+    out[i] = detail_archive_->FindNavaids(ToUpper(idents[i]));
+  }
+  return out;
+}
+
+std::vector<std::vector<HoldInfo>> NavDatabase::LookupHolds(
+    const std::vector<std::string>& fix_idents) const {
+  std::vector<std::vector<HoldInfo>> out(fix_idents.size());
+  if (!detail_archive_.has_value()) {
+    return out;
+  }
+  for (size_t i = 0; i < fix_idents.size(); ++i) {
+    out[i] = detail_archive_->FindHolds(ToUpper(fix_idents[i]));
+  }
+  return out;
+}
+
 }  // namespace bf

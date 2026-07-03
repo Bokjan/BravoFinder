@@ -241,37 +241,38 @@ void GraphBuilder::RebuildIndices() {
   }
 }
 
-GraphBuilder GraphBuilder::FromImage(BfdbImage&& image) {
+GraphBuilder GraphBuilder::FromArchive(GraphArchive&& archive) {
   GraphBuilder b;
-  b.graph_.coords_ = std::move(image.coords);
-  b.graph_.offsets_ = std::move(image.offsets);
-  b.graph_.edges_ = std::move(image.edges);
-  b.idents_ = std::move(image.idents);
-  b.on_network_ = std::move(image.on_network);
-  b.kinds_ = std::move(image.kinds);
-  b.airport_elevations_ft_ = std::move(image.airport_elevations_ft);
-  b.airway_names_ = std::move(image.airway_names);
-  b.first_airport_vertex_ = image.first_airport_vertex;
+  b.graph_.coords_ = std::move(archive.coords);
+  b.graph_.offsets_ = std::move(archive.offsets);
+  b.graph_.edges_ = std::move(archive.edges);
+  b.idents_ = std::move(archive.idents);
+  b.on_network_ = std::move(archive.on_network);
+  b.kinds_ = std::move(archive.kinds);
+  b.airport_elevations_ft_ = std::move(archive.airport_elevations_ft);
+  b.airway_names_ = std::move(archive.airway_names);
+  b.first_airport_vertex_ = archive.first_airport_vertex;
   b.RebuildIndices();
   return b;
 }
 
-BfdbImage GraphBuilder::ToImage(const std::string& data_dir, uint32_t cycle, uint32_t build) const {
-  BfdbImage image;
-  image.cycle = cycle;
-  image.build = build;
-  image.first_airport_vertex = first_airport_vertex_;
-  image.data_dir = data_dir;
-  image.coords = graph_.coords_;
-  image.offsets = graph_.offsets_;
-  image.edges = graph_.edges_;
-  image.on_network = on_network_;
-  image.idents = idents_;
-  image.kinds = kinds_;
-  image.airport_elevations_ft = airport_elevations_ft_;
-  image.airway_names = airway_names_;
+GraphArchive GraphBuilder::ToArchive(const std::string& data_dir, uint32_t cycle,
+                                     uint32_t build) const {
+  GraphArchive archive;
+  archive.cycle = cycle;
+  archive.build = build;
+  archive.first_airport_vertex = first_airport_vertex_;
+  archive.data_dir = data_dir;
+  archive.coords = graph_.coords_;
+  archive.offsets = graph_.offsets_;
+  archive.edges = graph_.edges_;
+  archive.on_network = on_network_;
+  archive.idents = idents_;
+  archive.kinds = kinds_;
+  archive.airport_elevations_ft = airport_elevations_ft_;
+  archive.airway_names = airway_names_;
   // mora/msa are owned by NavDatabase, not the builder; the caller fills them.
-  return image;
+  return archive;
 }
 
 int GraphBuilder::ElevationOf(int vertex) const {

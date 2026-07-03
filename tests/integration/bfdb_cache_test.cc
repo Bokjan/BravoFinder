@@ -95,14 +95,14 @@ TEST_CASE("bfdb: the cache header preserves AIRAC provenance", "[integration][bf
   if (path.empty()) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::BfdbImage> img = bf::BfdbCache::Read(path);
-  REQUIRE(img);
+  bf::Result<bf::GraphArchive> arc = bf::BfdbCache::Read(path);
+  REQUIRE(arc);
   // cycle 2601 / build 20260112 for the test dataset; both should be non-zero
   // and the graph non-empty.
-  CHECK(img.value().cycle != 0);
-  CHECK(img.value().build != 0);
-  CHECK_FALSE(img.value().coords.empty());
-  CHECK(img.value().offsets.size() == img.value().coords.size() + 1);
+  CHECK(arc.value().cycle != 0);
+  CHECK(arc.value().build != 0);
+  CHECK_FALSE(arc.value().coords.empty());
+  CHECK(arc.value().offsets.size() == arc.value().coords.size() + 1);
   std::remove(path.c_str());
 }
 
@@ -112,16 +112,16 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
   if (path.empty()) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::BfdbImage> img = bf::BfdbCache::Read(path);
-  REQUIRE(img);
-  const bf::BfdbImage& im = img.value();
+  bf::Result<bf::GraphArchive> arc = bf::BfdbCache::Read(path);
+  REQUIRE(arc);
+  const bf::GraphArchive& arcv = arc.value();
 
   // Per-vertex kinds are present for every vertex.
-  REQUIRE(im.kinds.size() == im.coords.size());
+  REQUIRE(arcv.kinds.size() == arcv.coords.size());
   // Real AIRAC data has a mix of fixes and navaids, so at least one vertex must
   // be a navaid kind -- proving the field is populated, not defaulted to kFix.
   bool has_navaid = false;
-  for (bf::WaypointKind k : im.kinds) {
+  for (bf::WaypointKind k : arcv.kinds) {
     if (k == bf::WaypointKind::kVor || k == bf::WaypointKind::kNdb || k == bf::WaypointKind::kDme) {
       has_navaid = true;
       break;
@@ -131,10 +131,10 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
 
   // Airport elevations: one per airport vertex, and at least one non-zero (most
   // airports sit above sea level), proving elevation survived the round-trip.
-  const size_t airport_count = im.coords.size() - static_cast<size_t>(im.first_airport_vertex);
-  REQUIRE(im.airport_elevations_ft.size() == airport_count);
+  const size_t airport_count = arcv.coords.size() - static_cast<size_t>(arcv.first_airport_vertex);
+  REQUIRE(arcv.airport_elevations_ft.size() == airport_count);
   bool has_nonzero_elev = false;
-  for (int e : im.airport_elevations_ft) {
+  for (int e : arcv.airport_elevations_ft) {
     if (e != 0) {
       has_nonzero_elev = true;
       break;
@@ -169,7 +169,7 @@ TEST_CASE("bfdb: an airport without procedures still routes via the cache", "[in
 TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]") {
   // Missing file.
   {
-    bf::Result<bf::BfdbImage> r = bf::BfdbCache::Read("/tmp/bravofinder_does_not_exist.bfdb");
+    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read("/tmp/bravofinder_does_not_exist.bfdb");
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
   }
@@ -179,7 +179,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     f << "NOPEnot a real bfdb file at all";
     f.close();
-    bf::Result<bf::BfdbImage> r = bf::BfdbCache::Read(path);
+    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
     std::remove(path.c_str());
@@ -192,7 +192,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     const uint32_t bad_version = 0xDEADBEEF;
     f.write(reinterpret_cast<const char*>(&bad_version), sizeof(bad_version));
     f.close();
-    bf::Result<bf::BfdbImage> r = bf::BfdbCache::Read(path);
+    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
     std::remove(path.c_str());
@@ -203,7 +203,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     f << "BF";
     f.close();
-    bf::Result<bf::BfdbImage> r = bf::BfdbCache::Read(path);
+    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
     std::remove(path.c_str());
@@ -232,7 +232,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
     f.close();
-    bf::Result<bf::BfdbImage> r = bf::BfdbCache::Read(path);
+    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
     std::remove(path.c_str());

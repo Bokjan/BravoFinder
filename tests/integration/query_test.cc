@@ -144,6 +144,49 @@ TEST_CASE("query: concurrent airway is found by each of its designators", "[inte
   CHECK(shared);
 }
 
+TEST_CASE("query: navaid detail lookup carries freq/range/elevation", "[integration][query]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  // The detail cache is a sibling of the graph cache; when opened from raw data
+  // it is built in-memory. Either way DGC (a VOR) must carry sane attributes.
+  auto r = db->LookupNavaidDetails({"DGC", "ZZ_NOT_REAL_ZZ"});
+  REQUIRE(r.size() == 2);
+  if (r[0].empty()) {
+    SKIP(
+        "no navaid detail cache available (raw-data path builds it; cache path "
+        "needs a sibling nav_detail.bfdb)");
+  }
+  const bf::NavaidDetailInfo& d = r[0][0];
+  CHECK(d.ident == "DGC");
+  CHECK(d.kind == bf::WaypointKind::kVor);
+  CHECK(d.freq_raw > 10000);  // a VOR frequency, MHz*100 (e.g. 11500 = 115.0)
+  CHECK(d.freq_raw < 12000);
+  CHECK(d.range_nm > 0.0);
+  CHECK(r[1].empty());  // the bogus ident matches nothing
+}
+
+TEST_CASE("query: hold lookup returns holding-pattern parameters", "[integration][query]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  // AE701 (region DA, airport DAAE) is a real enroute-terminal hold in cycle
+  // 2601: inbound 171, 1.0 min leg, right turns, 5580-14000 ft, 230 kt.
+  auto r = db->LookupHolds({"AE701", "ZZ_NOT_REAL_ZZ"});
+  REQUIRE(r.size() == 2);
+  if (r[0].empty()) {
+    SKIP("no hold data available (needs earth_hold.dat parsed into a detail cache)");
+  }
+  const bf::HoldInfo& h = r[0][0];
+  CHECK(h.fix_ident == "AE701");
+  CHECK(h.inbound_course > 0.0);
+  CHECK((h.turn_dir == 'R' || h.turn_dir == 'L'));
+  CHECK(h.min_alt_ft > 0);
+  CHECK(r[1].empty());
+}
+
 TEST_CASE("query: concurrent lookups on one database are race-free", "[integration][query]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
@@ -161,7 +204,10 @@ TEST_CASE("query: concurrent lookups on one database are race-free", "[integrati
         auto a = db->LookupAirports({"KJFK"});
         auto p = db->LookupProcedures({"KJFK"});
         auto ai = db->LookupAirways({"Y28"});
-        if (!w[0].empty() && !w[1].empty() && a[0] && p[0] && ai[0]) {
+        auto nd = db->LookupNavaidDetails({"DGC"});
+        auto h = db->LookupHolds({"AE701"});
+        if (!w[0].empty() && !w[1].empty() && a[0] && p[0] && ai[0] && nd.size() == 1 &&
+            h.size() == 1) {
           ok.fetch_add(1, std::memory_order_relaxed);
         }
       }

@@ -5,9 +5,11 @@
 
 #include "core/domain/airport.h"
 #include "core/domain/airway.h"
+#include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
+#include "core/domain/navaid_detail.h"
 #include "core/domain/waypoint.h"
 
 namespace bf {
@@ -31,6 +33,8 @@ struct NavData {
   uint32_t build = 0;
 
   std::vector<Waypoint> waypoints;
+  std::vector<NavaidDetail> navaid_details;  // parallel to routable navaids in waypoints
+  std::vector<HoldFix> hold_fixes;           // from earth_hold.dat
   std::vector<AirwayConnection> airways;
   std::vector<Airport> airports;
   MoraGrid mora;

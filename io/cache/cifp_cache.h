@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "core/result.h"
 #include "io/loaders/xplane/cifp/cifp_parser.h"
@@ -61,12 +62,13 @@ class CifpCache {
   // v1: initial segmented format (magic "BFCP").
   static constexpr uint32_t kFormatVersion = 1;
 
-  // Parse every CIFP file under `data_dir`/CIFP and write them as segments into
-  // `out_path`, recording the given provenance in the header. Returns the
-  // number of airports written, or an Error.
-  static Result<uint32_t> Build(const std::string& data_dir, const std::string& out_path,
-                                const std::string& source_loader, uint32_t cycle, uint32_t build,
-                                const std::string& program_semver);
+  // Write already-parsed per-airport procedure data as segments into `out_path`,
+  // recording the given provenance in the header. Source-agnostic: the caller
+  // (a loader) supplies (ICAO, CifpData) pairs, so this never touches any data
+  // source's on-disk layout. Returns the number of airports written, or an Error.
+  static Result<uint32_t> Build(const std::vector<std::pair<std::string, CifpData>>& procedures,
+                                const std::string& out_path, const std::string& source_loader,
+                                uint32_t cycle, uint32_t build, const std::string& program_semver);
 
   // Open an archive: read the header and directory into memory. Segments are
   // fetched lazily. Returns kDataMissing if the file is absent or malformed.

@@ -64,4 +64,30 @@ struct AirwayInfo {
   std::vector<AirwayLeg> segments;
 };
 
+// Detailed attributes of a radio navaid (VOR/NDB/DME/ILS), supplementing the
+// basic WaypointInfo from LookupWaypoints with fields not needed for routing.
+struct NavaidDetailInfo {
+  std::string ident;
+  std::string region;
+  WaypointKind kind = WaypointKind::kOther;
+  int elev_ft = 0;
+  int freq_raw = 0;  // raw dat value: NDB = kHz; VOR/ILS/DME = MHz * 100
+  double range_nm = 0.0;
+  double heading = 0.0;  // VOR: slaved variation; ILS/LOC: localizer bearing; DME: bias
+};
+
+// One holding pattern at a fix, from earth_hold.dat.
+struct HoldInfo {
+  std::string fix_ident;
+  std::string fix_region;
+  std::string airport_icao;  // "ENRT" for enroute holds
+  double inbound_course = 0.0;
+  double leg_time_min = 0.0;
+  double leg_dist_nm = 0.0;
+  char turn_dir = 'R';  // 'R' or 'L'
+  int min_alt_ft = 0;
+  int max_alt_ft = 0;      // 0 = no upper limit
+  int speed_limit_kt = 0;  // 0 = no limit
+};
+
 }  // namespace bf

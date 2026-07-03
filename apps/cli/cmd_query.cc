@@ -92,6 +92,56 @@ int RunQuery(const NavDatabase& db, const std::string& kind, const std::vector<s
         }
       }
     }
+  } else if (kind == "navaid_detail") {
+    auto results = db.LookupNavaidDetails(ids);
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (results[i].empty()) {
+        miss(ids[i]);
+        continue;
+      }
+      for (const NavaidDetailInfo& d : results[i]) {
+        if (json) {
+          WriteNavaidDetailJson(writer, d);
+        } else {
+          // NDB frequencies are kHz; VOR/DME/ILS are MHz (raw = MHz * 100).
+          std::cout << d.ident << " (" << d.region << ") " << ToString(d.kind) << "  elev "
+                    << d.elev_ft << " ft  freq ";
+          if (d.kind == WaypointKind::kNdb) {
+            std::cout << d.freq_raw << " kHz";
+          } else {
+            std::cout << (d.freq_raw / 100.0) << " MHz";
+          }
+          std::cout << "  range " << d.range_nm << " NM\n";
+        }
+      }
+    }
+  } else if (kind == "hold") {
+    auto results = db.LookupHolds(ids);
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (results[i].empty()) {
+        miss(ids[i]);
+        continue;
+      }
+      for (const HoldInfo& h : results[i]) {
+        if (json) {
+          WriteHoldJson(writer, h);
+        } else {
+          std::cout << h.fix_ident << " (" << h.fix_region << ")  " << h.airport_icao
+                    << "  inbound " << h.inbound_course << "°  ";
+          if (h.leg_dist_nm > 0) {
+            std::cout << "out " << h.leg_dist_nm << " NM  ";
+          } else {
+            std::cout << "out " << h.leg_time_min << " min  ";
+          }
+          std::cout << (h.turn_dir == 'L' ? 'L' : 'R') << "-turn  alt " << h.min_alt_ft << "-"
+                    << h.max_alt_ft << " ft";
+          if (h.speed_limit_kt > 0) {
+            std::cout << "  " << h.speed_limit_kt << " kt";
+          }
+          std::cout << "\n";
+        }
+      }
+    }
   } else {  // airway
     auto results = db.LookupAirways(ids);
     for (size_t i = 0; i < ids.size(); ++i) {
@@ -134,9 +184,12 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
 
   CLI::App* query = app.add_subcommand(
       "query", "Look up navigation data (waypoints, airports, procedures, airways)");
-  query->add_option("kind", a->kind, "What to look up: waypoint, airport, procedure, or airway")
+  query
+      ->add_option("kind", a->kind,
+                   "What to look up: waypoint, airport, procedure, airway, navaid_detail, or hold")
       ->required()
-      ->check(CLI::IsMember({"waypoint", "airport", "procedure", "airway"}));
+      ->check(
+          CLI::IsMember({"waypoint", "airport", "procedure", "airway", "navaid_detail", "hold"}));
   query->add_option("id", a->ids, "One or more idents / ICAO codes / airway names")->required();
   query->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();

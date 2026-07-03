@@ -17,9 +17,9 @@
 #include "core/routing/route.h"
 #include "core/routing/route_json.h"
 #include "core/routing/route_request.h"
+#include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
-#include "rapidjson/document.h"
 
 namespace bf::mcp {
 
@@ -82,13 +82,13 @@ std::pair<std::string, bool> RunLookup(const std::vector<std::optional<Info>>& r
   return {json, all_missing};
 }
 
-// The waypoint lookup returns a group per id (an ident is reused across
-// regions), so its result shape is vector<vector<WaypointInfo>> rather than the
-// optional-vector the other lookups use. Serialize as a JSON array parallel to
-// `ids`, where each element is itself an array of the region matches for that
-// id (empty when the ident is unknown or names an airport).
-std::pair<std::string, bool> RunWaypointLookup(
-    const std::vector<std::vector<bf::WaypointInfo>>& results) {
+// A grouped lookup returns a group per id (an ident is reused across regions),
+// so its result shape is vector<vector<Info>> rather than the optional-vector
+// the other lookups use. Serialize as a JSON array parallel to `ids`, where each
+// element is itself an array of the matches for that id (empty when unknown).
+template <class Info, class Fn>
+std::pair<std::string, bool> RunGroupedLookup(const std::vector<std::vector<Info>>& results,
+                                              Fn write_one) {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.SetMaxDecimalPlaces(6);
@@ -96,8 +96,8 @@ std::pair<std::string, bool> RunWaypointLookup(
   bool all_empty = true;
   for (const auto& group : results) {
     writer.StartArray();
-    for (const bf::WaypointInfo& w : group) {
-      bf::WriteWaypointJson(writer, w);
+    for (const Info& x : group) {
+      write_one(writer, x);
     }
     writer.EndArray();
     if (!group.empty()) {
@@ -149,19 +149,20 @@ Tool MakeLookupTool(const char* name, const char* description, const char* schem
               });
 }
 
-// The waypoint lookup is special: an ident maps to a group of region matches
-// (vector<vector<WaypointInfo>>), not a single optional. This tool handles that
-// shape while keeping the id-list parsing shared with the other lookups.
-Tool MakeWaypointLookupTool(const char* name, const char* description, const char* schema) {
-  return Tool(
-      name, description, ParseSchema(schema),
-      [](const rapidjson::Value& args, const NavDatabase& db) -> std::pair<std::string, bool> {
-        auto ids = ParseIdList(args, "ids");
-        if (!ids) {
-          return {R"({"error":"ids (array of strings) is required"})", true};
-        }
-        return RunWaypointLookup(db.LookupWaypoints(*ids));
-      });
+// A grouped-lookup tool: an id maps to a group of matches (vector<vector<Info>>)
+// rather than a single optional. Shares id-list parsing with the other lookups.
+template <class Info, class Fn, class WriteFn>
+Tool MakeGroupedLookupTool(const char* name, const char* description, const char* schema, Fn lookup,
+                           WriteFn write_one) {
+  return Tool(name, description, ParseSchema(schema),
+              [lookup, write_one](const rapidjson::Value& args,
+                                  const NavDatabase& db) -> std::pair<std::string, bool> {
+                auto ids = ParseIdList(args, "ids");
+                if (!ids) {
+                  return {R"({"error":"ids (array of strings) is required"})", true};
+                }
+                return RunGroupedLookup<Info>(lookup(db, *ids), write_one);
+              });
 }
 
 // The find_routes handler.
@@ -267,7 +268,7 @@ const std::vector<Tool>& AllTools() {
   if (!tools.empty()) {
     return tools;
   }
-  tools.reserve(6);
+  tools.reserve(8);
 
   tools.emplace_back(
       "find_routes",
@@ -306,14 +307,18 @@ const std::vector<Tool>& AllTools() {
           R"("required":["route"]})"),
       ParseRouteHandler);
 
-  tools.push_back(MakeWaypointLookupTool(
+  tools.push_back(MakeGroupedLookupTool<bf::WaypointInfo>(
       "lookup_waypoints",
       "Look up waypoints / navaids by ident. An ident is reused across regions, "
       "so each id returns a group of matches (ident, region, coordinate, kind, "
       "on-network flag). Batch: one group per id, empty when not found.",
       R"({"type":"object","properties":{)"
       R"("ids":{"type":"array","items":{"type":"string"},"description":"One or more waypoint idents to look up. Each result is a group parallel to this list."}},)"
-      R"("required":["ids"]})"));
+      R"("required":["ids"]})",
+      [](const NavDatabase& db, const std::vector<std::string>& ids) {
+        return db.LookupWaypoints(ids);
+      },
+      [](auto& w, const bf::WaypointInfo& x) { bf::WriteWaypointJson(w, x); }));
 
   tools.push_back(MakeLookupTool<bf::AirportInfo>(
       "lookup_airports",
@@ -350,6 +355,34 @@ const std::vector<Tool>& AllTools() {
       [](const NavDatabase& db, const std::vector<std::string>& ids) {
         return db.LookupAirways(ids);
       }));
+
+  tools.push_back(MakeGroupedLookupTool<bf::NavaidDetailInfo>(
+      "lookup_navaid_detail",
+      "Look up detailed radio-navaid attributes by ident (frequency, service "
+      "range, elevation, and heading/variation). An ident is reused across "
+      "regions, so each id returns a group of matches. freq_raw is kHz for NDBs "
+      "and MHz*100 for VOR/DME/ILS. Requires a detail cache; empty otherwise.",
+      R"({"type":"object","properties":{)"
+      R"("ids":{"type":"array","items":{"type":"string"},"description":"One or more navaid idents. Each result is a group parallel to this list."}},)"
+      R"("required":["ids"]})",
+      [](const NavDatabase& db, const std::vector<std::string>& ids) {
+        return db.LookupNavaidDetails(ids);
+      },
+      [](auto& w, const bf::NavaidDetailInfo& x) { bf::WriteNavaidDetailJson(w, x); }));
+
+  tools.push_back(MakeGroupedLookupTool<bf::HoldInfo>(
+      "lookup_holds",
+      "Look up holding patterns by fix ident (inbound course, outbound leg "
+      "time/distance, turn direction, altitude window, speed limit). Each id "
+      "returns a group of holds across all regions/airports at that fix. "
+      "Requires a detail cache; empty otherwise.",
+      R"({"type":"object","properties":{)"
+      R"("ids":{"type":"array","items":{"type":"string"},"description":"One or more hold fix idents. Each result is a group parallel to this list."}},)"
+      R"("required":["ids"]})",
+      [](const NavDatabase& db, const std::vector<std::string>& ids) {
+        return db.LookupHolds(ids);
+      },
+      [](auto& w, const bf::HoldInfo& x) { bf::WriteHoldJson(w, x); }));
 
   return tools;
 }

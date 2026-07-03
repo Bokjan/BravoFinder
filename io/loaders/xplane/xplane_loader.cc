@@ -1,13 +1,16 @@
 #include "io/loaders/xplane/xplane_loader.h"
 
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <unordered_set>
 #include <utility>
 
+#include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
+#include "core/domain/navaid_detail.h"
 
 namespace bf {
 
@@ -155,6 +158,7 @@ Result<NavData> XPlaneLoader::Load(const std::string& data_dir) {
     Ident key(ident, region);
     if (seen.insert(key).second) {
       data.waypoints.push_back(Waypoint{key, Coordinate{lat, lon}, kind});
+      data.navaid_details.push_back(NavaidDetail{key, kind, elev, freq, range, hdg});
     }
   });
   if (!nav_ok) {
@@ -257,7 +261,65 @@ Result<NavData> XPlaneLoader::Load(const std::string& data_dir) {
     }
   });
 
+  // --- earth_hold.dat: ident region airport rowcode inbound_course leg_time
+  //     leg_dist turn_dir min_alt max_alt speed ---
+  // Optional: a missing file simply leaves hold_fixes empty.
+  ForEachDataRow(data_dir + "/earth_hold.dat", [&](std::istringstream& row) {
+    std::string ident;
+    std::string region;
+    std::string airport;
+    int row_code = 0;
+    double inbound_course = 0;
+    double leg_time = 0;
+    double leg_dist = 0;
+    std::string turn;
+    int min_alt = 0;
+    int max_alt = 0;
+    int speed = 0;
+    if (!(row >> ident >> region >> airport >> row_code >> inbound_course >> leg_time >> leg_dist >>
+          turn >> min_alt >> max_alt >> speed)) {
+      return;
+    }
+    HoldFix h;
+    h.fix = Ident(ident, region);
+    h.airport_icao = airport;
+    h.inbound_course = inbound_course;
+    h.leg_time_min = leg_time;
+    h.leg_dist_nm = leg_dist;
+    h.turn_dir = (turn == "L") ? 'L' : 'R';
+    h.min_alt_ft = min_alt;
+    h.max_alt_ft = max_alt;
+    h.speed_limit_kt = speed;
+    data.hold_fixes.push_back(std::move(h));
+  });
+
   return Result<NavData>::Ok(std::move(data));
+}
+
+Result<std::vector<AirportProcedureData>> XPlaneLoader::LoadProcedures(
+    const std::string& data_dir) {
+  namespace fs = std::filesystem;
+  const fs::path cifp_dir = fs::path(data_dir) / "CIFP";
+  std::error_code ec;
+  if (!fs::is_directory(cifp_dir, ec)) {
+    return Result<std::vector<AirportProcedureData>>::Err(
+        Error(ErrorCode::kDataMissing, "no CIFP directory under " + data_dir));
+  }
+
+  std::vector<AirportProcedureData> out;
+  for (const fs::directory_entry& de : fs::directory_iterator(cifp_dir, ec)) {
+    if (!de.is_regular_file() || de.path().extension() != ".dat") {
+      continue;
+    }
+    // The ICAO is the file stem, e.g. "CIFP/KJFK.dat" -> "KJFK".
+    std::string icao = de.path().stem().string();
+    Result<CifpData> parsed = CifpParser::Parse(de.path().string());
+    if (!parsed) {
+      continue;  // skip an unreadable file; not fatal for the set as a whole
+    }
+    out.emplace_back(std::move(icao), std::move(parsed).value());
+  }
+  return Result<std::vector<AirportProcedureData>>::Ok(std::move(out));
 }
 
 }  // namespace bf

@@ -12,18 +12,18 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// A minimal but valid BfdbImage: an empty graph (0 vertices) carrying the given
+// A minimal but valid GraphArchive: an empty graph (0 vertices) carrying the given
 // AIRAC provenance. Enough for the header-only scan the inventory performs.
-bf::BfdbImage TinyImage(uint32_t cycle, uint32_t build) {
-  bf::BfdbImage img;
-  img.cycle = cycle;
-  img.build = build;
-  img.program_semver = "3.2.0";
-  img.source_loader = "test";
-  img.first_airport_vertex = 0;
-  img.offsets = {0};  // CSR offsets for V=0 has size V+1
+bf::GraphArchive TinyArchive(uint32_t cycle, uint32_t build) {
+  bf::GraphArchive arc;
+  arc.cycle = cycle;
+  arc.build = build;
+  arc.program_semver = "3.2.0";
+  arc.source_loader = "test";
+  arc.first_airport_vertex = 0;
+  arc.offsets = {0};  // CSR offsets for V=0 has size V+1
   // All per-vertex/airport arrays stay empty; MoraGrid defaults to a full grid.
-  return img;
+  return arc;
 }
 
 // A throwaway directory unique to a test tag, cleaned and recreated so repeated
@@ -39,7 +39,7 @@ fs::path TempDir(const std::string& tag) {
 // Write a tiny cache under `dir` at the canonical name for cycle/build.
 void WriteCache(const fs::path& dir, uint32_t cycle, uint32_t build) {
   const std::string path = (dir / bf::FormatBfdbName(cycle, build)).string();
-  REQUIRE(bf::BfdbCache::Write(path, TinyImage(cycle, build)));
+  REQUIRE(bf::BfdbCache::Write(path, TinyArchive(cycle, build)));
 }
 
 }  // namespace
@@ -93,7 +93,7 @@ TEST_CASE("inventory: header is authoritative over a misleading filename",
   // A cache whose header says 2605, deliberately stored under a name claiming
   // a different cycle. The scan must trust the header.
   const std::string path = (dir / "nav_2601_20260112.bfdb").string();
-  REQUIRE(bf::BfdbCache::Write(path, TinyImage(2605, 20260501)));
+  REQUIRE(bf::BfdbCache::Write(path, TinyArchive(2605, 20260501)));
 
   bf::Result<bf::BfdbInventory> inv = bf::BfdbInventory::Scan(dir.string());
   REQUIRE(inv);

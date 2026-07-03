@@ -1,8 +1,8 @@
 #include "io/cache/cifp_cache.h"
 
 #include <cstring>
-#include <filesystem>
 #include <fstream>
+#include <utility>
 #include <vector>
 
 #include "io/cache/byte_io.h"
@@ -12,8 +12,6 @@ namespace bf {
 namespace {
 
 constexpr char kMagic[4] = {'B', 'F', 'C', 'P'};
-
-namespace fs = std::filesystem;
 
 // --- One airport's CIFP data, serialized as a self-contained segment. ---
 //
@@ -147,33 +145,22 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size) {
 
 }  // namespace
 
-Result<uint32_t> CifpCache::Build(const std::string& data_dir, const std::string& out_path,
-                                  const std::string& source_loader, uint32_t cycle, uint32_t build,
+Result<uint32_t> CifpCache::Build(const std::vector<std::pair<std::string, CifpData>>& procedures,
+                                  const std::string& out_path, const std::string& source_loader,
+                                  uint32_t cycle, uint32_t build,
                                   const std::string& program_semver) {
-  const fs::path cifp_dir = fs::path(data_dir) / "CIFP";
-  std::error_code ec;
-  if (!fs::is_directory(cifp_dir, ec)) {
-    return Result<uint32_t>::Err(
-        Error(ErrorCode::kDataMissing, "no CIFP directory under " + data_dir));
-  }
-
   // Directory entries and segment bodies are accumulated first; offsets are
-  // fixed up once the header + directory size is known.
+  // fixed up once the header + directory size is known. The caller supplies
+  // already-parsed (ICAO, CifpData) pairs, so this is source-agnostic: it never
+  // touches any data source's on-disk layout.
   struct Entry {
     std::string icao;
     std::string body;
   };
   std::vector<Entry> entries;
-  for (const fs::directory_entry& de : fs::directory_iterator(cifp_dir, ec)) {
-    if (!de.is_regular_file() || de.path().extension() != ".dat") {
-      continue;
-    }
-    const std::string icao = de.path().stem().string();
-    Result<CifpData> parsed = CifpParser::Parse(de.path().string());
-    if (!parsed) {
-      continue;  // skip unreadable file; not fatal for the archive as a whole
-    }
-    entries.push_back({icao, SerializeSegment(parsed.value())});
+  entries.reserve(procedures.size());
+  for (const auto& [icao, data] : procedures) {
+    entries.push_back({icao, SerializeSegment(data)});
   }
 
   // Header + directory string area.
