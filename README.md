@@ -226,15 +226,8 @@ and must not be redistributed. Place your local data under `navdata/` (git-ignor
 
 ## Documentation
 
-In-depth technical articles live under [docs/](docs/) (in Chinese). Start with
-[the routing-algorithm primer](docs/routing-basics.zh-CN.md), then explore the
-design highlights: [compliant routing](docs/compliant-routing.zh-CN.md),
-[procedure modeling](docs/procedure-modeling.zh-CN.md), the
-[Yen / Lawler optimization](docs/yen-lawler-optimization.zh-CN.md), the
-[portable binary cache](docs/binary-cache.zh-CN.md),
-[thread-safety contract B](docs/thread-safety.zh-CN.md), and
-[performance](docs/performance.zh-CN.md). See [docs/README.md](docs/README.md) for
-the full index.
+In-depth technical articles (in Chinese) live under [docs/](docs/README.md) —
+start with the routing-algorithm primer and follow the index from there.
 
 ## License
 
