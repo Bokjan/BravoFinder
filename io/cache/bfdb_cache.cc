@@ -186,19 +186,21 @@ Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
   f.read(buf.data(), static_cast<std::streamsize>(kMaxHeader));
   buf.resize(static_cast<size_t>(f.gcount()));
   if (buf.size() < 4) {
-    return Result<BfdbHeader>::Err(Error(ErrorCode::kDataMissing, "truncated .bfdb: " + path));
+    return Result<BfdbHeader>::Err(Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
   }
 
   auto bad = [&](const char* why) {
     return Result<BfdbHeader>::Err(
-        Error(ErrorCode::kDataMissing, std::string(why) + "; run bf build to regenerate"));
+        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
   };
   if (std::memcmp(buf.data(), kMagic, 4) != 0) {
     return bad("not a .bfdb file (bad magic)");
   }
   ByteReader r(buf.data() + 4, buf.size() - 4);
   if (r.U32() != kFormatVersion) {
-    return bad("incompatible .bfdb format version");
+    return Result<BfdbHeader>::Err(Error(ErrorCode::kFormatMismatch,
+                                         "incompatible .bfdb format version; run bf build to "
+                                         "regenerate"));
   }
 
   BfdbHeader header;
@@ -224,19 +226,19 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
   }
   const std::streamsize size = f.tellg();
   if (size < 4) {
-    return Result<GraphArchive>::Err(Error(ErrorCode::kDataMissing, "truncated .bfdb: " + path));
+    return Result<GraphArchive>::Err(Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
   }
   std::string buf(static_cast<size_t>(size), '\0');
   f.seekg(0);
   f.read(buf.data(), size);
   if (!f) {
     return Result<GraphArchive>::Err(
-        Error(ErrorCode::kDataMissing, "failed reading .bfdb: " + path));
+        Error(ErrorCode::kCacheCorrupt, "failed reading .bfdb: " + path));
   }
 
   auto bad = [&](const char* why) {
     return Result<GraphArchive>::Err(
-        Error(ErrorCode::kDataMissing, std::string(why) + "; run bf build to regenerate"));
+        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
   };
 
   if (std::memcmp(buf.data(), kMagic, 4) != 0) {
@@ -245,7 +247,9 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
   ByteReader r(buf.data() + 4, buf.size() - 4);
   const uint32_t format = r.U32();
   if (format != kFormatVersion) {
-    return bad("incompatible .bfdb format version");
+    return Result<GraphArchive>::Err(Error(ErrorCode::kFormatMismatch,
+                                           "incompatible .bfdb format version; run bf build to "
+                                           "regenerate"));
   }
 
   GraphArchive arc;

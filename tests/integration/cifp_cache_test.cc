@@ -180,7 +180,7 @@ TEST_CASE("cifp cache: a corrupt or missing cache is rejected cleanly", "[unit][
     f.close();
     bf::Result<bf::CifpArchive> r = bf::CifpCache::Open(path);
     CHECK_FALSE(r);
-    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
   }
   {
@@ -190,7 +190,7 @@ TEST_CASE("cifp cache: a corrupt or missing cache is rejected cleanly", "[unit][
     f.close();
     bf::Result<bf::CifpArchive> r = bf::CifpCache::Open(path);
     CHECK_FALSE(r);
-    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
   }
   // Valid magic, version and header strings, but an absurd airport count. The
@@ -216,7 +216,7 @@ TEST_CASE("cifp cache: a corrupt or missing cache is rejected cleanly", "[unit][
     f.close();
     bf::Result<bf::CifpArchive> r = bf::CifpCache::Open(path);
     CHECK_FALSE(r);
-    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
   }
 }

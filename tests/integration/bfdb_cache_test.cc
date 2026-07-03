@@ -186,7 +186,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     f.close();
     bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
     CHECK_FALSE(r);
-    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
   }
   // Right magic, wrong version.
@@ -199,7 +199,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     f.close();
     bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
     CHECK_FALSE(r);
-    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    CHECK(r.error().code == bf::ErrorCode::kFormatMismatch);
     std::remove(path.c_str());
   }
   // Truncated (only magic).
@@ -210,7 +210,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     f.close();
     bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
     CHECK_FALSE(r);
-    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
   }
   // Valid magic and version, but an absurd vertex count in the header. The
@@ -239,7 +239,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     f.close();
     bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
     CHECK_FALSE(r);
-    CHECK(r.error().code == bf::ErrorCode::kDataMissing);
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
   }
 }

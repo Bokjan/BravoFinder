@@ -248,7 +248,7 @@ Result<CifpArchive> CifpCache::Open(const std::string& path) {
 
   auto bad = [&](const char* why) {
     return Result<CifpArchive>::Err(
-        Error(ErrorCode::kDataMissing, std::string(why) + "; run bf build to regenerate"));
+        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
   };
 
   // Read the fixed header to learn the entry count, then read the directory rows
@@ -292,7 +292,9 @@ Result<CifpArchive> CifpCache::Open(const std::string& path) {
     return bad("truncated CIFP cache header");
   }
   if (format != kFormatVersion) {
-    return bad("incompatible CIFP cache format version");
+    return Result<CifpArchive>::Err(Error(ErrorCode::kFormatMismatch,
+                                          "incompatible CIFP cache format version; run bf build to "
+                                          "regenerate"));
   }
   if (!readInline(archive.program_semver_) || !readInline(archive.source_loader_)) {
     return bad("corrupt CIFP cache header");

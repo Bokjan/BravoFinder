@@ -136,7 +136,7 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
 
   auto bad = [&](const char* why) {
     return Result<NavDetailArchive>::Err(
-        Error(ErrorCode::kDataMissing, std::string(why) + "; run bf build to regenerate"));
+        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
   };
 
   // Read entire file into memory for a single-pass parse.
@@ -168,7 +168,9 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
     return bad("truncated nav detail cache header");
   }
   if (format != kFormatVersion) {
-    return bad("incompatible nav detail cache format version");
+    return Result<NavDetailArchive>::Err(
+        Error(ErrorCode::kFormatMismatch,
+              "incompatible nav detail cache format version; run bf build to regenerate"));
   }
 
   NavDetailArchive archive;
