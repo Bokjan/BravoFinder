@@ -36,7 +36,13 @@ target_link_libraries(bf_tests PRIVATE bf::io Catch2::Catch2WithMain)
 execute_process(
   COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libasan.so
   OUTPUT_VARIABLE _asan_lib OUTPUT_STRIP_TRAILING_WHITESPACE)
-if(IS_ABSOLUTE "${_asan_lib}" AND CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+execute_process(
+  COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libtsan.so
+  OUTPUT_VARIABLE _tsan_lib OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread" AND IS_ABSOLUTE "${_tsan_lib}")
+  set_property(TARGET bf_tests PROPERTY CROSSCOMPILING_EMULATOR
+    "${CMAKE_COMMAND};-E;env;LD_PRELOAD=${_tsan_lib}")
+elseif(CMAKE_CXX_FLAGS MATCHES "-fsanitize" AND IS_ABSOLUTE "${_asan_lib}")
   set_property(TARGET bf_tests PROPERTY CROSSCOMPILING_EMULATOR
     "${CMAKE_COMMAND};-E;env;LD_PRELOAD=${_asan_lib}")
 endif()
