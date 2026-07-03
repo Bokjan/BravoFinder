@@ -16,6 +16,15 @@
 #include <utility>
 
 #ifdef _WIN32
+// Suppress windows.h's min/max function-like macros (they collide with
+// std::min/std::max in headers that transitively include this one) and trim the
+// header to speed compilation.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #else
 #include <fcntl.h>
