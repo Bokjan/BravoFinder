@@ -363,6 +363,14 @@ Result<CifpArchive> CifpCache::Open(const std::string& path) {
     std::string icao = dir_pool.substr(row.icao_off, row.icao_len);
     archive.index_.emplace(std::move(icao), std::make_pair(row.seg_off, row.seg_len));
   }
+
+  // Open the shared read-only handle for positional segment reads. The stream
+  // `f` above was only used to read the header/directory; segments are fetched
+  // via pread on this handle instead of reopening the file per Fetch.
+  archive.file_ = PreadFile(path);
+  if (!archive.file_.is_open()) {
+    return bad("cannot open CIFP cache for segment reads");
+  }
   return Result<CifpArchive>::Ok(std::move(archive));
 }
 
@@ -406,16 +414,11 @@ std::optional<CifpData> CifpArchive::Fetch(const std::string& icao) const {
   }
   const uint64_t offset = it->second.first;
   const uint32_t length = it->second.second;
-  // Independent ifstream per call: no shared mutable state, so concurrent
-  // fetches for different airports are race-free (contract B).
-  std::ifstream f(path_, std::ios::binary);
-  if (!f.is_open()) {
-    return std::nullopt;
-  }
-  f.seekg(static_cast<std::streamoff>(offset));
+  // Positional read on the shared handle: pread/ReadFile take an explicit offset
+  // and touch no shared cursor, so concurrent fetches for different airports are
+  // race-free without a lock (contract B). Bounds were validated at Open.
   std::string bytes(length, '\0');
-  f.read(bytes.data(), length);
-  if (!f) {
+  if (!file_.ReadAt(bytes.data(), length, offset)) {
     return std::nullopt;
   }
   return DeserializeSegment(bytes.data(), bytes.size());

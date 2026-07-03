@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace bf {
@@ -206,21 +207,31 @@ class ByteReader {
   bool ok_ = true;
 };
 
-// A string pool that appends each string and returns a (offset, length)
-// reference into a single blob. Deliberately does not deduplicate (the pool is
-// only a few MB; simplicity wins).
+// A string pool that appends each distinct string once and returns a (offset,
+// length) reference into a single blob. Repeated strings (idents, regions,
+// airway names, ICAO codes recur heavily) resolve to the same reference, so the
+// blob holds one copy of each. Deduplication is transparent to readers: the
+// on-disk reference format is unchanged, so a pool written with or without it
+// reads identically.
 class StringPool {
  public:
   std::pair<uint32_t, uint32_t> Add(const std::string& s) {
-    const uint32_t offset = static_cast<uint32_t>(blob_.size());
+    auto [it, inserted] = interned_.try_emplace(s, std::pair<uint32_t, uint32_t>{});
+    if (!inserted) {
+      return it->second;
+    }
+    const std::pair<uint32_t, uint32_t> ref{static_cast<uint32_t>(blob_.size()),
+                                            static_cast<uint32_t>(s.size())};
     blob_.append(s);
-    return {offset, static_cast<uint32_t>(s.size())};
+    it->second = ref;
+    return ref;
   }
 
   const std::string& blob() const { return blob_; }
 
  private:
   std::string blob_;
+  std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> interned_;
 };
 
 // Resolve a (offset, len) reference against a loaded pool blob. Sets `ok` false

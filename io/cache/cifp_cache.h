@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/result.h"
+#include "io/cache/pread_file.h"
 #include "io/loaders/xplane12/cifp/cifp_parser.h"
 
 namespace bf {
@@ -18,16 +19,18 @@ namespace bf {
 // disk and are deserialized one at a time by Fetch().
 //
 // Thread-safety: after Open, the archive is immutable (the directory is fixed).
-// Fetch() opens its own ifstream per call and shares no mutable state, so it is
-// safe to call concurrently from multiple threads. This preserves NavDatabase's
-// contract B without any locking here.
+// Fetch() reads its segment via a positional read (pread / ReadFile with an
+// explicit offset) on a shared read-only handle that keeps no mutable cursor, so
+// it is safe to call concurrently from multiple threads. This preserves
+// NavDatabase's contract B without any locking here. The owned handle makes the
+// archive move-only.
 class CifpArchive {
  public:
   CifpArchive() = default;
 
   // Deserialize the segment for `icao` (case-sensitive; callers upper-case).
   // Returns std::nullopt if the airport is not in the archive or its segment is
-  // corrupt. Each call performs independent file I/O.
+  // corrupt. Reads only that segment, at its offset, from the shared handle.
   std::optional<CifpData> Fetch(const std::string& icao) const;
 
   // Deserialize every airport's segment in one pass, returning an ICAO -> data
@@ -47,6 +50,7 @@ class CifpArchive {
   friend class CifpCache;
 
   std::string path_;  // the nav_cifp.bfdb this archive reads segments from
+  PreadFile file_;    // shared read-only handle for positional segment reads
   std::unordered_map<std::string, std::pair<uint64_t, uint32_t>> index_;  // icao -> (offset, len)
   uint32_t cycle_ = 0;
   uint32_t build_ = 0;
