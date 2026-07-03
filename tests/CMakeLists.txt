@@ -16,9 +16,10 @@ add_executable(bf_tests
                integration/query_test.cc
                integration/bfdb_cache_test.cc
                integration/bfdb_inventory_test.cc
-               integration/cifp_cache_test.cc)
+               integration/cifp_cache_test.cc
+               integration/mcp_registry_test.cc)
 
-target_link_libraries(bf_tests PRIVATE bf::io Catch2::Catch2WithMain)
+target_link_libraries(bf_tests PRIVATE bf::io bf_mcp_lib Catch2::Catch2WithMain)
 
 # Register each Catch2 TEST_CASE with CTest. Run from the project root so the
 # integration tests find the default navdata/ directory. Catch2 returns exit

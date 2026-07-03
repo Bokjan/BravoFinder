@@ -215,7 +215,8 @@ Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
   return Result<BfdbHeader>::Ok(std::move(header));
 }
 
-Result<BfdbImage> BfdbCache::Read(const std::string& path) {  std::ifstream f(path, std::ios::binary | std::ios::ate);
+Result<BfdbImage> BfdbCache::Read(const std::string& path) {
+  std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open()) {
     return Result<BfdbImage>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
   }

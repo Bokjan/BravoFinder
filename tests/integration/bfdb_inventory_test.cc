@@ -105,14 +105,17 @@ TEST_CASE("inventory: header is authoritative over a misleading filename",
   CHECK_FALSE(v.Find(2601));
 }
 
-TEST_CASE("inventory: ignores CIFP companions and non-cache files",
-          "[integration][inventory]") {
+TEST_CASE("inventory: ignores CIFP companions and non-cache files", "[integration][inventory]") {
   const fs::path dir = TempDir("ignore");
   WriteCache(dir, 2601, 20260112);
   // A companion-named file and an unrelated file must both be ignored by name,
   // never opened as graph caches.
-  { std::ofstream(dir / "nav_2601_20260112_cifp.bfdb") << "not a graph cache"; }
-  { std::ofstream(dir / "readme.txt") << "hello"; }
+  {
+    std::ofstream(dir / "nav_2601_20260112_cifp.bfdb") << "not a graph cache";
+  }
+  {
+    std::ofstream(dir / "readme.txt") << "hello";
+  }
 
   bf::Result<bf::BfdbInventory> inv = bf::BfdbInventory::Scan(dir.string());
   REQUIRE(inv);
@@ -128,7 +131,9 @@ TEST_CASE("inventory: records caches with an unreadable header as skipped",
   WriteCache(dir, 2601, 20260112);
   // A file matching the graph-cache name pattern but with garbage contents:
   // opened, header rejected, listed in skipped().
-  { std::ofstream(dir / "nav_2602_20260209.bfdb") << "GARBAGE not a bfdb"; }
+  {
+    std::ofstream(dir / "nav_2602_20260209.bfdb") << "GARBAGE not a bfdb";
+  }
 
   bf::Result<bf::BfdbInventory> inv = bf::BfdbInventory::Scan(dir.string());
   REQUIRE(inv);
@@ -147,7 +152,6 @@ TEST_CASE("inventory: an empty directory yields no entries", "[integration][inve
 }
 
 TEST_CASE("inventory: a missing directory is an error", "[integration][inventory]") {
-  bf::Result<bf::BfdbInventory> inv =
-      bf::BfdbInventory::Scan("/nonexistent/bravofinder/dir/xyzzy");
+  bf::Result<bf::BfdbInventory> inv = bf::BfdbInventory::Scan("/nonexistent/bravofinder/dir/xyzzy");
   CHECK_FALSE(inv);
 }

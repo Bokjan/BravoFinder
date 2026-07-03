@@ -11,6 +11,9 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <optional>
+#include <string>
+
 #include "core/version.h"
 #include "tools.h"
 
@@ -19,6 +22,29 @@ namespace bf::mcp {
 namespace {
 
 constexpr char kProtocolVersion[] = "2024-11-05";
+
+// A server-provided tool (not a per-database capability): lists the AIRAC
+// cycles the registry can serve. Handled directly by McpServer since it needs
+// the registry, not a single NavDatabase.
+constexpr char kListCyclesTool[] = "list_cycles";
+
+// Inject the shared "cycle" argument into a per-database tool's schema. cycle
+// is a server-level concern (which database to query), so it is added here
+// rather than duplicated into every tool's own schema string.
+void InjectCycleProperty(rapidjson::Value& schema, rapidjson::Document::AllocatorType& alloc) {
+  if (!schema.IsObject() || !schema.HasMember("properties") || !schema["properties"].IsObject()) {
+    return;
+  }
+  rapidjson::Value cycle(rapidjson::kObjectType);
+  cycle.AddMember("type", "integer", alloc);
+  cycle.AddMember(
+      "description",
+      rapidjson::Value("AIRAC cycle to query, e.g. 2601. Omit to use the latest loaded cycle. "
+                       "Use list_cycles to see what is available.",
+                       alloc),
+      alloc);
+  schema["properties"].AddMember("cycle", cycle, alloc);
+}
 
 // Parse a JSON-RPC request line. Returns false if the line is not a valid JSON
 // object (the caller then silently skips it, as a well-behaved client sends
@@ -158,12 +184,56 @@ void McpServer::HandleToolsList(int id) {
     // own (server-owned) allocator is not relied upon past this call.
     rapidjson::Value schema_copy;
     schema_copy.CopyFrom(tool.input_schema, alloc);
+    // Every per-database tool accepts an optional "cycle"; inject it here so the
+    // tools stay cycle-agnostic and the argument is declared in one place.
+    InjectCycleProperty(schema_copy, alloc);
     entry.AddMember("inputSchema", schema_copy.Move(), alloc);
+    tools.PushBack(entry.Move(), alloc);
+  }
+
+  // The server-provided list_cycles tool (no cycle argument of its own).
+  {
+    rapidjson::Value entry(rapidjson::kObjectType);
+    entry.AddMember("name", rapidjson::Value(kListCyclesTool, alloc), alloc);
+    entry.AddMember(
+        "description",
+        rapidjson::Value("List the AIRAC cycles this server can query. Returns each cycle, its "
+                         "build, and whether it is already loaded. Pass a cycle to the other "
+                         "tools' 'cycle' argument to query a specific one.",
+                         alloc),
+        alloc);
+    rapidjson::Value schema(rapidjson::kObjectType);
+    schema.AddMember("type", "object", alloc);
+    schema.AddMember("properties", rapidjson::Value(rapidjson::kObjectType), alloc);
+    entry.AddMember("inputSchema", schema, alloc);
     tools.PushBack(entry.Move(), alloc);
   }
 
   result.AddMember("tools", tools, alloc);
   SendResult(id, result);
+}
+
+// Serialize the registry's available cycles as a JSON array, newest first.
+void McpServer::HandleListCycles(int id) {
+  const BfdbInventory& inv = registry_.inventory();
+  // A cycle is "loaded" once Get has opened it; the inventory does not track
+  // that, so we only report cycle/build here (loaded state is transient and not
+  // essential for the client's choice).
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartArray();
+  // Entries are sorted ascending; present newest first for readability.
+  const auto& entries = inv.entries();
+  for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+    writer.StartObject();
+    writer.Key("cycle");
+    writer.Uint(it->cycle);
+    writer.Key("build");
+    writer.Uint(it->build);
+    writer.EndObject();
+  }
+  writer.EndArray();
+  SendToolResult(id, buffer.GetString(), inv.empty());
 }
 
 void McpServer::HandleToolsCall(int id, const rapidjson::Value& params) {
@@ -172,6 +242,12 @@ void McpServer::HandleToolsCall(int id, const rapidjson::Value& params) {
     return;
   }
   const std::string name = params["name"].GetString();
+
+  if (name == kListCyclesTool) {
+    HandleListCycles(id);
+    return;
+  }
+
   // A missing/non-object "arguments" is treated as empty: tools validate their
   // own required fields and report a tool error if needed.
   rapidjson::Value null_args;
@@ -179,9 +255,22 @@ void McpServer::HandleToolsCall(int id, const rapidjson::Value& params) {
                                      ? params["arguments"]
                                      : null_args;
 
+  // Resolve which database to serve from the optional "cycle" argument (absent
+  // => latest). This is the server's concern, so the tool handlers never see
+  // cycle and keep operating on a single database.
+  std::optional<uint32_t> cycle;
+  if (args.HasMember("cycle") && args["cycle"].IsUint()) {
+    cycle = args["cycle"].GetUint();
+  }
+  Result<const NavDatabase*> db = registry_.Get(cycle);
+  if (!db) {
+    SendToolResult(id, R"({"error":")" + db.error().message + R"("})", true);
+    return;
+  }
+
   for (const Tool& tool : AllTools()) {
     if (tool.name == name) {
-      auto [json, is_error] = tool.handler(args, db_);
+      auto [json, is_error] = tool.handler(args, *db.value());
       SendToolResult(id, json, is_error);
       return;
     }

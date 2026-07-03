@@ -68,6 +68,12 @@ class NavDatabase {
   // `bf build` after Open(). Returns an Error if the file cannot be written.
   Result<void> WriteCache(const std::string& out_path) const;
 
+  // AIRAC provenance parsed from the source data (or restored from a cache):
+  // the cycle number (e.g. 2601) and build date stamp (e.g. 20260112). Zero
+  // when the source carried no parsable provenance.
+  uint32_t cycle() const { return cycle_; }
+  uint32_t build() const { return build_; }
+
   // Serialize every airport's CIFP procedures to a segmented `nav_cifp.bfdb`
   // procedure cache, so deployment needs only the cache files (not the CIFP
   // directory). `source_loader` is recorded as provenance. Returns the number

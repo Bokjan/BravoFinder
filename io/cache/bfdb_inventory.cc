@@ -16,8 +16,8 @@ Result<BfdbInventory> BfdbInventory::Scan(const std::string& dir) {
   std::error_code ec;
   fs::directory_iterator it(dir, ec);
   if (ec) {
-    return Result<BfdbInventory>::Err(
-        Error(ErrorCode::kDataMissing, "cannot read directory: " + dir + " (" + ec.message() + ")"));
+    return Result<BfdbInventory>::Err(Error(
+        ErrorCode::kDataMissing, "cannot read directory: " + dir + " (" + ec.message() + ")"));
   }
 
   BfdbInventory inv;

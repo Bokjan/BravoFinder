@@ -35,11 +35,11 @@ TEST_CASE("naming: ParseBfdbName rejects the CIFP companion", "[unit][naming]") 
 }
 
 TEST_CASE("naming: ParseBfdbName rejects non-matching names", "[unit][naming]") {
-  CHECK_FALSE(bf::ParseBfdbName("nav.bfdb"));            // legacy fallback name, no cycle/build
-  CHECK_FALSE(bf::ParseBfdbName("nav_2601.bfdb"));       // missing build segment
-  CHECK_FALSE(bf::ParseBfdbName("nav_2601_.bfdb"));      // empty build segment
-  CHECK_FALSE(bf::ParseBfdbName("nav__20260112.bfdb"));  // empty cycle segment
-  CHECK_FALSE(bf::ParseBfdbName("nav_ab_cd.bfdb"));      // non-numeric
+  CHECK_FALSE(bf::ParseBfdbName("nav.bfdb"));               // legacy fallback name, no cycle/build
+  CHECK_FALSE(bf::ParseBfdbName("nav_2601.bfdb"));          // missing build segment
+  CHECK_FALSE(bf::ParseBfdbName("nav_2601_.bfdb"));         // empty build segment
+  CHECK_FALSE(bf::ParseBfdbName("nav__20260112.bfdb"));     // empty cycle segment
+  CHECK_FALSE(bf::ParseBfdbName("nav_ab_cd.bfdb"));         // non-numeric
   CHECK_FALSE(bf::ParseBfdbName("nav_2601_20260112.txt"));  // wrong extension
   CHECK_FALSE(bf::ParseBfdbName("other_2601_20260112.bfdb"));  // wrong prefix
 }

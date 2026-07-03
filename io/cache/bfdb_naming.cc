@@ -21,7 +21,8 @@ std::optional<std::pair<uint32_t, uint32_t>> ParseBfdbName(std::string_view path
   // is not a graph cache name and returns nullopt.
   constexpr std::string_view kPrefix = "nav_";
   constexpr std::string_view kSuffix = ".bfdb";
-  if (name.size() <= kPrefix.size() + kSuffix.size() || name.compare(0, kPrefix.size(), kPrefix) != 0 ||
+  if (name.size() <= kPrefix.size() + kSuffix.size() ||
+      name.compare(0, kPrefix.size(), kPrefix) != 0 ||
       name.compare(name.size() - kSuffix.size(), kSuffix.size(), kSuffix) != 0) {
     return std::nullopt;
   }
