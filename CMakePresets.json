@@ -81,11 +81,13 @@
     {
       "name": "windows-debug",
       "configurePreset": "windows-debug",
+      "configuration": "Debug",
       "jobs": 0
     },
     {
       "name": "windows-release",
       "configurePreset": "windows-release",
+      "configuration": "Release",
       "jobs": 0
     }
   ],
@@ -152,6 +154,7 @@
     {
       "name": "windows-debug",
       "configurePreset": "windows-debug",
+      "configuration": "Debug",
       "output": {
         "outputOnFailure": true
       }
@@ -159,6 +162,7 @@
     {
       "name": "windows-release",
       "configurePreset": "windows-release",
+      "configuration": "Release",
       "output": {
         "outputOnFailure": true
       }
