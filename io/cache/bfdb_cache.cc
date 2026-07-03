@@ -304,7 +304,7 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
     uint32_t io, il, ro, rl;
   };
   arc.coords.resize(v);
-  arc.on_network.assign(v, false);
+  arc.on_network.assign(v, 0);
   arc.kinds.resize(v);
   std::vector<IdentRef> ident_refs(v);
   for (uint32_t i = 0; i < v; ++i) {
@@ -315,7 +315,7 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
     ident_refs[i].ro = r.U32();
     ident_refs[i].rl = r.U32();
     const uint8_t flags = r.U8();
-    arc.on_network[i] = (flags & 0x01) != 0;
+    arc.on_network[i] = (flags & 0x01) != 0 ? 1 : 0;
     arc.kinds[i] = static_cast<WaypointKind>(r.U8());
   }
   // Airport records: elevation per airport vertex, in vertex order.

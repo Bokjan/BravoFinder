@@ -99,7 +99,7 @@ class GraphBuilder {
 
   NavGraph graph_;
   std::vector<Ident> idents_;        // per-vertex ident, size = V
-  std::vector<bool> on_network_;     // per-vertex: participates in an airway, size = V
+  std::vector<uint8_t> on_network_;  // per-vertex: participates in an airway (0/1), size = V
   std::vector<WaypointKind> kinds_;  // per-vertex point kind, size = V
   int first_airport_vertex_ = 0;     // vertices [this, V) are airports
   std::vector<int>

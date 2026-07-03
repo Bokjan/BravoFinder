@@ -129,10 +129,10 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   // network. Terminal-area fixes (approach/SID/STAR points) are geographically
   // closest to an airport but are dead ends here until procedures are modeled,
   // so connecting to them would strand the airport off the network.
-  std::vector<bool> on_network(total, false);
+  std::vector<uint8_t> on_network(total, 0);
   for (int v = 0; v < total; ++v) {
     if (!adj[v].empty()) {
-      on_network[v] = true;
+      on_network[v] = 1;
     }
   }
   AirwaySegment dct;  // default-constructed: name empty, FL 0..0
