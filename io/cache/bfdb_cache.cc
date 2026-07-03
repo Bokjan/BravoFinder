@@ -12,6 +12,12 @@ namespace {
 
 constexpr char kMagic[4] = {'B', 'F', 'D', 'B'};
 
+// The vertex-record flags byte and the WaypointKind are each serialized as a
+// single U8; guard that the kind still fits, so adding enumerators past 255
+// fails to compile rather than silently truncating on write.
+static_assert(static_cast<int>(WaypointKind::kOther) < 256,
+              "WaypointKind no longer fits in the U8 vertex-record field");
+
 }  // namespace
 
 Result<void> BfdbCache::Write(const std::string& path, const GraphArchive& archive) {
@@ -167,12 +173,14 @@ Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
   if (!f.is_open()) {
     return Result<BfdbHeader>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
   }
-  // The header is small and bounded: 4 (magic) + 9*U32 (version, cycle, build,
-  // v, e, airway_count, msa_count, first_airport_vertex, and each string's
-  // length prefix) plus the three variable-length strings. Read a generous
-  // fixed prefix; if a string length points past it, the file is treated as
-  // corrupt rather than read further (a real cache's provenance strings are a
-  // few dozen bytes).
+  // The header prefix is small and bounded: 4 (magic) + fixed U32 fields
+  // (version, cycle, build, v, e, airway_count, msa_count, first_airport_vertex)
+  // then the inline provenance strings. ReadHeader only needs the first two
+  // strings (program_semver, source_loader); data_dir and the body follow but
+  // are not read here. 4096 is a generous ceiling -- real provenance strings are
+  // a few dozen bytes -- chosen so one bounded read covers the whole prefix; if
+  // a string length points past what was read, the file is treated as corrupt
+  // rather than reading further.
   constexpr size_t kMaxHeader = 4096;
   std::string buf(kMaxHeader, '\0');
   f.read(buf.data(), static_cast<std::streamsize>(kMaxHeader));
@@ -257,7 +265,9 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
   // vertex record 34 B (coord 16 + ident refs 16 + flags 1 + kind 1), airport
   // record 4 B (I32 elevation), offsets 4 B, GraphEdge 15 B (4+4+2+2+2+1, tighter
   // than the 16 B in-memory struct), airway ref 8 B, MSA sector at least 28 B
-  // (6xU32 refs + a U32 arc count).
+  // (6xU32 refs + a U32 arc count, EXCLUDING its variable-length arc array --
+  // each sector's arcs are separately fused against the then-remaining bytes in
+  // the MSA read loop below, so 28 B here is only the fixed per-sector minimum).
   //
   // first_airport_vertex must lie in [0, v]; the airport record section then
   // holds (v - first_airport_vertex) elevations. An out-of-range value is
@@ -352,6 +362,9 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
     m.aio = r.U32();
     m.ail = r.U32();
     const uint32_t arc_count = r.U32();
+    // Fuse against the CURRENTLY remaining bytes (shrinks as prior sectors are
+    // consumed), each arc being 12 B (3xI32). A necessary, per-sector bound; the
+    // subsequent reads still degrade safely via r.ok() on any residual mismatch.
     if (!r.ok() || arc_count > r.remaining() / 12) {
       return bad("corrupt .bfdb msa section");
     }

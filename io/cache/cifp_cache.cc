@@ -13,6 +13,13 @@ namespace {
 
 constexpr char kMagic[4] = {'B', 'F', 'C', 'P'};
 
+// Each of these enums is serialized as a single U8 in a segment; guard that the
+// last enumerator still fits, so extending an enum past 255 fails to compile
+// rather than silently truncating on write.
+static_assert(static_cast<int>(ProcedureType::kApproach) < 256, "ProcedureType exceeds U8");
+static_assert(static_cast<int>(PathTerminator::kUnknown) < 256, "PathTerminator exceeds U8");
+static_assert(static_cast<int>(AltConstraintKind::kBetween) < 256, "AltConstraintKind exceeds U8");
+
 // --- One airport's CIFP data, serialized as a self-contained segment. ---
 //
 // A segment has its own trailing string pool, so it can be deserialized in
@@ -181,29 +188,27 @@ Result<uint32_t> CifpCache::Build(const std::vector<std::pair<std::string, CifpD
   std::string directory;
   ByteWriter dw(directory);
   const size_t dir_entry_size = 4 + 4 + 8 + 4;  // icao off,len + offset + len
-  // Provisional sizes to locate the first segment. The directory string pool
-  // holds the ICAO codes.
-  std::string dir_pool_blob;
-  {
-    // First pass: build the ICAO pool so its size is known.
-    for (const Entry& e : entries) {
-      dir_pool.Add(e.icao);
-    }
-    dir_pool_blob = dir_pool.blob();
+  // First pass: intern every ICAO, capturing each one's (offset, len) ref as the
+  // pool returns it -- so the second pass emits refs directly instead of
+  // re-deriving offsets by manually accumulating a cursor (which silently
+  // depended on the two passes visiting entries in the same order).
+  std::vector<std::pair<uint32_t, uint32_t>> icao_refs;
+  icao_refs.reserve(entries.size());
+  for (const Entry& e : entries) {
+    icao_refs.push_back(dir_pool.Add(e.icao));
   }
+  const std::string dir_pool_blob = dir_pool.blob();
   const size_t segments_start =
       header.size() + entries.size() * dir_entry_size + 4 /*dir_pool_len*/ + dir_pool_blob.size();
 
   // Second pass: emit directory rows with absolute segment offsets.
   uint64_t running = segments_start;
-  size_t pool_cursor = 0;
-  for (const Entry& e : entries) {
-    dw.U32(static_cast<uint32_t>(pool_cursor));
-    dw.U32(static_cast<uint32_t>(e.icao.size()));
-    pool_cursor += e.icao.size();
+  for (size_t i = 0; i < entries.size(); ++i) {
+    dw.U32(icao_refs[i].first);
+    dw.U32(icao_refs[i].second);
     dw.U64(running);
-    dw.U32(static_cast<uint32_t>(e.body.size()));
-    running += e.body.size();
+    dw.U32(static_cast<uint32_t>(entries[i].body.size()));
+    running += entries[i].body.size();
   }
 
   std::string out;

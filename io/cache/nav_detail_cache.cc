@@ -12,6 +12,9 @@ namespace {
 
 constexpr char kMagic[4] = {'B', 'F', 'N', 'D'};
 
+// WaypointKind is serialized as a single U8 per navaid record; guard it fits.
+static_assert(static_cast<int>(WaypointKind::kOther) < 256, "WaypointKind exceeds U8");
+
 }  // namespace
 
 // --- Serialization format (version 1) -----------------------------------
