@@ -56,6 +56,9 @@ Result<void> NavDetailCache::Build(const std::string& out_path, const NavDetailA
   StringPool pool;
   std::string body;
   ByteWriter w(body);
+  // Navaid record 41 B + hold record 65 B on disk (excluding pool bytes); a hint
+  // to avoid repeated reallocation.
+  w.Reserve(archive.navaids_.size() * 41 + archive.holds_.size() * 65);
 
   auto ref = [&](const std::string& s) {
     const auto r = pool.Add(s);
@@ -100,12 +103,8 @@ Result<void> NavDetailCache::Build(const std::string& out_path, const NavDetailA
   hw.U32(static_cast<uint32_t>(archive.navaids_.size()));
   hw.U32(static_cast<uint32_t>(archive.holds_.size()));
 
-  auto write_inline = [&](const std::string& s) {
-    hw.U32(static_cast<uint32_t>(s.size()));
-    out.append(s);
-  };
-  write_inline(program_semver);
-  write_inline(source_loader);
+  hw.Str(program_semver);
+  hw.Str(source_loader);
 
   hw.U32(static_cast<uint32_t>(pool.blob().size()));
   out.append(body);
@@ -178,21 +177,13 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
     return bad("truncated nav detail cache header");
   }
 
-  // Inline strings: program_semver and source_loader (lengths then bytes)
-  auto read_inline = [&](std::string& s) {
-    const uint32_t len = r.U32();
-    if (!r.ok() || len > r.remaining()) {
-      return false;
-    }
-    s.resize(len);
-    for (uint32_t i = 0; i < len; ++i) {
-      s[i] = static_cast<char>(r.U8());
-    }
-    return r.ok();
-  };
-  std::string program_semver_unused;
-  std::string source_loader_unused;
-  if (!read_inline(program_semver_unused) || !read_inline(source_loader_unused)) {
+  // Inline strings: program_semver and source_loader (lengths then bytes).
+  // Read and discarded here -- the archive does not retain provenance.
+  const std::string program_semver_unused = r.Str();
+  const std::string source_loader_unused = r.Str();
+  (void)program_semver_unused;
+  (void)source_loader_unused;
+  if (!r.ok()) {
     return bad("corrupt nav detail cache header");
   }
 
@@ -209,13 +200,14 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
   }
 
   // Records section comes before the pool blob in the buffer.
-  // Resolve string references against the pool blob at the end of the file.
+  // Resolve string references against the pool blob at the end of the file,
+  // in place (a slice of the already-read buffer), no separate copy.
   const size_t pool_start = static_cast<size_t>(file_size) - pool_size;
-  const std::string pool_blob(buf.data() + pool_start, pool_size);
+  const char* pool_blob = buf.data() + pool_start;
 
   bool refs_ok = true;
   auto resolve = [&](uint32_t off, uint32_t len) -> std::string {
-    return ResolveRef(pool_blob, off, len, refs_ok);
+    return ResolveRef(pool_blob, pool_size, off, len, refs_ok);
   };
 
   // Navaid records

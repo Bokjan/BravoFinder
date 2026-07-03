@@ -73,7 +73,7 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size) {
   if (!r.ok() || pool_len > r.remaining()) {
     return std::nullopt;
   }
-  const std::string blob(data + sizeof(uint32_t), pool_len);
+  const char* blob = data + sizeof(uint32_t);
   // Advance the reader past the pool to the body.
   ByteReader br(data + sizeof(uint32_t) + pool_len, size - sizeof(uint32_t) - pool_len);
 
@@ -81,7 +81,7 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size) {
   auto ref = [&](std::string& s) {
     const uint32_t off = br.U32();
     const uint32_t len = br.U32();
-    s = ResolveRef(blob, off, len, refs_ok);
+    s = ResolveRef(blob, pool_len, off, len, refs_ok);
   };
 
   // Minimum on-disk bytes per record, used to reject an absurd count before
@@ -169,12 +169,8 @@ Result<uint32_t> CifpCache::Build(const std::vector<std::pair<std::string, CifpD
   ByteWriter hw(header);
   header.append(kMagic, 4);
   hw.U32(kFormatVersion);
-  auto write_inline = [&](const std::string& s) {
-    hw.U32(static_cast<uint32_t>(s.size()));
-    header.append(s);
-  };
-  write_inline(program_semver);
-  write_inline(source_loader);
+  hw.Str(program_semver);
+  hw.Str(source_loader);
   hw.U32(cycle);
   hw.U32(build);
   hw.U32(static_cast<uint32_t>(entries.size()));

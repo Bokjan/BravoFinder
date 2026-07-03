@@ -36,6 +36,12 @@ Result<void> BfdbCache::Write(const std::string& path, const GraphArchive& archi
   StringPool pool;
   std::string sections;
   ByteWriter w(sections);
+  // Estimate the sections size up front to avoid repeated reallocation: vertex
+  // records 34 B, airport records 4 B, offsets 4 B, edges 15 B, airway refs 8 B,
+  // the fixed MORA grid, and MSA sectors (~28 B + arcs). A hint, not exact.
+  w.Reserve(v * 34 + airport_count * 4 + (v + 1) * 4 + e * 15 + archive.airway_names.size() * 8 +
+            static_cast<size_t>(MoraGrid::kLatCount) * MoraGrid::kLonCount * 2 +
+            archive.msa.size() * 32);
 
   // Vertex records: one self-contained record per vertex, gathering all
   // per-vertex attributes (position, ident, a flags byte, and the point kind).
@@ -116,10 +122,12 @@ Result<void> BfdbCache::Write(const std::string& path, const GraphArchive& archi
     }
   }
 
-  // Header, then sections, then the string pool blob.
-  std::string out;
-  ByteWriter hw(out);
-  out.append(kMagic, 4);
+  // Header, then sections, then the string pool blob. The header is built in its
+  // own small buffer; the three parts are written to the stream in order so the
+  // large `sections` buffer is not copied into a combined buffer first.
+  std::string header;
+  ByteWriter hw(header);
+  header.append(kMagic, 4);
   hw.U32(kFormatVersion);
   hw.U32(archive.cycle);
   hw.U32(archive.build);
@@ -130,24 +138,19 @@ Result<void> BfdbCache::Write(const std::string& path, const GraphArchive& archi
   hw.U32(static_cast<uint32_t>(archive.first_airport_vertex));
   // Header strings are stored inline (length-prefixed) rather than in the pool,
   // since the pool is a trailing section but these are read from the header.
-  auto write_inline = [&](const std::string& s) {
-    hw.U32(static_cast<uint32_t>(s.size()));
-    out.append(s);
-  };
-  write_inline(archive.program_semver);
-  write_inline(archive.source_loader);
-  write_inline(archive.data_dir);
+  hw.Str(archive.program_semver);
+  hw.Str(archive.source_loader);
+  hw.Str(archive.data_dir);
   hw.U32(static_cast<uint32_t>(pool.blob().size()));
-
-  out.append(sections);
-  out.append(pool.blob());
 
   std::ofstream f(path, std::ios::binary | std::ios::trunc);
   if (!f.is_open()) {
     return Result<void>::Err(
         Error(ErrorCode::kDataMissing, "cannot open .bfdb for writing: " + path));
   }
-  f.write(out.data(), static_cast<std::streamsize>(out.size()));
+  f.write(header.data(), static_cast<std::streamsize>(header.size()));
+  f.write(sections.data(), static_cast<std::streamsize>(sections.size()));
+  f.write(pool.blob().data(), static_cast<std::streamsize>(pool.blob().size()));
   if (!f) {
     return Result<void>::Err(Error(ErrorCode::kParseError, "failed writing .bfdb: " + path));
   }
@@ -198,18 +201,9 @@ Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
   for (int i = 0; i < 5; ++i) {
     r.U32();
   }
-  auto read_inline = [&](std::string& s) {
-    const uint32_t len = r.U32();
-    if (!r.ok() || len > r.remaining()) {
-      return false;
-    }
-    s.resize(len);
-    for (uint32_t i = 0; i < len; ++i) {
-      s[i] = static_cast<char>(r.U8());
-    }
-    return true;
-  };
-  if (!read_inline(header.program_semver) || !read_inline(header.source_loader)) {
+  header.program_semver = r.Str();
+  header.source_loader = r.Str();
+  if (!r.ok()) {
     return bad("corrupt .bfdb header");
   }
   return Result<BfdbHeader>::Ok(std::move(header));
@@ -282,20 +276,10 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
     return bad("corrupt .bfdb: header counts exceed file size");
   }
   // Inline header strings (length-prefixed), in write order.
-  auto read_inline = [&](std::string& s) {
-    const uint32_t len = r.U32();
-    if (!r.ok() || len > r.remaining()) {
-      s.clear();
-      return false;
-    }
-    s.resize(len);
-    for (uint32_t i = 0; i < len; ++i) {
-      s[i] = static_cast<char>(r.U8());
-    }
-    return true;
-  };
-  if (!read_inline(arc.program_semver) || !read_inline(arc.source_loader) ||
-      !read_inline(arc.data_dir)) {
+  arc.program_semver = r.Str();
+  arc.source_loader = r.Str();
+  arc.data_dir = r.Str();
+  if (!r.ok()) {
     return bad("corrupt .bfdb header");
   }
   const uint32_t pool_len = r.U32();
@@ -328,9 +312,7 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
   }
   // offsets
   arc.offsets.resize(static_cast<size_t>(v) + 1);
-  for (uint32_t i = 0; i <= v; ++i) {
-    arc.offsets[i] = r.I32();
-  }
+  r.I32Span(arc.offsets.data(), static_cast<size_t>(v) + 1);
   // edges
   arc.edges.resize(e);
   for (uint32_t i = 0; i < e; ++i) {
@@ -354,9 +336,7 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
   }
   // mora
   std::vector<int16_t> cells(static_cast<size_t>(MoraGrid::kLatCount) * MoraGrid::kLonCount);
-  for (int16_t& c : cells) {
-    c = r.I16();
-  }
+  r.I16Span(cells.data(), cells.size());
   // msa
   struct MsaRef {
     uint32_t cio, cil, cro, crl, aio, ail;
@@ -383,31 +363,33 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
     }
   }
 
-  // String pool blob is the final section.
+  // String pool blob is the final section. Resolve references against it in
+  // place (a slice of the already-read file buffer), no separate copy.
   if (!r.ok() || r.remaining() < pool_len) {
     return bad("corrupt .bfdb: truncated string pool");
   }
-  const std::string blob = buf.substr(buf.size() - pool_len);
+  const char* blob = buf.data() + (buf.size() - pool_len);
+  const size_t blob_len = pool_len;
 
   // Resolve all references against the pool.
   bool refs_ok = true;
   arc.idents.resize(v);
   for (uint32_t i = 0; i < v; ++i) {
     const IdentRef& ir = ident_refs[i];
-    arc.idents[i].ident = ResolveRef(blob, ir.io, ir.il, refs_ok);
-    arc.idents[i].region = ResolveRef(blob, ir.ro, ir.rl, refs_ok);
+    arc.idents[i].ident = ResolveRef(blob, blob_len, ir.io, ir.il, refs_ok);
+    arc.idents[i].region = ResolveRef(blob, blob_len, ir.ro, ir.rl, refs_ok);
   }
   arc.airway_names.resize(airway_count);
   for (uint32_t i = 0; i < airway_count; ++i) {
-    arc.airway_names[i] = ResolveRef(blob, airway_refs[i].o, airway_refs[i].l, refs_ok);
+    arc.airway_names[i] = ResolveRef(blob, blob_len, airway_refs[i].o, airway_refs[i].l, refs_ok);
   }
   arc.mora = MoraGrid::FromCells(std::move(cells));
   arc.msa.resize(msa_count);
   for (uint32_t i = 0; i < msa_count; ++i) {
     MsaRef& m = msa_refs[i];
-    arc.msa[i].center.ident = ResolveRef(blob, m.cio, m.cil, refs_ok);
-    arc.msa[i].center.region = ResolveRef(blob, m.cro, m.crl, refs_ok);
-    arc.msa[i].airport_icao = ResolveRef(blob, m.aio, m.ail, refs_ok);
+    arc.msa[i].center.ident = ResolveRef(blob, blob_len, m.cio, m.cil, refs_ok);
+    arc.msa[i].center.region = ResolveRef(blob, blob_len, m.cro, m.crl, refs_ok);
+    arc.msa[i].airport_icao = ResolveRef(blob, blob_len, m.aio, m.ail, refs_ok);
     arc.msa[i].arcs = std::move(m.arcs);
   }
 
