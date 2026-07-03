@@ -5,6 +5,7 @@
 #include <string>
 
 #include "commands.h"
+#include "io/cache/bfdb_naming.h"
 #include "io/nav_database.h"
 
 namespace bf::cli {
@@ -21,7 +22,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
   CLI::App* build = app.add_subcommand("build", "Build a .bfdb cache from X-Plane data");
   build->add_option("data_dir", args->data_dir, "Directory of X-Plane navigation data")->required();
   build->add_option("-o,--output", args->output,
-                    "Output .bfdb path (default: <data_dir>/nav.bfdb)");
+                    "Output .bfdb path (default: <data_dir>/nav_<cycle>_<build>.bfdb)");
   build->add_option("--loader", args->loader, "Data source loader")
       ->capture_default_str()
       ->check(CLI::IsMember({"xplane"}));
@@ -29,13 +30,19 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
                   "Skip building the CIFP procedure cache (<stem>_cifp.bfdb)");
 
   build->callback([args, &exit_code]() {
-    const std::string out = args->output.empty() ? args->data_dir + "/nav.bfdb" : args->output;
     Result<NavDatabase> db = NavDatabase::Open(args->data_dir);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
       exit_code = EXIT_FAILURE;
       return;
     }
+    // Default output name encodes the AIRAC cycle/build parsed from the data, so
+    // a directory of caches can be told apart and served by the MCP registry. An
+    // explicit -o is honored verbatim.
+    const std::string out =
+        args->output.empty()
+            ? args->data_dir + "/" + FormatBfdbName(db.value().cycle(), db.value().build())
+            : args->output;
     Result<void> written = db.value().WriteCache(out);
     if (!written) {
       std::cerr << "error: " << written.error().message << "\n";
