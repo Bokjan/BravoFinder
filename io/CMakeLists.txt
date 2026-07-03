@@ -4,6 +4,8 @@ add_library(bf_io
             loaders/xplane/cifp/cifp_parser.cc
             loaders/xplane/cifp/procedure_connector.cc
             cache/bfdb_cache.cc
+            cache/bfdb_inventory.cc
+            cache/bfdb_naming.cc
             cache/cifp_cache.cc
             graph_builder.cc
             nav_database.cc

@@ -154,8 +154,68 @@ Result<void> BfdbCache::Write(const std::string& path, const BfdbImage& image) {
   return Result<void>::Ok();
 }
 
-Result<BfdbImage> BfdbCache::Read(const std::string& path) {
-  std::ifstream f(path, std::ios::binary | std::ios::ate);
+// Read only the fixed header region: magic, format version, cycle/build, and
+// the three inline provenance strings. Deliberately mirrors the header layout
+// written by Write (see the "Header, then sections..." block there) but stops
+// before the vertex records. The count fields are skipped, not validated,
+// since the body is never touched.
+Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
+  std::ifstream f(path, std::ios::binary);
+  if (!f.is_open()) {
+    return Result<BfdbHeader>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
+  }
+  // The header is small and bounded: 4 (magic) + 9*U32 (version, cycle, build,
+  // v, e, airway_count, msa_count, first_airport_vertex, and each string's
+  // length prefix) plus the three variable-length strings. Read a generous
+  // fixed prefix; if a string length points past it, the file is treated as
+  // corrupt rather than read further (a real cache's provenance strings are a
+  // few dozen bytes).
+  constexpr size_t kMaxHeader = 4096;
+  std::string buf(kMaxHeader, '\0');
+  f.read(buf.data(), static_cast<std::streamsize>(kMaxHeader));
+  buf.resize(static_cast<size_t>(f.gcount()));
+  if (buf.size() < 4) {
+    return Result<BfdbHeader>::Err(Error(ErrorCode::kDataMissing, "truncated .bfdb: " + path));
+  }
+
+  auto bad = [&](const char* why) {
+    return Result<BfdbHeader>::Err(
+        Error(ErrorCode::kDataMissing, std::string(why) + "; run bf build to regenerate"));
+  };
+  if (std::memcmp(buf.data(), kMagic, 4) != 0) {
+    return bad("not a .bfdb file (bad magic)");
+  }
+  ByteReader r(buf.data() + 4, buf.size() - 4);
+  if (r.U32() != kFormatVersion) {
+    return bad("incompatible .bfdb format version");
+  }
+
+  BfdbHeader header;
+  header.cycle = r.U32();
+  header.build = r.U32();
+  // Skip the four count fields (v, e, airway_count, msa_count) and
+  // first_airport_vertex; ReadHeader never touches the body they describe.
+  for (int i = 0; i < 5; ++i) {
+    r.U32();
+  }
+  auto read_inline = [&](std::string& s) {
+    const uint32_t len = r.U32();
+    if (!r.ok() || len > r.remaining()) {
+      return false;
+    }
+    s.resize(len);
+    for (uint32_t i = 0; i < len; ++i) {
+      s[i] = static_cast<char>(r.U8());
+    }
+    return true;
+  };
+  if (!read_inline(header.program_semver) || !read_inline(header.source_loader)) {
+    return bad("corrupt .bfdb header");
+  }
+  return Result<BfdbHeader>::Ok(std::move(header));
+}
+
+Result<BfdbImage> BfdbCache::Read(const std::string& path) {  std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open()) {
     return Result<BfdbImage>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
   }

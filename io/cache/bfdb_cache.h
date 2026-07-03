@@ -42,6 +42,16 @@ struct BfdbImage {
   std::vector<int> airport_elevations_ft;
 };
 
+// The header fields of a `.bfdb`, readable without deserializing the graph.
+// Used to catalog a directory of caches by their authoritative cycle/build
+// (the filename is only a hint; see bfdb_naming.h).
+struct BfdbHeader {
+  uint32_t cycle = 0;
+  uint32_t build = 0;
+  std::string program_semver;  // bf version that built this cache
+  std::string source_loader;   // loader that produced the data, e.g. "xplane"
+};
+
 // Binary serialization of a BfdbImage to and from a `.bfdb` file.
 //
 // The format is explicit, fixed-width, little-endian, and uses IEEE-754 bit
@@ -69,6 +79,11 @@ class BfdbCache {
   // Read a `.bfdb` file into a BfdbImage. Returns kDataMissing if the file is
   // absent, malformed, truncated, or of an incompatible format version.
   static Result<BfdbImage> Read(const std::string& path);
+
+  // Read only the header (magic, version, cycle/build, provenance strings)
+  // without deserializing the graph body, so a directory of caches can be
+  // cataloged cheaply. Same failure modes as Read for the header region.
+  static Result<BfdbHeader> ReadHeader(const std::string& path);
 };
 
 }  // namespace bf
