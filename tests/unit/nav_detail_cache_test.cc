@@ -1,7 +1,13 @@
+#ifdef _MSC_VER
+// MSVC deprecates fopen in favor of fopen_s; the warning is noise in this test.
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include "io/cache/nav_detail_cache.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -12,8 +18,10 @@
 namespace {
 
 // A temp path unique to this test file; removed at the end of each case.
+// Uses the platform temp dir so the test runs on Windows (where /tmp is absent).
 std::string TempPath(const std::string& tag) {
-  return std::string("/tmp/bravofinder_nav_detail_test_") + tag + ".bfdb";
+  std::filesystem::path dir = std::filesystem::temp_directory_path();
+  return (dir / ("bravofinder_nav_detail_test_" + tag + ".bfdb")).string();
 }
 
 // Build a small NavData with a couple of navaids (one sharing an ident across
