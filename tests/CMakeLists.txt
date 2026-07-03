@@ -22,6 +22,26 @@ target_link_libraries(bf_tests PRIVATE bf::io Catch2::Catch2WithMain)
 # integration tests find the default navdata/ directory. Catch2 returns exit
 # code 4 when a test SKIPs (e.g. real data absent); map it to CTest's skip so a
 # skip is not reported as a failure.
+#
+# DISCOVERY_MODE PRE_TEST defers test enumeration to run time so the binary is
+# not executed during the configure step (where ASan fails without LD_PRELOAD).
+# When sanitizers are active the compiler links them dynamically; on this system
+# the runtime lives under the GCC library directory rather than a standard
+# search path. We ask the compiler for the exact path to libasan.so and wire it
+# in via CROSSCOMPILING_EMULATOR (the hook catch_discover_tests uses as the
+# executor for both the discovery run and each individual test invocation).
+# When sanitizers are inactive (release builds) the compiler returns the bare
+# filename "libasan.so", IS_ABSOLUTE is false, and we skip the property so
+# tests run without any wrapper.
+execute_process(
+  COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libasan.so
+  OUTPUT_VARIABLE _asan_lib OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(IS_ABSOLUTE "${_asan_lib}" AND CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+  set_property(TARGET bf_tests PROPERTY CROSSCOMPILING_EMULATOR
+    "${CMAKE_COMMAND};-E;env;LD_PRELOAD=${_asan_lib}")
+endif()
+
 catch_discover_tests(bf_tests
                      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-                     PROPERTIES SKIP_RETURN_CODE 4)
+                     PROPERTIES SKIP_RETURN_CODE 4
+                     DISCOVERY_MODE PRE_TEST)

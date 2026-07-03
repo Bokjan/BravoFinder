@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.1.0
+        VERSION 3.1.1
         DESCRIPTION "A realistic / compliant flight route engine"
         LANGUAGES CXX)
 
@@ -33,15 +33,15 @@ FetchContent_Declare(
   GIT_TAG v2.6.2)
 FetchContent_MakeAvailable(CLI11)
 
-# rapidjson is header-only; we use only its SAX-style Writer for JSON output.
-# Point SOURCE_SUBDIR at a nonexistent directory so FetchContent_MakeAvailable
-# only downloads the sources without running upstream's dated CMake (which would
-# otherwise emit its own cmake_minimum_required deprecation warning). We expose
-# the headers ourselves via an INTERFACE target.
+# rapidjson is header-only; we use only its SAX-style Writer and DOM parser.
+# SOURCE_SUBDIR points at a nonexistent directory so FetchContent_MakeAvailable
+# only downloads the sources without running upstream's CMake (which would pull
+# in rapidjson's own examples/tests/docs targets). We expose the headers
+# ourselves via an INTERFACE target.
 FetchContent_Declare(
   rapidjson
   GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
-  GIT_TAG v1.1.0
+  GIT_TAG 24b5e7a8b27f42fa16b96fc70aade9106cf7102f
   SOURCE_SUBDIR do-not-build)
 FetchContent_MakeAvailable(rapidjson)
 add_library(rapidjson INTERFACE)

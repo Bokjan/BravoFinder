@@ -5,7 +5,7 @@
 #include <string>
 
 #include "io/nav_database.h"
-#include "rapidjson_document.h"
+#include "rapidjson/document.h"
 #include "tools.h"
 
 namespace bf::mcp {

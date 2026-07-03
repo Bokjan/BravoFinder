@@ -19,7 +19,7 @@
 #include "core/routing/route_request.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
-#include "rapidjson_document.h"
+#include "rapidjson/document.h"
 
 namespace bf::mcp {
 
