@@ -14,8 +14,8 @@
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "core/version.h"
-#include "io/loaders/xplane/cifp/cifp_parser.h"
-#include "io/loaders/xplane/xplane_loader.h"
+#include "io/loaders/xplane12/cifp/cifp_parser.h"
+#include "io/loaders/xplane12/xplane12_loader.h"
 #include "io/nav_database.h"
 
 namespace {
@@ -46,17 +46,18 @@ bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
 // Parse the full CIFP set from real data and write it to `cifp_path`, mirroring
 // what NavDatabase::WriteCifpCache does. Returns the airport count Result.
 bf::Result<uint32_t> BuildCifpCache(const std::string& cifp_path) {
-  bf::Result<std::vector<bf::AirportProcedureData>> procs =
-      bf::XPlaneLoader::LoadProcedures(NavDataDir());
+  bf::XPlane12Loader loader;
+  bf::Result<std::vector<bf::AirportProcedureData>> procs = loader.LoadProcedures(NavDataDir());
   if (!procs) {
     return bf::Result<uint32_t>::Err(std::move(procs).error());
   }
-  return bf::CifpCache::Build(procs.value(), cifp_path, "xplane", 2601, 20260112,
+  return bf::CifpCache::Build(procs.value(), cifp_path, "xplane12", 2601, 20260112,
                               bf::kBravoFinderVersion);
 }
 
 // Build both caches (graph + CIFP) from real data into a temp dir, returning the
-// graph cache path (empty on SKIP). The CIFP cache is the sibling *_cifp.bfdb.
+// graph cache path (empty on SKIP). The CIFP cache is the sibling *_cifp.bfdb,
+// so OpenCached(graph_path) auto-discovers it.
 std::string BuildBothCaches(const std::string& tag) {
   bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(NavDataDir());
   if (!db) {
@@ -65,7 +66,7 @@ std::string BuildBothCaches(const std::string& tag) {
   const std::string graph_path = TempPath(tag + "_nav.bfdb");
   const std::string cifp_path = TempPath(tag + "_nav_cifp.bfdb");
   REQUIRE(db.value().WriteCache(graph_path));
-  bf::Result<uint32_t> n = db.value().WriteCifpCache(cifp_path, "xplane");
+  bf::Result<uint32_t> n = db.value().WriteCifpCache(cifp_path);
   REQUIRE(n);
   REQUIRE(n.value() > 0);
   return graph_path;
@@ -83,7 +84,7 @@ TEST_CASE("cifp cache: a fetched segment matches direct file parsing", "[integra
 
   bf::Result<bf::CifpArchive> archive = bf::CifpCache::Open(cifp_path);
   REQUIRE(archive);
-  CHECK(archive.value().source_loader() == "xplane");
+  CHECK(archive.value().source_loader() == "xplane12");
   CHECK(archive.value().program_semver() == bf::kBravoFinderVersion);
   CHECK(archive.value().cycle() == 2601);
 
@@ -122,10 +123,10 @@ TEST_CASE("cifp cache: a route via the cache matches the file-based route", "[in
   }
   const std::string cifp_path = TempPath("route_nav_cifp.bfdb");
 
-  // File-based (data dir with CIFP files) vs cache-based (explicit --cifp-db).
+  // File-based (data dir with CIFP files) vs cache-based (sibling _cifp.bfdb
+  // auto-discovered next to the graph cache).
   bf::Result<bf::NavDatabase> file_db = bf::NavDatabase::Open(NavDataDir());
-  bf::Result<bf::NavDatabase> cache_db =
-      bf::NavDatabase::OpenCached(graph_path, "/tmp/bravofinder_no_such_dir", cifp_path);
+  bf::Result<bf::NavDatabase> cache_db = bf::NavDatabase::OpenCached(graph_path);
   REQUIRE(file_db);
   REQUIRE(cache_db);
 
@@ -153,10 +154,9 @@ TEST_CASE("cifp cache: a sibling _cifp.bfdb is auto-discovered", "[integration][
   const std::string cifp_path = TempPath("auto_nav_cifp.bfdb");
   REQUIRE(std::filesystem::exists(cifp_path));
 
-  // No explicit --cifp-db and a data dir without CIFP files: procedures must
-  // still come from the auto-discovered sibling cache.
-  bf::Result<bf::NavDatabase> db =
-      bf::NavDatabase::OpenCached(graph_path, "/tmp/bravofinder_no_such_dir");
+  // Procedures must come from the auto-discovered sibling cache (no source
+  // .dat files are read on the cached path).
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::OpenCached(graph_path);
   REQUIRE(db);
   bf::Result<std::vector<bf::Route>> routes = db.value().FindRoutes(MakeRequest("KJFK", "KLAX"));
   REQUIRE(routes);
@@ -228,10 +228,9 @@ TEST_CASE("cifp cache: eager loading yields the same route as on-demand", "[inte
   }
   const std::string cifp_path = TempPath("eager_nav_cifp.bfdb");
 
-  bf::Result<bf::NavDatabase> on_demand = bf::NavDatabase::OpenCached(
-      graph_path, "/tmp/bravofinder_no_such_dir", cifp_path, bf::CifpLoad::kOnDemand);
-  bf::Result<bf::NavDatabase> eager = bf::NavDatabase::OpenCached(
-      graph_path, "/tmp/bravofinder_no_such_dir", cifp_path, bf::CifpLoad::kEager);
+  bf::Result<bf::NavDatabase> on_demand =
+      bf::NavDatabase::OpenCached(graph_path, bf::CifpLoad::kOnDemand);
+  bf::Result<bf::NavDatabase> eager = bf::NavDatabase::OpenCached(graph_path, bf::CifpLoad::kEager);
   REQUIRE(on_demand);
   REQUIRE(eager);
 
@@ -257,8 +256,7 @@ TEST_CASE("cifp cache: concurrent routing on an eager database is race-free",
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   const std::string cifp_path = TempPath("eager_concurrent_nav_cifp.bfdb");
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::OpenCached(
-      graph_path, "/tmp/bravofinder_no_such_dir", cifp_path, bf::CifpLoad::kEager);
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::OpenCached(graph_path, bf::CifpLoad::kEager);
   REQUIRE(db);
 
   // In eager mode ProceduresFor reads the frozen cache without a lock; hammer it

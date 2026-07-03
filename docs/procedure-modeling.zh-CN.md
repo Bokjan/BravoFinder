@@ -2,7 +2,7 @@
 
 > 这是 BravoFinder 工作量最大、也最能体现"真实"的部分：解析真实的 SID/STAR/进近程序，
 > 并把机场正确接入航路网。面向想理解"机场是怎么连上航路的"的读者。相关代码：
-> `io/loaders/xplane/cifp/`（解析器 + 衔接器）、`core/domain/procedure.h`。
+> `io/loaders/xplane12/cifp/`（解析器 + 衔接器）、`core/domain/procedure.h`。
 
 ## 1. 为什么机场不能"直连最近航路点"
 

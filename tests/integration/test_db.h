@@ -20,12 +20,11 @@ inline std::string NavDataDir() {
 
 // Open a database for read-only integration tests, preferring a prebuilt
 // `<dir>/nav.bfdb` cache (loads in ~1.5s) over parsing the raw .dat files
-// (~8.5s). The cache path also auto-discovers a sibling `nav_cifp.bfdb` for
-// procedures and passes `dir` so CIFP files still resolve when no procedure
-// cache exists. Falls back to Open() when no graph cache is present, so a fresh
-// checkout without a built cache still runs (just slower). Behavior is identical
-// either way; only load time differs. Returns an errored Result when the data is
-// absent so callers can SKIP.
+// (~8.5s). The cache path auto-discovers sibling `nav_cifp.bfdb` / `nav_detail.bfdb`
+// companions for procedures and navaid detail. Falls back to Open() when no
+// graph cache is present, so a fresh checkout without a built cache still runs
+// (just slower). Behavior is identical either way; only load time differs.
+// Returns an errored Result when the data is absent so callers can SKIP.
 //
 // Note: this is for tests that only READ the database. The cache round-trip
 // tests (bfdb_cache_test / cifp_cache_test) deliberately build and open their
@@ -33,7 +32,7 @@ inline std::string NavDataDir() {
 inline bf::Result<bf::NavDatabase> OpenReadOnlyDb(const std::string& dir) {
   const std::string cache = dir + "/nav.bfdb";
   if (std::filesystem::exists(cache)) {
-    return bf::NavDatabase::OpenCached(cache, dir);
+    return bf::NavDatabase::OpenCached(cache);
   }
   return bf::NavDatabase::Open(dir);
 }

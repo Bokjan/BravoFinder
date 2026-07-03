@@ -60,8 +60,12 @@ TEST_CASE("bfdb: a cached route matches the freshly built route", "[integration]
   }
   const std::string path = TempBfdb("roundtrip");
   REQUIRE(direct.value().WriteCache(path));
+  // Also write the sibling <stem>_cifp.bfdb so the cached path resolves the same
+  // procedures (SID/STAR) the direct path parses from CIFP files.
+  const std::string cifp_path = "/tmp/bravofinder_test_roundtrip_cifp.bfdb";
+  REQUIRE(direct.value().WriteCifpCache(cifp_path));
 
-  bf::Result<bf::NavDatabase> cached = bf::NavDatabase::OpenCached(path, dir);
+  bf::Result<bf::NavDatabase> cached = bf::NavDatabase::OpenCached(path);
   REQUIRE(cached);
 
   // Same query on both databases must yield identical routes.
@@ -88,6 +92,7 @@ TEST_CASE("bfdb: a cached route matches the freshly built route", "[integration]
   }
 
   std::remove(path.c_str());
+  std::remove(cifp_path.c_str());
 }
 
 TEST_CASE("bfdb: the cache header preserves AIRAC provenance", "[integration][bfdb]") {
@@ -151,7 +156,7 @@ TEST_CASE("bfdb: an airport without procedures still routes via the cache", "[in
   if (path.empty()) {
     SKIP("navigation data not found in '" << dir << "'");
   }
-  bf::Result<bf::NavDatabase> cached = bf::NavDatabase::OpenCached(path, dir);
+  bf::Result<bf::NavDatabase> cached = bf::NavDatabase::OpenCached(path);
   REQUIRE(cached);
   // KIKR has no CIFP file; the airport should still connect via DCT fallback.
   bf::Result<std::vector<bf::Route>> routes =

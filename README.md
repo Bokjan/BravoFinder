@@ -146,9 +146,9 @@ bf route KJFK KLAX
 bf route EGLL LFPG --format json
 bf route KSEA KBOS --data /path/to/xplane/data
 
-# Load a prebuilt cache to skip parsing. The sibling <stem>_cifp.bfdb is
-# auto-discovered next to --db; --cifp-db overrides it. With both caches, the
-# CIFP/ directory is not needed at all.
+# Load a prebuilt cache to skip parsing. The sibling <stem>_cifp.bfdb and
+# <stem>_detail.bfdb are auto-discovered next to --db, so the CIFP/ directory is
+# not needed at all.
 bf route KJFK KLAX --db navdata/nav_2601_20260112.bfdb
 
 # Procedure cache load mode: on-demand (default, ~1.5 MB, best for one-shot

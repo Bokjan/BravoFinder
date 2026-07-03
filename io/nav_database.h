@@ -16,11 +16,12 @@
 #include "core/routing/route_request.h"
 #include "io/cache/cifp_cache.h"
 #include "io/cache/nav_detail_cache.h"
-#include "io/loaders/xplane/cifp/cifp_parser.h"
+#include "io/loaders/xplane12/cifp/cifp_parser.h"
 
 namespace bf {
 
 class GraphBuilder;
+class Loader;
 
 // How a CIFP procedure cache is loaded by OpenCached.
 enum class CifpLoad {
@@ -47,22 +48,21 @@ class NavDatabase {
   NavDatabase(NavDatabase&&) noexcept;
   NavDatabase& operator=(NavDatabase&&) noexcept;
 
-  // Load X-Plane data from `data_dir` and build the route graph. Returns the
-  // ready database or an Error.
-  static Result<NavDatabase> Open(const std::string& data_dir);
+  // Load navigation source data from `source_dir` and build the route graph.
+  // `loader_name` selects the source loader (see MakeLoader; only "xplane12"
+  // today) and is recorded as `source_loader` provenance in any caches written.
+  // Returns the ready database or an Error (including an unknown loader name).
+  static Result<NavDatabase> Open(const std::string& source_dir,
+                                  const std::string& loader_name = "xplane12");
 
   // Load a prebuilt graph from a `.bfdb` cache file, skipping all parsing and
-  // graph construction (seconds -> milliseconds). `data_dir` locates the CIFP
-  // files that ProceduresFor still reads on demand; if empty, the data_dir
-  // recorded at build time is used. `cifp_db_path` points to a `nav_cifp.bfdb`
-  // procedure cache; if empty, a sibling `<stem>_cifp.bfdb` next to `bfdb_path`
-  // is used when present, else procedures fall back to CIFP files under
-  // data_dir. `cifp_load` selects on-demand (default) or eager loading of the
-  // procedure cache (see CifpLoad). Returns an Error if the graph cache is
-  // missing, corrupt, or of an incompatible format.
+  // graph construction (seconds -> milliseconds). CIFP procedures come from a
+  // sibling `<stem>_cifp.bfdb` procedure cache next to `bfdb_path` when present;
+  // if absent, an airport simply reports no procedures (the cached path never
+  // reads source `.dat` files). `cifp_load` selects on-demand (default) or eager
+  // loading of the procedure cache (see CifpLoad). Returns an Error if the graph
+  // cache is missing, corrupt, or of an incompatible format.
   static Result<NavDatabase> OpenCached(const std::string& bfdb_path,
-                                        const std::string& data_dir = "",
-                                        const std::string& cifp_db_path = "",
                                         CifpLoad cifp_load = CifpLoad::kOnDemand);
 
   // Serialize the built graph and metadata to a `.bfdb` cache file. Called by
@@ -77,17 +77,16 @@ class NavDatabase {
 
   // Serialize every airport's CIFP procedures to a segmented `nav_cifp.bfdb`
   // procedure cache, so deployment needs only the cache files (not the CIFP
-  // directory). `source_loader` is recorded as provenance. Returns the number
-  // of airports written, or an Error. Reads from data_dir_/CIFP.
-  Result<uint32_t> WriteCifpCache(const std::string& out_path,
-                                  const std::string& source_loader) const;
+  // directory). Provenance (`source_loader`) is the loader's name. Reads the
+  // procedures via the loader from the source dir passed to Open. Returns the
+  // number of airports written, or an Error.
+  Result<uint32_t> WriteCifpCache(const std::string& out_path) const;
 
   // Serialize the navaid detail + hold archive to a `nav_..._detail.bfdb` side
-  // cache. `source_loader` is recorded as provenance. Returns an Error if the
-  // database has no detail archive (e.g. opened from a cache without one) or the
-  // file cannot be written.
-  Result<void> WriteDetailCache(const std::string& out_path,
-                                const std::string& source_loader) const;
+  // cache. Provenance (`source_loader`) is the loader's name. Returns an Error
+  // if the database has no detail archive (e.g. opened from a cache without one)
+  // or the file cannot be written.
+  Result<void> WriteDetailCache(const std::string& out_path) const;
 
   // Find up to request.k candidate routes, ordered best-first, honoring the
   // request's altitude/level constraints. Endpoints resolve as airport ICAO
@@ -149,8 +148,11 @@ class NavDatabase {
 
  private:
   // Load (and cache) an airport's CIFP procedures on demand. Returns nullptr if
-  // the airport has no CIFP file. The cache accumulates across queries so a
-  // session of related queries pays each airport's parse cost only once.
+  // the airport has no procedures. The cache accumulates across queries so a
+  // session of related queries pays each airport's parse cost only once. The
+  // source is the loaded CIFP archive if one is present (OpenCached path), else
+  // the loader parsing a source `.dat` on demand (Open path); if neither is
+  // available the airport simply has no procedures.
   //
   // Thread-safe: cache_mutex_ guards only the map lookup/insert, never the disk
   // parse, so concurrent queries for different airports parse in parallel. The
@@ -170,7 +172,11 @@ class NavDatabase {
   std::unique_ptr<GraphBuilder> builder_;
   MoraGrid mora_;
   std::vector<MsaSector> msa_;
-  std::string data_dir_;
+  // The source loader, and the source directory it parses. Both set only on the
+  // Open() path (where raw data is parsed); null/empty on the OpenCached() path,
+  // which reads only prebuilt caches and never needs a loader.
+  std::unique_ptr<Loader> loader_;
+  std::string source_dir_;
   // Airway designator -> its directed segments. Built once at Open, then
   // immutable, so reads are lock-free.
   std::unordered_map<std::string, AirwayInfo> airway_index_;

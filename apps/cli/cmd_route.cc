@@ -20,7 +20,6 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     std::string arrival;
     std::string data_dir = "navdata";
     std::string db_path;
-    std::string cifp_db_path;
     std::string cifp_load = "on-demand";
     std::string format = "text";
     std::string level = "none";
@@ -43,11 +42,8 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
   route->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();
   route->add_option("--db", a->db_path,
-                    "Prebuilt .bfdb cache to load (skips parsing; --data still "
-                    "locates CIFP files for procedures)");
-  route->add_option("--cifp-db", a->cifp_db_path,
-                    "CIFP procedure cache to load (default: <db-stem>_cifp.bfdb "
-                    "next to --db, if present)");
+                    "Prebuilt .bfdb cache to load (skips parsing; its sibling "
+                    "<stem>_cifp.bfdb supplies procedures if present)");
   route
       ->add_option("--cifp-load", a->cifp_load,
                    "CIFP cache load mode: on-demand (default) or eager")
@@ -85,10 +81,10 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
 
   route->callback([a, &exit_code]() {
     // With --db, load the prebuilt cache (milliseconds); otherwise parse and
-    // build from the data directory. --data still locates CIFP files for
-    // on-demand procedure parsing; --cifp-db (or a sibling <stem>_cifp.bfdb)
-    // supplies procedures from a cache instead.
-    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_db_path, a->cifp_load);
+    // build from the data directory. On the cached path, procedures come from
+    // the sibling <stem>_cifp.bfdb if present; on the raw path, --data locates
+    // CIFP files for on-demand procedure parsing.
+    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
       exit_code = EXIT_FAILURE;

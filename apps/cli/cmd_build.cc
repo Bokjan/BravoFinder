@@ -14,7 +14,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
   struct Args {
     std::string data_dir;
     std::string output;
-    std::string loader = "xplane";
+    std::string loader = "xplane12";
     bool without_cifp = false;
   };
   auto args = std::make_shared<Args>();
@@ -25,12 +25,12 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
                     "Output .bfdb path (default: <data_dir>/nav_<cycle>_<build>.bfdb)");
   build->add_option("--loader", args->loader, "Data source loader")
       ->capture_default_str()
-      ->check(CLI::IsMember({"xplane"}));
+      ->check(CLI::IsMember({"xplane12"}));
   build->add_flag("--without-cifp", args->without_cifp,
                   "Skip building the CIFP procedure cache (<stem>_cifp.bfdb)");
 
   build->callback([args, &exit_code]() {
-    Result<NavDatabase> db = NavDatabase::Open(args->data_dir);
+    Result<NavDatabase> db = NavDatabase::Open(args->data_dir, args->loader);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
       exit_code = EXIT_FAILURE;
@@ -56,7 +56,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
     if (!args->without_cifp) {
       const std::filesystem::path p(out);
       const std::string cifp_out = (p.parent_path() / (p.stem().string() + "_cifp.bfdb")).string();
-      Result<uint32_t> n = db.value().WriteCifpCache(cifp_out, args->loader);
+      Result<uint32_t> n = db.value().WriteCifpCache(cifp_out);
       if (!n) {
         std::cerr << "error: " << n.error().message << "\n";
         exit_code = EXIT_FAILURE;
@@ -72,7 +72,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
       const std::filesystem::path p(out);
       const std::string detail_out =
           (p.parent_path() / (p.stem().string() + "_detail.bfdb")).string();
-      Result<void> d = db.value().WriteDetailCache(detail_out, args->loader);
+      Result<void> d = db.value().WriteDetailCache(detail_out);
       if (!d) {
         std::cerr << "error: " << d.error().message << "\n";
         exit_code = EXIT_FAILURE;

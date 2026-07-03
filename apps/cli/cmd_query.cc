@@ -177,7 +177,6 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
     std::vector<std::string> ids;
     std::string data_dir = "navdata";
     std::string db_path;
-    std::string cifp_db_path;
     std::string format = "text";
   };
   auto a = std::make_shared<Args>();
@@ -194,14 +193,12 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
   query->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();
   query->add_option("--db", a->db_path, "Prebuilt .bfdb cache to load (skips parsing)");
-  query->add_option("--cifp-db", a->cifp_db_path,
-                    "CIFP procedure cache to load (default: <db-stem>_cifp.bfdb next to --db)");
   query->add_option("--format", a->format, "Output format: text or json")
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
 
   query->callback([a, &exit_code]() {
-    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_db_path);
+    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
       exit_code = EXIT_FAILURE;

@@ -1,8 +1,9 @@
-#include "io/loaders/xplane/xplane_loader.h"
+#include "io/loaders/xplane12/xplane12_loader.h"
 
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -108,7 +109,7 @@ AirwayDirection ParseDirection(const std::string& token) {
 
 }  // namespace
 
-Result<NavData> XPlaneLoader::Load(const std::string& data_dir) {
+Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
   NavData data;
   // AIRAC provenance from the fix file header (0 if absent; non-fatal).
   std::tie(data.cycle, data.build) = ParseCycleBuild(data_dir + "/earth_fix.dat");
@@ -296,8 +297,8 @@ Result<NavData> XPlaneLoader::Load(const std::string& data_dir) {
   return Result<NavData>::Ok(std::move(data));
 }
 
-Result<std::vector<AirportProcedureData>> XPlaneLoader::LoadProcedures(
-    const std::string& data_dir) {
+Result<std::vector<AirportProcedureData>> XPlane12Loader::LoadProcedures(
+    const std::string& data_dir) const {
   namespace fs = std::filesystem;
   const fs::path cifp_dir = fs::path(data_dir) / "CIFP";
   std::error_code ec;
@@ -320,6 +321,15 @@ Result<std::vector<AirportProcedureData>> XPlaneLoader::LoadProcedures(
     out.emplace_back(std::move(icao), std::move(parsed).value());
   }
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(out));
+}
+
+std::optional<CifpData> XPlane12Loader::LoadProcedure(const std::string& data_dir,
+                                                      const std::string& icao) const {
+  Result<CifpData> parsed = CifpParser::Parse(data_dir + "/CIFP/" + icao + ".dat");
+  if (!parsed) {
+    return std::nullopt;
+  }
+  return std::move(parsed).value();
 }
 
 }  // namespace bf

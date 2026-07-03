@@ -7,6 +7,7 @@ add_executable(bf_tests
                unit/constraint_test.cc
                unit/yen_test.cc
                unit/cifp_parser_test.cc
+               unit/loader_registry_test.cc
                unit/route_string_test.cc
                unit/route_parser_test.cc
                unit/route_json_test.cc

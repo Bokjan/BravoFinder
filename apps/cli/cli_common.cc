@@ -11,11 +11,11 @@
 namespace bf::cli {
 
 Result<NavDatabase> OpenForRead(const std::string& db_path, const std::string& data_dir,
-                                const std::string& cifp_db_path, const std::string& cifp_load) {
+                                const std::string& cifp_load) {
   if (db_path.empty()) {
     return NavDatabase::Open(data_dir);
   }
-  return NavDatabase::OpenCached(db_path, data_dir, cifp_db_path,
+  return NavDatabase::OpenCached(db_path,
                                  cifp_load == "eager" ? CifpLoad::kEager : CifpLoad::kOnDemand);
 }
 
