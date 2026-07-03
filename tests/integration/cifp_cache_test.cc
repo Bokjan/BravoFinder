@@ -32,8 +32,10 @@ bool HasNavData() {
   return f.is_open();
 }
 
+// Uses the platform temp dir so the test runs on Windows (where /tmp is absent).
 std::string TempPath(const std::string& tag) {
-  return std::string("/tmp/bravofinder_cifp_test_") + tag;
+  std::filesystem::path dir = std::filesystem::temp_directory_path();
+  return (dir / ("bravofinder_cifp_test_" + tag)).string();
 }
 
 bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
@@ -169,7 +171,7 @@ TEST_CASE("cifp cache: a sibling _cifp.bfdb is auto-discovered", "[integration][
 
 TEST_CASE("cifp cache: a corrupt or missing cache is rejected cleanly", "[unit][cifp]") {
   {
-    bf::Result<bf::CifpArchive> r = bf::CifpCache::Open("/tmp/bravofinder_no_cifp.bfdb");
+    bf::Result<bf::CifpArchive> r = bf::CifpCache::Open(TempPath("does_not_exist.bfdb"));
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
   }

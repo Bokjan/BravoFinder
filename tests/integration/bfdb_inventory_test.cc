@@ -5,17 +5,18 @@
 #include <fstream>
 #include <string>
 
-#include "io/cache/bfdb_cache.h"
 #include "io/cache/bfdb_naming.h"
+#include "io/cache/graph_cache.h"
+#include "io/cache/graph_snapshot.h"
 
 namespace {
 
 namespace fs = std::filesystem;
 
-// A minimal but valid GraphArchive: an empty graph (0 vertices) carrying the given
+// A minimal but valid GraphSnapshot: an empty graph (0 vertices) carrying the given
 // AIRAC provenance. Enough for the header-only scan the inventory performs.
-bf::GraphArchive TinyArchive(uint32_t cycle, uint32_t build) {
-  bf::GraphArchive arc;
+bf::GraphSnapshot TinySnapshot(uint32_t cycle, uint32_t build) {
+  bf::GraphSnapshot arc;
   arc.cycle = cycle;
   arc.build = build;
   arc.program_semver = "3.2.0";
@@ -39,7 +40,7 @@ fs::path TempDir(const std::string& tag) {
 // Write a tiny cache under `dir` at the canonical name for cycle/build.
 void WriteCache(const fs::path& dir, uint32_t cycle, uint32_t build) {
   const std::string path = (dir / bf::FormatBfdbName(cycle, build)).string();
-  REQUIRE(bf::BfdbCache::Write(path, TinyArchive(cycle, build)));
+  REQUIRE(bf::GraphCache::Build(path, TinySnapshot(cycle, build)));
 }
 
 }  // namespace
@@ -93,7 +94,7 @@ TEST_CASE("inventory: header is authoritative over a misleading filename",
   // A cache whose header says 2605, deliberately stored under a name claiming
   // a different cycle. The scan must trust the header.
   const std::string path = (dir / "nav_2601_20260112.bfdb").string();
-  REQUIRE(bf::BfdbCache::Write(path, TinyArchive(2605, 20260501)));
+  REQUIRE(bf::GraphCache::Build(path, TinySnapshot(2605, 20260501)));
 
   bf::Result<bf::BfdbInventory> inv = bf::BfdbInventory::Scan(dir.string());
   REQUIRE(inv);

@@ -10,7 +10,7 @@
 //
 // IMPORTANT: the filename is only a discovery/display hint, never the source of
 // truth. The authoritative cycle/build live in the cache header (see
-// BfdbCache::ReadHeader); a caller must trust the header, not a name a user may
+// GraphCache::ReadHeader); a caller must trust the header, not a name a user may
 // have renamed. ParseBfdbName is therefore best-effort and used only to group
 // and label files before opening them.
 

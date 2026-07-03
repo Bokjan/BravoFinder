@@ -2,8 +2,6 @@
 
 #include <utility>
 
-#include "io/cache/bfdb_cache.h"
-
 namespace bf::mcp {
 
 NavDatabaseRegistry::NavDatabaseRegistry(BfdbInventory inventory)

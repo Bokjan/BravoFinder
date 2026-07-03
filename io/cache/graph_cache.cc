@@ -1,10 +1,11 @@
-#include "io/cache/bfdb_cache.h"
+#include "io/cache/graph_cache.h"
 
 #include <cstring>
 #include <fstream>
 #include <unordered_map>
 
 #include "io/cache/byte_io.h"
+#include "io/cache/graph_snapshot.h"
 
 namespace bf {
 
@@ -20,7 +21,7 @@ static_assert(static_cast<int>(WaypointKind::kOther) < 256,
 
 }  // namespace
 
-Result<void> BfdbCache::Write(const std::string& path, const GraphArchive& archive) {
+Result<void> GraphCache::Build(const std::string& path, const GraphSnapshot& archive) {
   const size_t v = archive.coords.size();
   const size_t e = archive.edges.size();
   if (archive.airway_names.size() > 0xFFFF) {
@@ -29,7 +30,7 @@ Result<void> BfdbCache::Write(const std::string& path, const GraphArchive& archi
   }
   if (archive.offsets.size() != v + 1 || archive.idents.size() != v ||
       archive.on_network.size() != v || archive.kinds.size() != v) {
-    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent archive array sizes"));
+    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent snapshot array sizes"));
   }
   const size_t airport_count = v - static_cast<size_t>(archive.first_airport_vertex);
   if (archive.first_airport_vertex < 0 || static_cast<size_t>(archive.first_airport_vertex) > v ||
@@ -168,10 +169,11 @@ Result<void> BfdbCache::Write(const std::string& path, const GraphArchive& archi
 // written by Write (see the "Header, then sections..." block there) but stops
 // before the vertex records. The count fields are skipped, not validated,
 // since the body is never touched.
-Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
+Result<GraphCacheHeader> GraphCache::ReadHeader(const std::string& path) {
   std::ifstream f(path, std::ios::binary);
   if (!f.is_open()) {
-    return Result<BfdbHeader>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
+    return Result<GraphCacheHeader>::Err(
+        Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
   }
   // The header prefix is small and bounded: 4 (magic) + fixed U32 fields
   // (version, cycle, build, v, e, airway_count, msa_count, first_airport_vertex)
@@ -186,11 +188,12 @@ Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
   f.read(buf.data(), static_cast<std::streamsize>(kMaxHeader));
   buf.resize(static_cast<size_t>(f.gcount()));
   if (buf.size() < 4) {
-    return Result<BfdbHeader>::Err(Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
+    return Result<GraphCacheHeader>::Err(
+        Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
   }
 
   auto bad = [&](const char* why) {
-    return Result<BfdbHeader>::Err(
+    return Result<GraphCacheHeader>::Err(
         Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
   };
   if (std::memcmp(buf.data(), kMagic, 4) != 0) {
@@ -198,12 +201,12 @@ Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
   }
   ByteReader r(buf.data() + 4, buf.size() - 4);
   if (r.U32() != kFormatVersion) {
-    return Result<BfdbHeader>::Err(Error(ErrorCode::kFormatMismatch,
-                                         "incompatible .bfdb format version; run bf build to "
-                                         "regenerate"));
+    return Result<GraphCacheHeader>::Err(Error(ErrorCode::kFormatMismatch,
+                                               "incompatible .bfdb format version; run bf build to "
+                                               "regenerate"));
   }
 
-  BfdbHeader header;
+  GraphCacheHeader header;
   header.cycle = r.U32();
   header.build = r.U32();
   // Skip the four count fields (v, e, airway_count, msa_count) and
@@ -216,28 +219,28 @@ Result<BfdbHeader> BfdbCache::ReadHeader(const std::string& path) {
   if (!r.ok()) {
     return bad("corrupt .bfdb header");
   }
-  return Result<BfdbHeader>::Ok(std::move(header));
+  return Result<GraphCacheHeader>::Ok(std::move(header));
 }
 
-Result<GraphArchive> BfdbCache::Read(const std::string& path) {
+Result<GraphSnapshot> GraphCache::Open(const std::string& path) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open()) {
-    return Result<GraphArchive>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
+    return Result<GraphSnapshot>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
   }
   const std::streamsize size = f.tellg();
   if (size < 4) {
-    return Result<GraphArchive>::Err(Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
+    return Result<GraphSnapshot>::Err(Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
   }
   std::string buf(static_cast<size_t>(size), '\0');
   f.seekg(0);
   f.read(buf.data(), size);
   if (!f) {
-    return Result<GraphArchive>::Err(
+    return Result<GraphSnapshot>::Err(
         Error(ErrorCode::kCacheCorrupt, "failed reading .bfdb: " + path));
   }
 
   auto bad = [&](const char* why) {
-    return Result<GraphArchive>::Err(
+    return Result<GraphSnapshot>::Err(
         Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
   };
 
@@ -247,12 +250,12 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
   ByteReader r(buf.data() + 4, buf.size() - 4);
   const uint32_t format = r.U32();
   if (format != kFormatVersion) {
-    return Result<GraphArchive>::Err(Error(ErrorCode::kFormatMismatch,
-                                           "incompatible .bfdb format version; run bf build to "
-                                           "regenerate"));
+    return Result<GraphSnapshot>::Err(Error(ErrorCode::kFormatMismatch,
+                                            "incompatible .bfdb format version; run bf build to "
+                                            "regenerate"));
   }
 
-  GraphArchive arc;
+  GraphSnapshot arc;
   arc.cycle = r.U32();
   arc.build = r.U32();
   const uint32_t v = r.U32();
@@ -413,7 +416,7 @@ Result<GraphArchive> BfdbCache::Read(const std::string& path) {
   if (!r.ok() || !refs_ok) {
     return bad("corrupt .bfdb: field or reference out of range");
   }
-  return Result<GraphArchive>::Ok(std::move(arc));
+  return Result<GraphSnapshot>::Ok(std::move(arc));
 }
 
 }  // namespace bf

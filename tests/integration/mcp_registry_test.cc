@@ -4,20 +4,21 @@
 #include <thread>
 #include <vector>
 
-#include "io/cache/bfdb_cache.h"
 #include "io/cache/bfdb_inventory.h"
 #include "io/cache/bfdb_naming.h"
+#include "io/cache/graph_cache.h"
+#include "io/cache/graph_snapshot.h"
 #include "registry.h"
 
 namespace {
 
 namespace fs = std::filesystem;
 
-// A minimal valid GraphArchive: an empty graph carrying AIRAC provenance. Enough
+// A minimal valid GraphSnapshot: an empty graph carrying AIRAC provenance. Enough
 // for OpenCached to build a (trivial) NavDatabase; the registry only cares that
 // it opens.
-bf::GraphArchive TinyArchive(uint32_t cycle, uint32_t build) {
-  bf::GraphArchive arc;
+bf::GraphSnapshot TinySnapshot(uint32_t cycle, uint32_t build) {
+  bf::GraphSnapshot arc;
   arc.cycle = cycle;
   arc.build = build;
   arc.program_semver = "3.2.0";
@@ -37,7 +38,7 @@ fs::path TempDir(const std::string& tag) {
 
 void WriteCache(const fs::path& dir, uint32_t cycle, uint32_t build) {
   const std::string path = (dir / bf::FormatBfdbName(cycle, build)).string();
-  REQUIRE(bf::BfdbCache::Write(path, TinyArchive(cycle, build)));
+  REQUIRE(bf::GraphCache::Build(path, TinySnapshot(cycle, build)));
 }
 
 bf::mcp::NavDatabaseRegistry MakeRegistry(const fs::path& dir) {

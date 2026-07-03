@@ -4,7 +4,7 @@ add_library(bf_io
             loaders/xplane12/xplane12_loader.cc
             loaders/xplane12/cifp/cifp_parser.cc
             loaders/xplane12/cifp/procedure_connector.cc
-            cache/bfdb_cache.cc
+            cache/graph_cache.cc
             cache/bfdb_inventory.cc
             cache/bfdb_naming.cc
             cache/cifp_cache.cc

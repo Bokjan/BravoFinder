@@ -1,8 +1,9 @@
-#include "io/cache/bfdb_cache.h"
+#include "io/cache/graph_cache.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -10,6 +11,7 @@
 #include "core/env.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
+#include "io/cache/graph_snapshot.h"
 #include "io/nav_database.h"
 
 namespace {
@@ -25,9 +27,11 @@ std::string NavDataDir() {
 }
 
 // A unique temp path for a .bfdb produced by a test. Uses the test name so
-// parallel cases do not collide.
+// parallel cases do not collide. Uses the platform temp dir so the test runs on
+// Windows (where /tmp is absent).
 std::string TempBfdb(const std::string& tag) {
-  return std::string("/tmp/bravofinder_test_") + tag + ".bfdb";
+  std::filesystem::path dir = std::filesystem::temp_directory_path();
+  return (dir / ("bravofinder_test_" + tag + ".bfdb")).string();
 }
 
 bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
@@ -62,7 +66,7 @@ TEST_CASE("bfdb: a cached route matches the freshly built route", "[integration]
   REQUIRE(direct.value().WriteCache(path));
   // Also write the sibling <stem>_cifp.bfdb so the cached path resolves the same
   // procedures (SID/STAR) the direct path parses from CIFP files.
-  const std::string cifp_path = "/tmp/bravofinder_test_roundtrip_cifp.bfdb";
+  const std::string cifp_path = TempBfdb("roundtrip_cifp");
   REQUIRE(direct.value().WriteCifpCache(cifp_path));
 
   bf::Result<bf::NavDatabase> cached = bf::NavDatabase::OpenCached(path);
@@ -100,7 +104,7 @@ TEST_CASE("bfdb: the cache header preserves AIRAC provenance", "[integration][bf
   if (path.empty()) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::GraphArchive> arc = bf::BfdbCache::Read(path);
+  bf::Result<bf::GraphSnapshot> arc = bf::GraphCache::Open(path);
   REQUIRE(arc);
   // cycle 2601 / build 20260112 for the test dataset; both should be non-zero
   // and the graph non-empty.
@@ -117,9 +121,9 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
   if (path.empty()) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::GraphArchive> arc = bf::BfdbCache::Read(path);
+  bf::Result<bf::GraphSnapshot> arc = bf::GraphCache::Open(path);
   REQUIRE(arc);
-  const bf::GraphArchive& arcv = arc.value();
+  const bf::GraphSnapshot& arcv = arc.value();
 
   // Per-vertex kinds are present for every vertex.
   REQUIRE(arcv.kinds.size() == arcv.coords.size());
@@ -174,7 +178,7 @@ TEST_CASE("bfdb: an airport without procedures still routes via the cache", "[in
 TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]") {
   // Missing file.
   {
-    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read("/tmp/bravofinder_does_not_exist.bfdb");
+    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(TempBfdb("does_not_exist"));
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
   }
@@ -184,7 +188,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     f << "NOPEnot a real bfdb file at all";
     f.close();
-    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
+    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
@@ -197,7 +201,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     const uint32_t bad_version = 0xDEADBEEF;
     f.write(reinterpret_cast<const char*>(&bad_version), sizeof(bad_version));
     f.close();
-    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
+    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kFormatMismatch);
     std::remove(path.c_str());
@@ -208,7 +212,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     f << "BF";
     f.close();
-    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
+    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
@@ -226,7 +230,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     };
     std::string buf;
     buf.append("BFDB", 4);
-    put_u32(buf, bf::BfdbCache::kFormatVersion);
+    put_u32(buf, bf::GraphCache::kFormatVersion);
     put_u32(buf, 2601);        // cycle
     put_u32(buf, 20260112);    // build
     put_u32(buf, 0xFFFFFFFF);  // v: absurd vertex count
@@ -237,7 +241,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
     f.close();
-    bf::Result<bf::GraphArchive> r = bf::BfdbCache::Read(path);
+    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());

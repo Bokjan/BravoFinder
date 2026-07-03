@@ -11,8 +11,9 @@
 #include "core/graph/nav_graph.h"
 #include "core/routing/route_string.h"
 #include "core/version.h"
-#include "io/cache/bfdb_cache.h"
 #include "io/cache/cifp_cache.h"
+#include "io/cache/graph_cache.h"
+#include "io/cache/graph_snapshot.h"
 #include "io/cache/nav_detail_cache.h"
 #include "io/graph_builder.h"
 #include "io/loaders/loader.h"
@@ -51,17 +52,17 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
 }
 
 Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLoad cifp_load) {
-  Result<GraphArchive> archive = BfdbCache::Read(bfdb_path);
-  if (!archive) {
-    return Result<NavDatabase>::Err(std::move(archive).error());
+  Result<GraphSnapshot> snapshot = GraphCache::Open(bfdb_path);
+  if (!snapshot) {
+    return Result<NavDatabase>::Err(std::move(snapshot).error());
   }
-  GraphArchive& arc = archive.value();
+  GraphSnapshot& arc = snapshot.value();
   NavDatabase db;
   db.cycle_ = arc.cycle;
   db.build_ = arc.build;
   db.mora_ = std::move(arc.mora);
   db.msa_ = std::move(arc.msa);
-  db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromArchive(std::move(arc)));
+  db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromSnapshot(std::move(arc)));
 
   // Resolve the CIFP procedure cache: a sibling "<stem>_cifp.bfdb" next to the
   // graph cache. Its absence is fine -- an airport then simply reports no
@@ -114,12 +115,12 @@ Result<void> NavDatabase::WriteCache(const std::string& out_path) const {
   if (!builder_) {
     return Result<void>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
-  GraphArchive archive = builder_->ToArchive(source_dir_, cycle_, build_);
-  archive.program_semver = kBravoFinderVersion;
-  archive.source_loader = loader_ ? loader_->name() : "";
-  archive.mora = mora_;
-  archive.msa = msa_;
-  return BfdbCache::Write(out_path, archive);
+  GraphSnapshot snapshot = builder_->ToSnapshot(source_dir_, cycle_, build_);
+  snapshot.program_semver = kBravoFinderVersion;
+  snapshot.source_loader = loader_ ? loader_->name() : "";
+  snapshot.mora = mora_;
+  snapshot.msa = msa_;
+  return GraphCache::Build(out_path, snapshot);
 }
 
 Result<uint32_t> NavDatabase::WriteCifpCache(const std::string& out_path) const {

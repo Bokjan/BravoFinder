@@ -5,8 +5,8 @@
 #include <system_error>
 #include <unordered_map>
 
-#include "io/cache/bfdb_cache.h"
 #include "io/cache/bfdb_naming.h"
+#include "io/cache/graph_cache.h"
 
 namespace bf {
 
@@ -36,7 +36,7 @@ Result<BfdbInventory> BfdbInventory::Scan(const std::string& dir) {
       continue;
     }
     // The filename got us here; the header decides the real cycle/build.
-    Result<BfdbHeader> header = BfdbCache::ReadHeader(path);
+    Result<GraphCacheHeader> header = GraphCache::ReadHeader(path);
     if (!header) {
       inv.skipped_.push_back(path);
       continue;
@@ -72,10 +72,11 @@ std::optional<BfdbEntry> BfdbInventory::Latest() const {
 }
 
 std::optional<BfdbEntry> BfdbInventory::Find(uint32_t cycle) const {
-  for (const BfdbEntry& e : entries_) {
-    if (e.cycle == cycle) {
-      return e;
-    }
+  // entries_ is sorted by cycle ascending, so binary-search for the cycle.
+  auto it = std::lower_bound(entries_.begin(), entries_.end(), cycle,
+                             [](const BfdbEntry& e, uint32_t c) { return e.cycle < c; });
+  if (it != entries_.end() && it->cycle == cycle) {
+    return *it;
   }
   return std::nullopt;
 }

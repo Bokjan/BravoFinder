@@ -56,7 +56,7 @@ class CifpArchive {
 
 // Builds and opens the `nav_cifp.bfdb` procedure cache: a portable, segmented
 // binary of every airport's parsed CIFP data, indexed by ICAO for on-demand
-// loading. Same little-endian, cross-platform format family as bfdb_cache.
+// loading. Same little-endian, cross-platform format family as graph_cache.
 class CifpCache {
  public:
   // v1: initial segmented format (magic "BFCP").

@@ -241,38 +241,38 @@ void GraphBuilder::RebuildIndices() {
   }
 }
 
-GraphBuilder GraphBuilder::FromArchive(GraphArchive&& archive) {
+GraphBuilder GraphBuilder::FromSnapshot(GraphSnapshot&& snapshot) {
   GraphBuilder b;
-  b.graph_.coords_ = std::move(archive.coords);
-  b.graph_.offsets_ = std::move(archive.offsets);
-  b.graph_.edges_ = std::move(archive.edges);
-  b.idents_ = std::move(archive.idents);
-  b.on_network_ = std::move(archive.on_network);
-  b.kinds_ = std::move(archive.kinds);
-  b.airport_elevations_ft_ = std::move(archive.airport_elevations_ft);
-  b.airway_names_ = std::move(archive.airway_names);
-  b.first_airport_vertex_ = archive.first_airport_vertex;
+  b.graph_.coords_ = std::move(snapshot.coords);
+  b.graph_.offsets_ = std::move(snapshot.offsets);
+  b.graph_.edges_ = std::move(snapshot.edges);
+  b.idents_ = std::move(snapshot.idents);
+  b.on_network_ = std::move(snapshot.on_network);
+  b.kinds_ = std::move(snapshot.kinds);
+  b.airport_elevations_ft_ = std::move(snapshot.airport_elevations_ft);
+  b.airway_names_ = std::move(snapshot.airway_names);
+  b.first_airport_vertex_ = snapshot.first_airport_vertex;
   b.RebuildIndices();
   return b;
 }
 
-GraphArchive GraphBuilder::ToArchive(const std::string& data_dir, uint32_t cycle,
-                                     uint32_t build) const {
-  GraphArchive archive;
-  archive.cycle = cycle;
-  archive.build = build;
-  archive.first_airport_vertex = first_airport_vertex_;
-  archive.data_dir = data_dir;
-  archive.coords = graph_.coords_;
-  archive.offsets = graph_.offsets_;
-  archive.edges = graph_.edges_;
-  archive.on_network = on_network_;
-  archive.idents = idents_;
-  archive.kinds = kinds_;
-  archive.airport_elevations_ft = airport_elevations_ft_;
-  archive.airway_names = airway_names_;
+GraphSnapshot GraphBuilder::ToSnapshot(const std::string& data_dir, uint32_t cycle,
+                                       uint32_t build) const {
+  GraphSnapshot snapshot;
+  snapshot.cycle = cycle;
+  snapshot.build = build;
+  snapshot.first_airport_vertex = first_airport_vertex_;
+  snapshot.data_dir = data_dir;
+  snapshot.coords = graph_.coords_;
+  snapshot.offsets = graph_.offsets_;
+  snapshot.edges = graph_.edges_;
+  snapshot.on_network = on_network_;
+  snapshot.idents = idents_;
+  snapshot.kinds = kinds_;
+  snapshot.airport_elevations_ft = airport_elevations_ft_;
+  snapshot.airway_names = airway_names_;
   // mora/msa are owned by NavDatabase, not the builder; the caller fills them.
-  return archive;
+  return snapshot;
 }
 
 int GraphBuilder::ElevationOf(int vertex) const {

@@ -27,7 +27,7 @@ inline std::string NavDataDir() {
 // Returns an errored Result when the data is absent so callers can SKIP.
 //
 // Note: this is for tests that only READ the database. The cache round-trip
-// tests (bfdb_cache_test / cifp_cache_test) deliberately build and open their
+// tests (graph_cache_test / cifp_cache_test) deliberately build and open their
 // own caches to exercise that path and must not use this helper.
 inline bf::Result<bf::NavDatabase> OpenReadOnlyDb(const std::string& dir) {
   const std::string cache = dir + "/nav.bfdb";
