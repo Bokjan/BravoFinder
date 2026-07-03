@@ -1,8 +1,8 @@
 # 跨平台二进制缓存：.bfdb / nav_cifp.bfdb
 
 > 把 ~1.5s 的"解析 + 建图"变成 ~50ms 的"读文件"，且文件在 x86/ARM 之间可移植、单文件
-> 部署。面向想理解缓存格式取舍的读者。相关代码：`io/cache/`（`byte_io.h`、`bfdb_cache.*`、
-> `cifp_cache.*`）、`io/graph_builder.cc`（`FromImage`/`ToImage`）。
+> 部署。面向想理解缓存格式取舍的读者。相关代码：`io/cache/`（`byte_io.h`、`graph_cache.*`、
+> `graph_snapshot.h`、`cifp_cache.*`）、`io/graph_builder.cc`（`FromSnapshot`/`ToSnapshot`）。
 
 ## 1. 问题：每次启动都要重新解析建图
 
@@ -37,9 +37,9 @@ debug ~7.7s。对一个"快速出结果"的 CLI，这个启动开销不可接受
 平行数组。这是为 A\* 热路径的 cache 友好——搜索只碰 `coords` 和 `edges`，不碰 ident 字符串，
 把冷热数据分开就不会把没用的 ident 拉进 cache 行。
 
-但**磁盘格式不必跟随内存布局**——它只在 `Read` 时顺序读一遍、再分发填回各 SoA 数组，磁盘上
-是 AoS 还是 SoA 对运行时零影响。早期版本盲目照抄内存 SoA，把每个属性写成一段独立的平行数组，
-于是"加一个 per-vertex 字段"= 多一条平行数组 + `Write`/`Read` 各加一段 + 手工维护 `size==V`
+但**磁盘格式不必跟随内存布局**——它只在 `Open` 时顺序读一遍、再分发填回各 SoA 数组，磁盘上
+是 AoS 还是 SoA 对运行时零影响。早期版本盲目照抄内存 SoA，把每个属性写成一段独立的平行数组,
+于是"加一个 per-vertex 字段"= 多一条平行数组 + `Build`/`Open` 各加一段 + 手工维护 `size==V`
 不变量，越加越散。这正是第 2 节"mmap 焊死磁盘=内存布局"的反面教训在自研格式里的翻版。
 
 v3 起磁盘改为**逐顶点一条自包含 record**（`coord + ident 引用 + flags + kind`）：加一个
@@ -79,7 +79,10 @@ per-vertex 字段就是 record 里多一个字段，没有新平行数组、没�
 
 结论：**运行时保持拥有型 `Ident`（全 SSO，无碎片）；只在序列化文件层**用 `{u32 offset, u32 len}`
 引用字符串池令文件紧凑，加载后重建回拥有型。鱼与熊掌部分兼得、零 lifetime 风险、零 API 改动。
-`StringPool` 第一版**不去重**（池只有几 MB，简单优先）。
+`StringPool` 后来加了**去重**（`unordered_map` 记已 intern 的串）：ident/region/airway/ICAO
+高度重复，同串只存一份。去重对 reader **透明**——引用格式 `{offset,len}` 与段布局都没变，旧
+reader 读新文件、新旧文件互读皆可，故**不 bump format_version**。实测（真实 2601 数据）graph
+-4.7%、CIFP -10.6%、detail -9.8%。
 
 ## 7. GraphEdge 瘦身到 16B
 
@@ -105,15 +108,17 @@ CIFP 散文件，另有一个**分段索引**缓存 `nav_cifp.bfdb`（magic "BFC
 - 结构：header + `ICAO→(段偏移, 段长)` 目录 + 每机场一段自包含的 `CifpData`（含段局部字符串池，
   可独立反序列化）；
 - **按需加载**（默认 `on-demand`）：`Open` 只读 header + 目录进内存（~1.5MB），`Fetch(icao)` 才
-  seek 读该段——启动仍毫秒级，不常驻全部程序；
+  按段偏移**定位读**（pread / Windows `ReadFile`+`OVERLAPPED`）该段——启动仍毫秒级，不常驻全部程序；
 - **eager 模式**：`Open` 时 `FetchAll` 全量反序列化进内存并冻结（~102MB），之后无锁读，面向
   Web/批量并发。
 
 实测 CIFP 缓存 ~44MB / 14838 机场（结构化后远小于 105MB 原始文本），`--data` 指空目录仍能
 从缓存出全 SID/STAR、与文件路径逐字节一致。
 
-> Fetch 每次开独立 `ifstream`、无共享可变态 → 并发查异机场天然安全，见
-> [thread-safety.zh-CN.md](thread-safety.zh-CN.md)。
+> `Fetch` 在 `Open` 时开的**一个只读句柄**上做定位读（pread / `ReadFile`+`OVERLAPPED`，都按显式
+> 偏移读、不动共享文件位置）→ 并发查异机场天然无锁安全，见
+> [thread-safety.zh-CN.md](thread-safety.zh-CN.md)。（早期每次 `Fetch` 都重开 `ifstream`，
+> 现改为共享句柄免去 per-fetch open 开销。）
 
 ## 9. 三层版本体系
 

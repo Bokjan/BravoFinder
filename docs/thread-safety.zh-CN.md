@@ -63,12 +63,17 @@ mutex 放在 `unique_ptr` 里，是为了让 `NavDatabase` 保持可移动（`st
 实测 eager 常驻 +102MB（192283 程序 / 764942 legs），on-demand 仅 +1.5MB。CLI 单次查询用
 on-demand 最优；长驻服务用 eager。
 
-## 6. CIFP 缓存的 Fetch：每次独立 ifstream
+## 6. CIFP 缓存的 Fetch：共享只读句柄 + 定位读
 
-按需加载从 `nav_cifp.bfdb` 取段时，`CifpArchive::Fetch` **每次调用开一个独立的 `ifstream`**、
-无共享可变状态（不用 thread_local、不持久化文件句柄）→ 并发 Fetch 不同机场天然 race-free，
-**这一层不需要任何锁**。曾考虑共享持久句柄，但那会引入共享文件游标 → 需要加锁，且违反
-无全局状态原则，故否决。
+按需加载从 `nav_cifp.bfdb` 取段时，`CifpArchive::Fetch` 在 `Open` 时打开的**一个只读句柄**上做
+**定位读**（POSIX `pread` / Windows `ReadFile` + `OVERLAPPED`）：两者都按显式偏移读、**不改动
+任何共享文件位置**，故并发 Fetch 不同机场无数据竞争，**这一层不需要任何锁**。
+
+早期版本是"每次 Fetch 开一个独立 `ifstream`"——也 race-free，但每次调用都付一次 `open` 系统
+调用。当年否决共享句柄的理由是"`ifstream`/`FILE*` 带一个共享文件游标 → seek+read 非原子 →
+需要加锁"；`pread`/`OVERLAPPED` 的定位读把偏移作为参数传入、不碰游标，正好绕过这个游标问题,
+于是共享句柄既省掉 per-fetch open、又不引入锁。句柄由 `PreadFile`（RAII）持有，使 `CifpArchive`
+成为 move-only。
 
 ## 7. 搜索期自包含
 
@@ -99,5 +104,5 @@ closed 数组、优先队列、Yen 的候选集与 deviation 索引，全部在�
 - **唯一共享可变态**是程序缓存，两种模式各自安全：on-demand 双检锁（只锁 map、指针跨 rehash
   稳定、try_emplace 保先到），eager 冻结后无锁读。
 - **搜索期全函数局部**，禁集按值捕获，memo 表每次独立。
-- **CIFP Fetch 每次独立 ifstream**，无共享游标。
+- **CIFP Fetch 在共享只读句柄上定位读**（pread / `ReadFile`+`OVERLAPPED`），不碰共享游标。
 - 全部用 **tsan + 8 线程压测**锁死，且验证过测试能抓竞争。
