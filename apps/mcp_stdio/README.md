@@ -1,151 +1,207 @@
 # bf-mcp-stdio
 
-BravoFinder 的本地 MCP server，把 `bf route` 和 `bf query` 的能力以 MCP tools 的
-形式通过 stdio 暴露给 LLM 客户端。本文件供 **agent / 配置助手** 阅读：前半部分讲
-怎么把 server 跑起来并接进 MCP 客户端，后半部分是 tool 能力速查。
+BravoFinder's local MCP server: it exposes the `bf route` and `bf query`
+capabilities as MCP tools over stdio for LLM clients. This file is written for
+**agents / configuration assistants**: the first half is how to run the server
+and wire it into an MCP client; the second half is a tool reference.
 
-## 这是什么
+## What it is
 
-- 传输方式：**stdio**（本地进程，客户端拉起子进程经 stdin/stdout 通信）。
-- 协议：MCP over JSON-RPC 2.0，零依赖手写（不引第三方 MCP SDK）。
-- 能力：5 个 tools，与 CLI 的 `route` / `query` 子命令一一对应。
-- 数据：server 启动时加载一个预建的 `.bfdb` 缓存（只读），不解析原始数据、不写文件。
+- Transport: **stdio** (a local process; the client spawns it and talks over
+  stdin/stdout).
+- Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK.
+- Capabilities: the six per-database tools below (mirroring the CLI `route` /
+  `query` subcommands), plus a `list_cycles` tool.
+- Data: the server is pointed at a **directory** of prebuilt `.bfdb` caches and
+  serves one or more AIRAC cycles from it. It never parses raw data or writes
+  files.
 
-## 构建
+## Multiple AIRAC cycles
 
-依赖项目自身的 `bf` 库和 RapidJSON，纯 CMake + FetchContent，无额外依赖。
+The server reads a directory of `nav_<cycle>_<build>.bfdb` caches (built by
+`bf build`; see the repo-root README). Each cache header carries its
+authoritative cycle/build, so the directory can hold several AIRACs at once.
+
+- Each cycle's database is opened **lazily** on first use and then cached; a
+  cold cycle costs one open, subsequent queries are served from memory.
+- Every per-database tool takes an optional `cycle` argument. Omit it to use the
+  **latest** (highest cycle, then highest build) loaded cache.
+- `list_cycles` returns the available cycles and builds.
+- A single-cycle deployment is just a directory holding one cache — nothing
+  special to configure.
+
+## Build
+
+Depends only on the project's own `bf` library and RapidJSON — pure CMake +
+FetchContent, no extra dependencies.
 
 ```bash
 cmake --preset release && cmake --build --preset release
-# 或 debug：
+# or debug:
 cmake --preset debug   && cmake --build --preset debug
 ```
 
-产物路径（target 名 `bf_mcp_stdio`，对外名 `bf-mcp-stdio`）：
+Output path (CMake target `bf_mcp_stdio`, external name `bf-mcp-stdio`):
 
 ```
 build/release/apps/mcp_stdio/bf-mcp-stdio
 build/debug/apps/mcp_stdio/bf-mcp-stdio
 ```
 
-## 启动与缓存定位
+## Startup and cache location
 
-server 启动时调用 `NavDatabase::OpenCached` 加载图缓存，**一次性**。缓存缺失或
-损坏则进程直接以非 0 退出并向 stderr 打印原因（早失败，MCP 客户端会报启动失败）。
+At startup the server scans a directory for `nav_<cycle>_<build>.bfdb` graph
+caches and builds a registry from their headers. Databases are opened lazily per
+cycle via `NavDatabase::OpenCached`; the sibling `<stem>_cifp.bfdb` procedure
+cache is auto-discovered next to each graph cache, else procedures fall back to
+per-airport parsing under the data directory. If the directory holds no usable
+cache the process exits non-zero and prints the reason to stderr (fail-fast, so
+the MCP client reports a clean startup failure). Files whose header is
+unreadable are reported to stderr and skipped, not silently ignored.
 
-缓存路径按以下优先级确定：
+The directory is resolved in this order:
 
-1. 命令行 `--db <path>` 显式指定图缓存；否则用 `<data_dir>/nav.bfdb`。
-2. `data_dir`：命令行 `--data <dir>` 指定；否则读环境变量 `BRAVOFINDER_NAVDATA`；
-   再否则默认 `navdata/`。
-3. 程序缓存：`--cifp-db <path>` 指定；否则自动找 `--db` 同目录下的
-   `<stem>_cifp.bfdb`（若存在）；再否则回退到从 `data_dir` 里的 CIFP 文件按需解析。
+1. Command-line `--db-dir <dir>`.
+2. The `BRAVOFINDER_NAVDATA` environment variable.
+3. Default `navdata/`.
 
 ```bash
-# 最简：navdata/ 下要有 nav.bfdb（和可选的 nav_cifp.bfdb），由 BRAVOFINDER_NAVDATA 定位
+# Simplest: navdata/ must contain at least one nav_<cycle>_<build>.bfdb, located
+# via BRAVOFINDER_NAVDATA.
 BRAVOFINDER_NAVDATA=navdata bf-mcp-stdio
 
-# 显式指定两个缓存
-bf-mcp-stdio --db navdata/nav.bfdb --cifp-db navdata/nav_cifp.bfdb
-
-# 只给图缓存，程序缓存由同目录兄弟文件自动发现
-bf-mcp-stdio --db /path/to/nav.bfdb
-
-# 指定数据目录（用于按需解析程序，若没给 --cifp-db）
-bf-mcp-stdio --data /path/to/xplane/data
+# Explicit directory holding one or more caches.
+bf-mcp-stdio --db-dir /path/to/caches
 ```
 
-> 缓存由 `bf build` 生成（见仓库根 README 的 `bf build` 用法）。`bf-mcp-stdio`
-> 本身**不**暴露 `build`——建缓存是 CLI / 部署脚本的职责。
+> Caches are produced by `bf build` (see the repo-root README). `bf-mcp-stdio`
+> itself does **not** expose `build` — creating caches is a CLI / deployment
+> concern.
 
-## 接进 MCP 客户端
+## Wiring into an MCP client
 
-在客户端的 MCP server 配置里，把 `command` 指向编译出的二进制，`args` 传启动参数。
-示例（Claude Desktop / Cursor / 类似客户端）：
+In the client's MCP server config, point `command` at the compiled binary and
+pass startup arguments via `args`. Example (Claude Desktop / Cursor / similar):
 
 ```json
 {
   "mcpServers": {
     "bravofinder": {
       "command": "/abs/path/to/bf-mcp-stdio",
-      "args": ["--db", "navdata/nav.bfdb"]
+      "args": ["--db-dir", "/path/to/caches"]
     }
   }
 }
 ```
 
-带环境变量的写法（多数客户端支持 `env` 字段）：
+Using an environment variable instead (most clients support an `env` field):
 
 ```json
 {
   "mcpServers": {
     "bravofinder": {
       "command": "/abs/path/to/bf-mcp-stdio",
-      "args": ["--data", "/path/to/xplane/data"],
       "env": { "BRAVOFINDER_NAVDATA": "/path/to/navdata" }
     }
   }
 }
 ```
 
-## Tool 能力速查
+## Tool reference
 
-所有 tool 的请求参数都放在 MCP `tools/call` 的 `arguments` 对象里。返回统一包装为
-`{ content: [{ type: "text", text: <json> }], isError: <bool> }`，其中 `text` 是一段
-JSON（对象或数组），直接解析即可。
+All tool request parameters go in the MCP `tools/call` `arguments` object.
+Results are uniformly wrapped as
+`{ content: [{ type: "text", text: <json> }], isError: <bool> }`, where `text`
+is a JSON value (object or array) ready to parse.
 
-| Tool | 必填参数 | 可选参数 | 返回 |
-|------|---------|---------|------|
-| `find_routes` | `departure`, `arrival` | `min_fl`, `max_fl`, `level`, `k`, `departure_runway`, `arrival_runway`, `departure_sid`, `arrival_star`, `avoid_waypoints`, `avoid_airways`, `random_seed`, `forced_points` | 候选航路数组（见下） |
-| `parse_route` | `route` (string) | — | 校验并展开后的单条航路对象 |
-| `lookup_waypoints` | `ids` (string[]) | — | 与 `ids` 平行的数组，元素为 waypoint 对象或 `null` |
-| `lookup_airports` | `ids` (string[]) | — | 同上，airport 对象或 `null` |
-| `lookup_procedures` | `ids` (string[]) | — | 同上，procedures 对象或 `null` |
-| `lookup_airways` | `ids` (string[]) | — | 同上，airway 对象或 `null` |
+Every per-database tool also accepts an optional **`cycle`** (integer, e.g.
+`2601`); omit it for the latest loaded cycle. It is injected by the server and
+selects which database answers the call, so it is not repeated in each tool's
+row below.
+
+| Tool | Required | Optional | Returns |
+|------|----------|----------|---------|
+| `find_routes` | `departure`, `arrival` | `min_fl`, `max_fl`, `level`, `k`, `departure_runway`, `arrival_runway`, `departure_sid`, `arrival_star`, `avoid_waypoints`, `avoid_airways`, `random_seed`, `forced_points` | Array of candidate routes (see below) |
+| `parse_route` | `route` (string) | — | The validated/expanded single route object |
+| `lookup_waypoints` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of region matches (empty if none) |
+| `lookup_airports` | `ids` (string[]) | — | Array parallel to `ids`; airport object or `null` |
+| `lookup_procedures` | `ids` (string[]) | — | Array parallel to `ids`; procedures object or `null` |
+| `lookup_airways` | `ids` (string[]) | — | Array parallel to `ids`; airway object or `null` |
+| `list_cycles` | — | — | Array of `{cycle, build}`, newest first |
 
 ### `find_routes`
 
-参数语义：
+Parameter semantics:
 
-- `departure` / `arrival`：机场 ICAO 或 waypoint ident（大小写不敏感）。
-- `min_fl` / `max_fl`：巡航飞行高度层区间（百英尺），如 `min_fl=300, max_fl=400` 表示 FL300–FL400；只给其一则视为单一高度层（如仅 `min_fl=350` 即 FL350）。设置后启用高度带 / MORA 约束过滤。
-- `level`：`none`（默认）| `low`（优先 Victor 低空航路）| `high`（优先 Jet 高空航路）。
-- `k`：返回的候选航路数（Yen K-shortest），默认 1，需 ≥ 1。
-- `departure_runway` / `arrival_runway`：限制所用 SID / STAR 的跑道，如 `RW31L`；空 = 任意。
-- `departure_sid` / `arrival_star`：指定 SID / STAR 名称（如 `DEEZZ5` 或 `DEEZZ5.TOWIN` 钉死过渡段）；空 = 自动选。
-- `avoid_waypoints`：要绕开的航路点数组，每项为 ident（`BOTON`）或 `IDENT/REGION`（`BOTON/LF`）；裸 ident 绕开该 ident 的全部 region 匹配。
-- `avoid_airways`：要绕开的航路代号数组，如 `J60`；同时屏蔽以 `J60-V123` 形式记录的并发航段。
-- `random_seed`：可复现的航路多样化种子；同一 seed 恒定产生同一航路，不同 seed 探索不同的合规航路；不给则返回最优航路。
-- `forced_points`：必经点（via）数组，按顺序，每项为 ident（`PSB`）或 `IDENT/REGION`（`PSB/K6`）；返回结果里以 `IDENT/REGION` 回显消歧后的选择。
+- `departure` / `arrival`: airport ICAO or waypoint ident (case-insensitive).
+- `min_fl` / `max_fl`: inclusive cruise flight-level range (hundreds of feet),
+  e.g. `min_fl=300, max_fl=400` for FL300–FL400; giving only one is a single
+  level (e.g. only `min_fl=350` means FL350). Setting either enables
+  altitude-band / MORA constraint filtering.
+- `level`: `none` (default) | `low` (prefer Victor low airways) | `high` (prefer
+  Jet high airways).
+- `k`: number of candidate routes (Yen K-shortest), default 1, must be ≥ 1.
+- `departure_runway` / `arrival_runway`: restrict the SID / STAR to this runway,
+  e.g. `RW31L`; empty = any.
+- `departure_sid` / `arrival_star`: pin a SID / STAR by name (e.g. `DEEZZ5`, or
+  `DEEZZ5.TOWIN` to pin the transition); empty = auto.
+- `avoid_waypoints`: waypoints to route around, each an ident (`BOTON`) or
+  `IDENT/REGION` (`BOTON/LF`); a bare ident avoids all its regional matches.
+- `avoid_airways`: airway designators to route around, e.g. `J60`; also blocks
+  concurrency segments recorded as `J60-V123`.
+- `random_seed`: reproducible route-diversity seed; the same seed always yields
+  the same route, different seeds explore alternative valid routes; omit for the
+  plain optimal route.
+- `forced_points`: ordered via points, each an ident (`PSB`) or `IDENT/REGION`
+  (`PSB/K6`); the response echoes them resolved as `IDENT/REGION`.
 
-返回数组每个元素字段：`route`（ICAO 申报式航路串）、`total_distance_nm`、`sid`、
-`dep_runway`、`sid_options`、`star`、`arr_runway`、`star_options`、`forced_points`（若有）、
-`dep_connection` / `arr_connection`（`procedure` / `radar_vectors` 等）、`legs`
-（每段的 `from` / `to` / `via` / `distance_nm`，并发航段额外带 `concurrent_airways`）。
+Each returned route element carries: `route` (ICAO filed-flight-plan string),
+`total_distance_nm`, `sid`, `dep_runway`, `sid_options`, `star`, `arr_runway`,
+`star_options`, `forced_points` (if any), `dep_connection` / `arr_connection`
+(`procedure` / `radar_vectors` etc.), and `legs` (each with `from` / `to` /
+`via` / `distance_nm`; concurrency segments add `concurrent_airways`).
 
 ### `parse_route`
 
-`route` 为 ICAO 申报式航路串（`[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]`）。校验各
-航段：航路代号必须真正连接其两端 fix（沿该航路在图上展开中间途经点），否则报错并指出出错
-的 token。命名 SID/STAR 会核对端点机场确实发布该程序、并作为单条连接段呈现（不逐 leg 展开）。
-返回与 `find_routes` 同构的单条航路对象（`route` / `total_distance_nm` / `legs` 等）。
+`route` is an ICAO filed-flight-plan string
+(`[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]`). Each segment is validated:
+an airway designator must actually connect its bracketing fixes (expanded to its
+intermediate points on the graph), else an error names the offending token. A
+named SID/STAR is checked against the endpoint airport's published procedures and
+shown as a single connection leg (not expanded leg-by-leg). Returns a single
+route object with the same shape as `find_routes` (`route` / `total_distance_nm`
+/ `legs` etc.).
 
-### lookup 系列
+### lookup tools
 
-`ids` 为字符串数组，返回数组与 `ids` **顺序平行**，查不到的对应位置为 `null`。
-`lookup_procedures` 的 `ids` 是机场 ICAO；其余按 ident / 设计器名查。
+`ids` is a string array; the result array is **parallel to `ids`**, with `null`
+(or an empty inner array for `lookup_waypoints`) where an id is not found.
+`lookup_procedures` takes airport ICAO codes; the others match by ident /
+designator.
 
-## 错误语义
+### `list_cycles`
 
-- tool 调用成功：`isError: false`。
-- `find_routes` 算不出航路（端点未知 / 无可行航路）：`isError: true`，`text` 为
-  `{"error":"..."}`。
-- 某 lookup 的 `ids` **全部**缺失：`isError: true`；**部分**命中：`isError: false`
-  （缺失项在数组里是 `null`）。
-- 未知 tool 名：`isError: true`。
-- 协议层错误（如 `tools/call` 缺 `params` 对象）：返回 JSON-RPC `error`，非 tool 结果。
+Takes no arguments. Returns an array of `{cycle, build}` for the caches the
+server can serve, newest first. Pass a `cycle` to the other tools to query a
+specific one.
 
-## 并发与生命周期
+## Error semantics
 
-`NavDatabase` 在 `OpenCached` 后只读，可多线程并发查询（契约 B）。客户端持有一个
-长驻 server 实例反复调用 `tools/call` 即可，无需每次重启。
+- Successful tool call: `isError: false`.
+- `find_routes` cannot compute a route (unknown endpoint / no feasible route):
+  `isError: true`, `text` is `{"error":"..."}`.
+- A lookup where **all** `ids` are missing: `isError: true`; a **partial** hit:
+  `isError: false` (missing entries are `null` in the array).
+- An unknown `cycle`: `isError: true`, `text` is `{"error":"unknown AIRAC
+  cycle: ..."}`.
+- Unknown tool name: `isError: true`.
+- Protocol-level error (e.g. `tools/call` missing its `params` object): a
+  JSON-RPC `error`, not a tool result.
+
+## Concurrency and lifetime
+
+Each `NavDatabase` is read-only after `OpenCached` and safe for concurrent
+queries (contract B). The registry that opens cycles on demand is likewise
+thread-safe: a mutex guards only the cache map, never the disk open, and opened
+databases have stable addresses. A client holds one long-lived server instance
+and calls `tools/call` repeatedly; no restart is needed to switch cycles.

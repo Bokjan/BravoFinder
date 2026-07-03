@@ -98,8 +98,13 @@ cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 BravoFinder also ships a local MCP server that exposes `bf route` and `bf query`
 as MCP tools over stdio, so an LLM client can ask for routes and look up
 navigation data directly. It is a thin, zero-dependency (beyond the project's
-own library) stdio JSON-RPC server: it loads the `.bfdb` cache once at startup
-and serves queries from it.
+own library) stdio JSON-RPC server.
+
+It is pointed at a **directory** of `.bfdb` caches (not a single file) and can
+serve multiple AIRAC cycles from it: each cycle's database is opened lazily on
+first use and cached. Every tool takes an optional `cycle` argument (omit for
+the newest), and a `list_cycles` tool enumerates what is available. A
+single-cycle deployment is just a directory holding one cache.
 
 Build it alongside the CLI:
 
@@ -108,51 +113,32 @@ cmake --preset release && cmake --build --preset release   # or: debug
 # binary: build/release/apps/mcp_stdio/bf-mcp-stdio
 ```
 
-Point it at a cache and run it (it fails fast at startup if the cache is
-missing or corrupt):
+Point it at a directory and run it (it fails fast at startup if the directory
+holds no `nav_<cycle>_<build>.bfdb` cache):
 
 ```bash
-# Defaults: BRAVOFINDER_NAVDATA locates navdata/, which must contain nav.bfdb
-# (and optionally nav_cifp.bfdb). Command-line flags override the environment.
+# The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
 BRAVOFINDER_NAVDATA=navdata bf-mcp-stdio
-bf-mcp-stdio --db navdata/nav.bfdb --cifp-db navdata/nav_cifp.bfdb
+bf-mcp-stdio --db-dir /path/to/caches
 ```
 
-Tools exposed (each maps 1:1 to a CLI subcommand):
+Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the
+`lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways`
+batch lookups (mirroring `bf query`), and `list_cycles`. See
+[apps/mcp_stdio/README.md](apps/mcp_stdio/README.md) for the full tool reference,
+argument semantics, and client configuration.
 
-| Tool | Description |
-|------|-------------|
-| `find_routes` | Route between two endpoints; same options as `bf route` (`level`, `k`, `min_fl`/`max_fl`, runways, SID/STAR, avoid, forced points, seed). |
-| `parse_route` | Validate and expand a filed route string (reverse of `find_routes`). |
-| `lookup_waypoints` | Batch-look-up waypoints by ident. |
-| `lookup_airports` | Batch-look-up airports by ICAO. |
-| `lookup_procedures` | Batch-look-up SID/STAR/approach by airport ICAO. |
-| `lookup_airways` | Batch-look-up airways by designator. |
+`bf build` (cache creation) remains a CLI concern and is not exposed as a tool.
 
-Example MCP client configuration (Claude Desktop / similar):
-
-```json
-{
-  "mcpServers": {
-    "bravofinder": {
-      "command": "/abs/path/to/bf-mcp-stdio",
-      "args": ["--db", "navdata/nav.bfdb"]
-    }
-  }
-}
-```
-
-The server speaks MCP over stdio as JSON-RPC 2.0. It only reads the cache
-(`NavDatabase` is immutable after `OpenCached`), so it is safe for an MCP client
-to hold one long-lived instance. `bf build` (cache creation) remains a CLI
-concern and is not exposed as a tool.
+### CLI (`bf`)
 
 ```bash
 # Build binary caches once per AIRAC cycle for fast startup (~1.5s -> ~50ms).
-# By default this writes both nav.bfdb (graph) and nav_cifp.bfdb (procedures),
-# so deployment needs only the two cache files, not the CIFP/ directory.
-bf build navdata                    # writes navdata/nav.bfdb + navdata/nav_cifp.bfdb
-bf build /path/to/xplane -o my.bfdb # writes my.bfdb + my_cifp.bfdb
+# The default name encodes the cycle/build so a directory of caches can hold
+# several AIRACs; both the graph cache and its nav_..._cifp.bfdb companion are
+# written, so deployment needs only the cache files, not the CIFP/ directory.
+bf build navdata                    # writes navdata/nav_<cycle>_<build>.bfdb (+ _cifp)
+bf build /path/to/xplane -o my.bfdb # explicit name: writes my.bfdb + my_cifp.bfdb
 bf build navdata --without-cifp     # graph cache only
 
 # Find a route (reads navigation data from ./navdata by default)
@@ -160,16 +146,15 @@ bf route KJFK KLAX
 bf route EGLL LFPG --format json
 bf route KSEA KBOS --data /path/to/xplane/data
 
-# Load the prebuilt caches to skip parsing. The sibling nav_cifp.bfdb is
+# Load a prebuilt cache to skip parsing. The sibling <stem>_cifp.bfdb is
 # auto-discovered next to --db; --cifp-db overrides it. With both caches, the
 # CIFP/ directory is not needed at all.
-bf route KJFK KLAX --db navdata/nav.bfdb
-bf route KJFK KLAX --db navdata/nav.bfdb --cifp-db other_cifp.bfdb
+bf route KJFK KLAX --db navdata/nav_2601_20260112.bfdb
 
 # Procedure cache load mode: on-demand (default, ~1.5 MB, best for one-shot
 # queries) or eager (loads all procedures up front, ~100 MB then lock-free,
 # best for servers / batch routing)
-bf route KJFK KLAX --db navdata/nav.bfdb --cifp-load eager
+bf route KJFK KLAX --db navdata/nav_2601_20260112.bfdb --cifp-load eager
 
 # Constrain by cruise altitude (enables altitude-band and MORA filtering).
 # A single level or an inclusive range (any level in the band is acceptable).
@@ -203,15 +188,15 @@ bf route KJFK KLAX --seed 42
 # Validate and expand a filed route string (the reverse of route): checks that
 # each airway connects its bracketing fixes, expands airways to their
 # intermediate points, and totals the distance. Errors name the bad token.
-bf parse-route "KJFK DEEZZ5 CANDR Q480 HOTEE J80 MCI ... KLAX" --db navdata/nav.bfdb
+bf parse-route "KJFK DEEZZ5 CANDR Q480 HOTEE J80 MCI ... KLAX" --db navdata/nav_2601_20260112.bfdb
 
 # Look up navigation data: waypoints, airports, procedures, or airways. Each
 # accepts one or more ids (a batch), and --format json emits an array parallel
 # to the input (a not-found id becomes null).
-bf query waypoint --db navdata/nav.bfdb NINOX DGC
-bf query airport  --db navdata/nav.bfdb KJFK KLAX
-bf query procedure --db navdata/nav.bfdb KJFK
-bf query airway   --db navdata/nav.bfdb Y28 --format json
+bf query waypoint --db navdata/nav_2601_20260112.bfdb NINOX DGC
+bf query airport  --db navdata/nav_2601_20260112.bfdb KJFK KLAX
+bf query procedure --db navdata/nav_2601_20260112.bfdb KJFK
+bf query airway   --db navdata/nav_2601_20260112.bfdb Y28 --format json
 
 # Print the program version
 bf --version
@@ -221,10 +206,12 @@ Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an
 airport has procedure data, the route and its legs name the SID and STAR used (and
 the interchangeable procedures that share the same connection fix).
 
-The `.bfdb` caches are portable, little-endian binary snapshots (`nav.bfdb` holds
-the graph; `nav_cifp.bfdb` holds per-airport procedures, loaded on demand). They
-are derived from Navigraph/Jeppesen data and, like the source data, must not be
-redistributed (they are git-ignored).
+The `.bfdb` caches are portable, little-endian binary snapshots (the graph cache
+holds the graph; its `_cifp.bfdb` companion holds per-airport procedures, loaded
+on demand). The canonical name is `nav_<cycle>_<build>.bfdb`, encoding the AIRAC
+provenance so a directory can hold several cycles. They are derived from
+Navigraph/Jeppesen data and, like the source data, must not be redistributed
+(they are git-ignored).
 
 ## Navigation Data
 
