@@ -18,15 +18,16 @@ and wire it into an MCP client; the second half is a tool reference.
 
 ## Multiple AIRAC cycles
 
-The server reads a directory of `nav_<cycle>_<build>.bfdb` caches (built by
-`bf build`; see the repo-root README). Each cache header carries its
-authoritative cycle/build, so the directory can hold several AIRACs at once.
+The server reads a directory of `nav_<cycle>.bfdb` caches (built by `bf build`;
+see the repo-root README). Each unified `.bfdb` carries the graph, CIFP
+procedures, and navaid detail in three sections; its header records the
+authoritative cycle, so the directory can hold several AIRACs at once.
 
 - Each cycle's database is opened **lazily** on first use and then cached; a
   cold cycle costs one open, subsequent queries are served from memory.
 - Every per-database tool takes an optional `cycle` argument. Omit it to use the
-  **latest** (highest cycle, then highest build) loaded cache.
-- `list_cycles` returns the available cycles and builds.
+  **latest** (highest cycle) loaded cache.
+- `list_cycles` returns the available cycles.
 - A single-cycle deployment is just a directory holding one cache — nothing
   special to configure.
 
@@ -50,14 +51,13 @@ build/debug/apps/mcp_stdio/bf-mcp-stdio
 
 ## Startup and cache location
 
-At startup the server scans a directory for `nav_<cycle>_<build>.bfdb` graph
-caches and builds a registry from their headers. Databases are opened lazily per
-cycle via `NavDatabase::OpenCached`; the sibling `<stem>_cifp.bfdb` procedure
-cache is auto-discovered next to each graph cache, else procedures fall back to
-per-airport parsing under the data directory. If the directory holds no usable
-cache the process exits non-zero and prints the reason to stderr (fail-fast, so
-the MCP client reports a clean startup failure). Files whose header is
-unreadable are reported to stderr and skipped, not silently ignored.
+At startup the server scans a directory for `nav_<cycle>.bfdb` caches and builds
+a registry from their headers. Each unified `.bfdb` holds the graph, CIFP
+procedures, and navaid detail in one file — no companion files are needed.
+Databases are opened lazily per cycle via the registry. If the directory holds no
+usable cache the process exits non-zero and prints the reason to stderr
+(fail-fast, so the MCP client reports a clean startup failure). Files whose
+header is unreadable are reported to stderr and skipped, not silently ignored.
 
 The directory is resolved in this order:
 
@@ -66,7 +66,7 @@ The directory is resolved in this order:
 3. Default `navdata/`.
 
 ```bash
-# Simplest: navdata/ must contain at least one nav_<cycle>_<build>.bfdb, located
+# Simplest: navdata/ must contain at least one nav_<cycle>.bfdb, located
 # via BRAVOFINDER_NAVDATA.
 BRAVOFINDER_NAVDATA=navdata bf-mcp-stdio
 
@@ -129,7 +129,7 @@ row below.
 | `lookup_airways` | `ids` (string[]) | — | Array parallel to `ids`; airway object or `null` |
 | `lookup_navaid_detail` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of region matches (empty if none) |
 | `lookup_holds` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of holds at that fix (empty if none) |
-| `list_cycles` | — | — | Array of `{cycle, build}`, newest first |
+| `list_cycles` | — | — | Array of `{cycle}`, newest first |
 
 ### `find_routes`
 
@@ -182,9 +182,8 @@ route object with the same shape as `find_routes` (`route` / `total_distance_nm`
 designator.
 
 `lookup_navaid_detail` and `lookup_holds` are grouped lookups (like
-`lookup_waypoints`): an ident maps to an array of matches. They require the
-graph cache to have a sibling `_detail.bfdb` (built automatically by `bf build`);
-without it they return empty arrays. `lookup_navaid_detail` returns each navaid's
+`lookup_waypoints`): an ident maps to an array of matches. The data lives in the unified `.bfdb`'s detail section, built automatically by
+`bf build`. `lookup_navaid_detail` returns each navaid's
 `ident`, `region`, `kind`, `elev_ft`, `freq_raw` (kHz for NDBs, MHz×100 for
 VOR/DME/ILS), `range_nm`, and `heading`. `lookup_holds` returns each hold's
 `fix_ident`, `fix_region`, `airport_icao` (`ENRT` for enroute holds),
@@ -193,9 +192,8 @@ VOR/DME/ILS), `range_nm`, and `heading`. `lookup_holds` returns each hold's
 
 ### `list_cycles`
 
-Takes no arguments. Returns an array of `{cycle, build}` for the caches the
-server can serve, newest first. Pass a `cycle` to the other tools to query a
-specific one.
+Takes no arguments. Returns an array of `{cycle}` for the caches the server can
+serve, newest first. Pass a `cycle` to the other tools to query a specific one.
 
 ## Error semantics
 

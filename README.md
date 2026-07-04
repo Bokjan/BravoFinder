@@ -17,12 +17,16 @@ compliant route engine**: routes respect real-world constraints such as airway
 directionality, high/low airway levels, segment altitude bands, and terminal
 procedures.
 
+Navigation data is read through a **pluggable `Loader` interface** (`io/loaders/`)
+that abstracts the source format. The default (and currently only) loader parses
+X-Plane 12 native `.dat` files; a future loader could read a Little Navmap SQLite
+database or another format without changing the route engine. The loader name is
+recorded as `source_loader` provenance in every `.bfdb` cache header.
+
 ## Status
 
-v3 is the first release of the rewrite. Everything below is implemented and tested; the CLI
-(`bf build` / `bf route`) is usable end to end against real X-Plane 12 data.
-
-The tool loads X-Plane 12 navigation data, builds a directed graph honoring airway
+The tool loads navigation data through a pluggable source loader (default: X-Plane 12),
+builds a directed graph honoring airway
 directionality and high/low levels, and finds routes between two airports (or
 waypoints) with A* and Yen K-shortest. Airports connect to the enroute network
 through their real SID/STAR procedures (parsed from ARINC 424 / CIFP), falling back
@@ -31,34 +35,6 @@ to a filed-flight-plan-style route such as `KJFK DEEZZ5 TOWIN ... PGS BASET5 KLA
 of ~2160 NM.
 
 A single loaded database is safe to query concurrently from multiple threads.
-
-### What each milestone delivered
-
-- **M1 (done)** — enroute airway network, A* search, `bf route` CLI.
-- **M2 (done)** — pluggable constraints: altitude bands, MORA safety floor,
-  high/low level preference; Yen K-shortest for multiple candidate routes.
-- **M3 (done)** — SID/STAR/approach procedures (ARINC 424 / CIFP, all 23 path
-  terminators), terminal-area MSA, procedure-based airport connection, procedures
-  surfaced in the route and CLI output.
-- **M4 (done)** — a procedure exposes every on-network fix it passes as a
-  candidate connection (with an along-track seed); the K-shortest search spans
-  different connection fixes / procedures rather than one fixed pair;
-  radar-vectored departures are flagged distinctly instead of looking like
-  missing data; and `bf build` writes a compact, portable `.bfdb` cache that
-  `bf route --db` loads for instant startup (~1.5s -> ~50ms). A full-corpus
-  review showed the originally-planned "equivalent modeling of heading/arc/
-  altitude legs" is not needed for routing (procedures already attach via
-  definite fixes; the rest is distance-less and belongs to the later geometry
-  work).
-- **M5 (done)** — route planning closure toward RFinder parity, all on existing
-  data: a cruise altitude *range* (`--alt 300-400`), avoid waypoints/airways
-  (`--avoid-wpt` / `--avoid-awy`, matched by designator so concurrencies are
-  covered), reproducible route diversity from a seed (`--seed`), forced "via"
-  points (`--via`, with K-shortest support), and `bf parse-route` to validate
-  and expand a filed route string (the reverse of `route`). Also fixed airway
-  lookup to resolve each designator of a concurrency.
-
-Not planned for the first phase: Web API, map visualization.
 
 ## Building
 
@@ -77,6 +53,7 @@ Build only what you need with `--target`:
 |---|---|
 | `bf` | CLI tool (`apps/cli/`) |
 | `bf_mcp_stdio` | MCP stdio server (`apps/mcp_stdio/`) |
+| `bf_mcp_lib`   | MCP server library (static) |
 | `bf_tests` | Test runner |
 | `bf_core` / `bf_io` | Libraries only |
 
@@ -140,6 +117,7 @@ full tool reference, argument semantics, and client configuration.
 bf build navdata                    # writes navdata/nav_<cycle>.bfdb
 bf build /path/to/xplane -o my.bfdb # explicit name: writes my.bfdb
 bf build navdata --without-cifp     # omit the CIFP procedure section
+bf build navdata --loader xplane12  # select source loader (default; only one today)
 
 # Find a route (reads navigation data from ./navdata by default)
 bf route KJFK KLAX
