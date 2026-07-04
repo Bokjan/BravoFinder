@@ -4,11 +4,12 @@ add_library(bf_io
             loaders/xplane12/xplane12_loader.cc
             loaders/xplane12/cifp/cifp_parser.cc
             loaders/xplane12/cifp/procedure_connector.cc
-            cache/graph_cache.cc
+            cache/graph_codec.cc
             cache/bfdb_inventory.cc
             cache/bfdb_naming.cc
-            cache/cifp_cache.cc
-            cache/nav_detail_cache.cc
+            cache/cifp_codec.cc
+            cache/nav_detail_codec.cc
+            cache/unified_cache.cc
             graph_builder.cc
             nav_database.cc
             nav_database_routing.cc

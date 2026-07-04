@@ -256,13 +256,9 @@ GraphBuilder GraphBuilder::FromSnapshot(GraphSnapshot&& snapshot) {
   return b;
 }
 
-GraphSnapshot GraphBuilder::ToSnapshot(const std::string& data_dir, uint32_t cycle,
-                                       uint32_t build) const {
+GraphSnapshot GraphBuilder::ToSnapshot() const {
   GraphSnapshot snapshot;
-  snapshot.cycle = cycle;
-  snapshot.build = build;
   snapshot.first_airport_vertex = first_airport_vertex_;
-  snapshot.data_dir = data_dir;
   snapshot.coords = graph_.coords_;
   snapshot.offsets = graph_.offsets_;
   snapshot.edges = graph_.edges_;

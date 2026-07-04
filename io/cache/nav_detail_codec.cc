@@ -1,73 +1,33 @@
-#include "io/cache/nav_detail_cache.h"
+#include "io/cache/nav_detail_codec.h"
 
 #include <algorithm>
-#include <cstring>
-#include <fstream>
 
 #include "io/cache/byte_io.h"
 
 namespace bf {
 
-namespace {
-
-constexpr char kMagic[4] = {'B', 'F', 'N', 'D'};
-
-// WaypointKind is serialized as a single U8 per navaid record; guard it fits.
-static_assert(static_cast<int>(WaypointKind::kOther) < 256, "WaypointKind exceeds U8");
-
-}  // namespace
-
-// --- Serialization format (version 1) -----------------------------------
+// --- Section body layout (all string refs point into the global pool) ---------
 //
-// Header:
-//   magic[4]           "BFND"
-//   format_version     U32
-//   cycle              U32
-//   build              U32
 //   navaid_count       U32
 //   hold_count         U32
-//   program_semver     U32-len + bytes
-//   source_loader      U32-len + bytes
-//   string_pool_size   U32
-//
-// Navaid records [navaid_count]:
-//   ident_offset U32, ident_len U32
-//   region_offset U32, region_len U32
-//   kind         U8  (WaypointKind)
-//   elev_ft      I32
-//   freq_raw     I32
-//   range_nm     F64
-//   heading      F64
-//
-// Hold records [hold_count]:
-//   fix_ident_offset U32, fix_ident_len U32
-//   fix_region_offset U32, fix_region_len U32
-//   airport_offset U32, airport_len U32
-//   inbound_course F64
-//   leg_time_min   F64
-//   leg_dist_nm    F64
-//   turn_dir       U8  (0='R', 1='L')
-//   min_alt_ft     I32
-//   max_alt_ft     I32
-//   speed_limit_kt I32
-//
-// String pool blob (all strings concatenated without separators)
+//   Navaid records [navaid_count]:
+//     ident_off/len U32, region_off/len U32, kind U8, elev_ft I32,
+//     freq_raw I32, range_nm F64, heading F64
+//   Hold records [hold_count]:
+//     fix_ident_off/len U32, fix_region_off/len U32, airport_off/len U32,
+//     inbound_course F64, leg_time_min F64, leg_dist_nm F64, turn_dir U8,
+//     min_alt_ft I32, max_alt_ft I32, speed_limit_kt I32
 
-Result<void> NavDetailCache::Build(const std::string& out_path, const NavDetailArchive& archive,
-                                   const std::string& source_loader,
-                                   const std::string& program_semver) {
-  StringPool pool;
-  std::string body;
-  ByteWriter w(body);
-  // Navaid record 41 B + hold record 65 B on disk (excluding pool bytes); a hint
-  // to avoid repeated reallocation.
-  w.Reserve(archive.navaids_.size() * 41 + archive.holds_.size() * 65);
-
+Result<void> NavDetailCodec::Encode(const NavDetailArchive& archive, ByteWriter& w,
+                                    StringPool& pool) {
   auto ref = [&](const std::string& s) {
     const auto r = pool.Add(s);
     w.U32(r.first);
     w.U32(r.second);
   };
+
+  w.U32(static_cast<uint32_t>(archive.navaids_.size()));
+  w.U32(static_cast<uint32_t>(archive.holds_.size()));
 
   // Navaid records (from the archive's sorted navaids_; the pair key mirrors
   // the Info's ident/region, so serialize the Info directly).
@@ -95,125 +55,36 @@ Result<void> NavDetailCache::Build(const std::string& out_path, const NavDetailA
     w.I32(h.max_alt_ft);
     w.I32(h.speed_limit_kt);
   }
-
-  // Assemble file: header + body + pool
-  std::string out;
-  ByteWriter hw(out);
-  out.append(kMagic, 4);
-  hw.U32(kFormatVersion);
-  hw.U32(archive.cycle_);
-  hw.U32(archive.build_);
-  hw.U32(static_cast<uint32_t>(archive.navaids_.size()));
-  hw.U32(static_cast<uint32_t>(archive.holds_.size()));
-
-  hw.Str(program_semver);
-  hw.Str(source_loader);
-
-  hw.U32(static_cast<uint32_t>(pool.blob().size()));
-  out.append(body);
-  out.append(pool.blob());
-
-  std::ofstream f(out_path, std::ios::binary | std::ios::trunc);
-  if (!f.is_open()) {
-    return Result<void>::Err(
-        Error(ErrorCode::kDataMissing, "cannot open nav detail cache for writing: " + out_path));
-  }
-  f.write(out.data(), static_cast<std::streamsize>(out.size()));
-  if (!f) {
-    return Result<void>::Err(Error(ErrorCode::kParseError, "failed writing " + out_path));
-  }
   return Result<void>::Ok();
 }
 
-Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
-  std::ifstream f(path, std::ios::binary | std::ios::ate);
-  if (!f.is_open()) {
-    return Result<NavDetailArchive>::Err(
-        Error(ErrorCode::kDataMissing, "cannot open nav detail cache: " + path));
-  }
-  const std::streamoff file_size = f.tellg();
-  f.seekg(0);
-
-  auto bad = [&](const char* why) {
+Result<NavDetailArchive> NavDetailCodec::Decode(const char* data, size_t size, const char* pool,
+                                                size_t pool_len) {
+  auto bad = [](const char* why) {
     return Result<NavDetailArchive>::Err(
         Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
   };
 
-  // Read entire file into memory for a single-pass parse.
-  if (file_size <= 0) {
-    return bad("empty nav detail cache");
-  }
-  std::string buf(static_cast<size_t>(file_size), '\0');
-  f.read(buf.data(), file_size);
-  if (!f) {
-    return bad("truncated nav detail cache");
-  }
-
-  ByteReader r(buf.data(), buf.size());
-
-  // Magic
-  if (r.remaining() < 4) {
-    return bad("not a nav detail cache (too short)");
-  }
-  char magic[4];
-  for (int i = 0; i < 4; ++i) {
-    magic[i] = static_cast<char>(r.U8());
-  }
-  if (std::memcmp(magic, kMagic, 4) != 0) {
-    return bad("not a nav detail cache (bad magic)");
-  }
-
-  const uint32_t format = r.U32();
-  if (!r.ok()) {
-    return bad("truncated nav detail cache header");
-  }
-  if (format != kFormatVersion) {
-    return Result<NavDetailArchive>::Err(
-        Error(ErrorCode::kFormatMismatch,
-              "incompatible nav detail cache format version; run bf build to regenerate"));
-  }
-
-  NavDetailArchive archive;
-  archive.cycle_ = r.U32();
-  archive.build_ = r.U32();
+  ByteReader r(data, size);
   const uint32_t navaid_count = r.U32();
   const uint32_t hold_count = r.U32();
   if (!r.ok()) {
-    return bad("truncated nav detail cache header");
+    return bad("truncated nav detail section header");
   }
-
-  // Inline strings: program_semver and source_loader (lengths then bytes).
-  // Read and discarded here -- the archive does not retain provenance.
-  const std::string program_semver_unused = r.Str();
-  const std::string source_loader_unused = r.Str();
-  (void)program_semver_unused;
-  (void)source_loader_unused;
-  if (!r.ok()) {
-    return bad("corrupt nav detail cache header");
-  }
-
-  const uint32_t pool_size = r.U32();
-  if (!r.ok() || pool_size > r.remaining()) {
-    return bad("corrupt nav detail cache: pool size exceeds file");
-  }
-
-  // Sanity check counts before allocating
-  constexpr size_t kNavaidRecordMin = 8 + 8 + 1 + 4 + 4 + 8 + 8;            // 41 bytes
-  constexpr size_t kHoldRecordMin = 8 + 8 + 8 + 8 + 8 + 8 + 1 + 4 + 4 + 4;  // 65 bytes
-  if (static_cast<size_t>(navaid_count) > r.remaining() / kNavaidRecordMin) {
-    return bad("corrupt nav detail cache: navaid count exceeds file");
-  }
-
-  // Records section comes before the pool blob in the buffer.
-  // Resolve string references against the pool blob at the end of the file,
-  // in place (a slice of the already-read buffer), no separate copy.
-  const size_t pool_start = static_cast<size_t>(file_size) - pool_size;
-  const char* pool_blob = buf.data() + pool_start;
 
   bool refs_ok = true;
   auto resolve = [&](uint32_t off, uint32_t len) -> std::string {
-    return ResolveRef(pool_blob, pool_size, off, len, refs_ok);
+    return ResolveRef(pool, pool_len, off, len, refs_ok);
   };
+
+  // Sanity-check counts before allocating.
+  constexpr size_t kNavaidRecordMin = 8 + 8 + 1 + 4 + 4 + 8 + 8;            // 41 bytes
+  constexpr size_t kHoldRecordMin = 8 + 8 + 8 + 8 + 8 + 8 + 1 + 4 + 4 + 4;  // 65 bytes
+  if (static_cast<size_t>(navaid_count) > r.remaining() / kNavaidRecordMin) {
+    return bad("corrupt nav detail section: navaid count exceeds section");
+  }
+
+  NavDetailArchive archive;
 
   // Navaid records
   archive.navaids_.resize(navaid_count);
@@ -228,7 +99,7 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
     const double range_nm = r.F64();
     const double heading = r.F64();
     if (!r.ok()) {
-      return bad("truncated nav detail cache navaid records");
+      return bad("truncated nav detail section navaid records");
     }
     NavaidDetailInfo info;
     info.ident = resolve(ident_off, ident_len);
@@ -243,7 +114,7 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
 
   // Hold records
   if (static_cast<size_t>(hold_count) > r.remaining() / kHoldRecordMin) {
-    return bad("corrupt nav detail cache: hold count exceeds file");
+    return bad("corrupt nav detail section: hold count exceeds section");
   }
   archive.holds_.resize(hold_count);
   for (uint32_t i = 0; i < hold_count; ++i) {
@@ -261,7 +132,7 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
     const int32_t max_alt_ft = r.I32();
     const int32_t speed_limit_kt = r.I32();
     if (!r.ok()) {
-      return bad("truncated nav detail cache hold records");
+      return bad("truncated nav detail section hold records");
     }
     HoldInfo& h = archive.holds_[i];
     h.fix_ident = resolve(fix_ident_off, fix_ident_len);
@@ -277,7 +148,7 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
   }
 
   if (!refs_ok) {
-    return bad("corrupt nav detail cache: string reference out of range");
+    return bad("corrupt nav detail section: string reference out of range");
   }
 
   archive.Finalize();
@@ -288,8 +159,6 @@ Result<NavDetailArchive> NavDetailCache::Open(const std::string& path) {
 
 NavDetailArchive NavDetailArchive::FromData(const NavData& data) {
   NavDetailArchive archive;
-  archive.cycle_ = data.cycle;
-  archive.build_ = data.build;
 
   archive.navaids_.reserve(data.navaid_details.size());
   for (const NavaidDetail& d : data.navaid_details) {

@@ -1,28 +1,15 @@
-#ifdef _MSC_VER
-// MSVC deprecates fopen in favor of fopen_s; the warning is noise in this test.
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
-#include "io/cache/nav_detail_cache.h"
+#include "io/cache/nav_detail_codec.h"
 
 #include <catch2/catch_test_macros.hpp>
-#include <cstdio>
-#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "core/domain/hold_fix.h"
 #include "core/domain/navaid_detail.h"
+#include "io/cache/byte_io.h"
 #include "io/nav_data.h"
 
 namespace {
-
-// A temp path unique to this test file; removed at the end of each case.
-// Uses the platform temp dir so the test runs on Windows (where /tmp is absent).
-std::string TempPath(const std::string& tag) {
-  std::filesystem::path dir = std::filesystem::temp_directory_path();
-  return (dir / ("bravofinder_nav_detail_test_" + tag + ".bfdb")).string();
-}
 
 // Build a small NavData with a couple of navaids (one sharing an ident across
 // regions) and a couple of holds (one fix carrying two holds), enough to
@@ -30,7 +17,6 @@ std::string TempPath(const std::string& tag) {
 bf::NavData MakeSampleData() {
   bf::NavData d;
   d.cycle = 2601;
-  d.build = 20260112;
 
   d.navaid_details.push_back(
       bf::NavaidDetail{bf::Ident("SEA", "K1"), bf::WaypointKind::kVor, 354, 11680, 150.0, 19.0});
@@ -75,18 +61,28 @@ bf::NavData MakeSampleData() {
   return d;
 }
 
+// Encode an archive to a section body + pool, then decode it back -- the unit
+// under test is the section codec, with the pool played by a standalone
+// StringPool as the unified container would provide.
+bf::Result<bf::NavDetailArchive> RoundTrip(const bf::NavDetailArchive& src) {
+  bf::StringPool pool;
+  std::string body;
+  bf::ByteWriter w(body);
+  bf::Result<void> enc = bf::NavDetailCodec::Encode(src, w, pool);
+  if (!enc) {
+    return bf::Result<bf::NavDetailArchive>::Err(std::move(enc).error());
+  }
+  const std::string& blob = pool.blob();
+  return bf::NavDetailCodec::Decode(body.data(), body.size(), blob.data(), blob.size());
+}
+
 }  // namespace
 
-TEST_CASE("nav detail cache: build -> open round-trips navaids", "[unit][detail]") {
-  const std::string path = TempPath("navaids");
+TEST_CASE("nav detail codec: encode -> decode round-trips navaids", "[unit][detail]") {
   bf::NavDetailArchive src = bf::NavDetailArchive::FromData(MakeSampleData());
-  REQUIRE(bf::NavDetailCache::Build(path, src, "xplane", "3.2.0"));
-
-  bf::Result<bf::NavDetailArchive> opened = bf::NavDetailCache::Open(path);
+  bf::Result<bf::NavDetailArchive> opened = RoundTrip(src);
   REQUIRE(opened);
   const bf::NavDetailArchive& a = opened.value();
-  CHECK(a.cycle() == 2601);
-  CHECK(a.build() == 20260112);
 
   // Single-region navaid.
   auto sea = a.FindNavaids("SEA");
@@ -105,16 +101,11 @@ TEST_CASE("nav detail cache: build -> open round-trips navaids", "[unit][detail]
 
   // Unknown ident -> empty.
   CHECK(a.FindNavaids("NOPE").empty());
-
-  std::remove(path.c_str());
 }
 
-TEST_CASE("nav detail cache: build -> open round-trips holds", "[unit][detail]") {
-  const std::string path = TempPath("holds");
+TEST_CASE("nav detail codec: encode -> decode round-trips holds", "[unit][detail]") {
   bf::NavDetailArchive src = bf::NavDetailArchive::FromData(MakeSampleData());
-  REQUIRE(bf::NavDetailCache::Build(path, src, "xplane", "3.2.0"));
-
-  bf::Result<bf::NavDetailArchive> opened = bf::NavDetailCache::Open(path);
+  bf::Result<bf::NavDetailArchive> opened = RoundTrip(src);
   REQUIRE(opened);
   const bf::NavDetailArchive& a = opened.value();
 
@@ -141,34 +132,14 @@ TEST_CASE("nav detail cache: build -> open round-trips holds", "[unit][detail]")
   CHECK(boton[0].speed_limit_kt == 0);
 
   CHECK(a.FindHolds("NOPE").empty());
-
-  std::remove(path.c_str());
 }
 
-TEST_CASE("nav detail cache: open rejects a bad magic", "[unit][detail]") {
-  const std::string path = TempPath("badmagic");
-  {
-    FILE* f = std::fopen(path.c_str(), "wb");
-    REQUIRE(f != nullptr);
-    std::fputs("XXXX and some trailing bytes", f);
-    std::fclose(f);
-  }
-  bf::Result<bf::NavDetailArchive> opened = bf::NavDetailCache::Open(path);
-  CHECK_FALSE(opened);
-  std::remove(path.c_str());
-}
-
-TEST_CASE("nav detail cache: empty data round-trips to an empty archive", "[unit][detail]") {
-  const std::string path = TempPath("empty");
+TEST_CASE("nav detail codec: empty data round-trips to an empty archive", "[unit][detail]") {
   bf::NavData empty;
   empty.cycle = 2601;
-  empty.build = 20260112;
   bf::NavDetailArchive src = bf::NavDetailArchive::FromData(empty);
-  REQUIRE(bf::NavDetailCache::Build(path, src, "xplane", "3.2.0"));
-
-  bf::Result<bf::NavDetailArchive> opened = bf::NavDetailCache::Open(path);
+  bf::Result<bf::NavDetailArchive> opened = RoundTrip(src);
   REQUIRE(opened);
   CHECK(opened.value().FindNavaids("SEA").empty());
   CHECK(opened.value().FindHolds("AE701").empty());
-  std::remove(path.c_str());
 }

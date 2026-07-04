@@ -14,8 +14,8 @@
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
-#include "io/cache/cifp_cache.h"
-#include "io/cache/nav_detail_cache.h"
+#include "io/cache/cifp_codec.h"
+#include "io/cache/nav_detail_codec.h"
 #include "io/loaders/xplane12/cifp/cifp_parser.h"
 
 namespace bf {
@@ -55,38 +55,28 @@ class NavDatabase {
   static Result<NavDatabase> Open(const std::string& source_dir,
                                   const std::string& loader_name = "xplane12");
 
-  // Load a prebuilt graph from a `.bfdb` cache file, skipping all parsing and
-  // graph construction (seconds -> milliseconds). CIFP procedures come from a
-  // sibling `<stem>_cifp.bfdb` procedure cache next to `bfdb_path` when present;
-  // if absent, an airport simply reports no procedures (the cached path never
-  // reads source `.dat` files). `cifp_load` selects on-demand (default) or eager
-  // loading of the procedure cache (see CifpLoad). Returns an Error if the graph
-  // cache is missing, corrupt, or of an incompatible format.
+  // Load a prebuilt database from a unified `.bfdb` file, skipping all parsing
+  // and graph construction (seconds -> milliseconds). Graph, CIFP procedures and
+  // navaid detail all come from the one file's sections; if the CIFP section is
+  // absent, an airport simply reports no procedures (the cached path never reads
+  // source `.dat` files). `cifp_load` selects on-demand (default) or eager
+  // loading of the procedure section (see CifpLoad). Returns an Error if the file
+  // is missing, corrupt, or of an incompatible format.
   static Result<NavDatabase> OpenCached(const std::string& bfdb_path,
                                         CifpLoad cifp_load = CifpLoad::kOnDemand);
 
-  // Serialize the built graph and metadata to a `.bfdb` cache file. Called by
-  // `bf build` after Open(). Returns an Error if the file cannot be written.
-  Result<void> WriteCache(const std::string& out_path) const;
+  // Serialize the whole database -- graph, CIFP procedures, and navaid detail --
+  // into ONE unified `.bfdb` file. Called by `bf build` after Open(). When
+  // `with_cifp` is false the CIFP section is omitted (the `--without-cifp` flag).
+  // Reads the CIFP procedures via the loader from the source dir passed to Open.
+  // Returns the number of airports written into the CIFP section (0 when
+  // omitted), or an Error if the file cannot be written.
+  Result<uint32_t> WriteUnified(const std::string& out_path, bool with_cifp = true) const;
 
-  // AIRAC provenance parsed from the source data (or restored from a cache):
-  // the cycle number (e.g. 2601) and build date stamp (e.g. 20260112). Zero
-  // when the source carried no parsable provenance.
+  // AIRAC provenance parsed from the source data (or restored from a cache): the
+  // cycle number (e.g. 2601). Zero when the source carried no parsable
+  // provenance. (The X-Plane-only `build` stamp is no longer tracked.)
   uint32_t cycle() const { return cycle_; }
-  uint32_t build() const { return build_; }
-
-  // Serialize every airport's CIFP procedures to a segmented `nav_cifp.bfdb`
-  // procedure cache, so deployment needs only the cache files (not the CIFP
-  // directory). Provenance (`source_loader`) is the loader's name. Reads the
-  // procedures via the loader from the source dir passed to Open. Returns the
-  // number of airports written, or an Error.
-  Result<uint32_t> WriteCifpCache(const std::string& out_path) const;
-
-  // Serialize the navaid detail + hold archive to a `nav_..._detail.bfdb` side
-  // cache. Provenance (`source_loader`) is the loader's name. Returns an Error
-  // if the database has no detail archive (e.g. opened from a cache without one)
-  // or the file cannot be written.
-  Result<void> WriteDetailCache(const std::string& out_path) const;
 
   // Find up to request.k candidate routes, ordered best-first, honoring the
   // request's altitude/level constraints. Endpoints resolve as airport ICAO
@@ -166,9 +156,8 @@ class NavDatabase {
   // so LookupAirways needs no lock (contract B: immutable after Open).
   void BuildAirwayIndex();
 
-  // AIRAC provenance, carried into the .bfdb cache header.
+  // AIRAC provenance, carried into the .bfdb container header.
   uint32_t cycle_ = 0;
-  uint32_t build_ = 0;
   std::unique_ptr<GraphBuilder> builder_;
   MoraGrid mora_;
   std::vector<MsaSector> msa_;

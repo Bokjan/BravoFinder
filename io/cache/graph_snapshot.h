@@ -12,22 +12,22 @@
 
 namespace bf {
 
-// A flat, self-contained snapshot of everything a NavDatabase needs to answer
-// queries, decoupled from GraphBuilder's internal indexing. GraphCache reads and
-// writes this snapshot; GraphBuilder converts to/from it. Unlike CifpArchive /
-// NavDetailArchive (which are live, queryable views), this is a passive data
-// carrier with no lookup methods of its own.
+// A flat, self-contained snapshot of the route-graph data a NavDatabase needs
+// to answer queries, decoupled from GraphBuilder's internal indexing. GraphCodec
+// encodes and decodes this snapshot as one section of a unified `.bfdb`;
+// GraphBuilder converts to/from it. Unlike CifpArchive / NavDetailArchive (which
+// are live, queryable views), this is a passive data carrier with no lookup
+// methods of its own.
+//
+// This holds ONLY graph data -- no AIRAC/provenance metadata. Cycle, source
+// loader, program version and data dir live once in the unified container header
+// (see unified_cache.h), not per section.
 //
 // The three lookup maps are NOT part of the snapshot: they are rebuilt from
 // `idents` on load (an unordered_map is not portably serializable and costs more
 // in RAM than the arrays it indexes).
 struct GraphSnapshot {
-  uint32_t cycle = 0;
-  uint32_t build = 0;
-  std::string program_semver;  // bf version that built this cache
-  std::string source_loader;   // loader that produced the data, e.g. "xplane"
   int first_airport_vertex = 0;
-  std::string data_dir;  // the data dir used at build time (route default)
 
   std::vector<Coordinate> coords;   // per-vertex position, size V
   std::vector<int> offsets;         // CSR row offsets, size V + 1

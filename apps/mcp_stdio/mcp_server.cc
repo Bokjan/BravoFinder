@@ -197,9 +197,9 @@ void McpServer::HandleToolsList(int id) {
     entry.AddMember("name", rapidjson::Value(kListCyclesTool, alloc), alloc);
     entry.AddMember(
         "description",
-        rapidjson::Value("List the AIRAC cycles this server can query. Returns each cycle, its "
-                         "build, and whether it is already loaded. Pass a cycle to the other "
-                         "tools' 'cycle' argument to query a specific one.",
+        rapidjson::Value("List the AIRAC cycles this server can query. Returns each cycle and "
+                         "whether it is already loaded. Pass a cycle to the other tools' "
+                         "'cycle' argument to query a specific one.",
                          alloc),
         alloc);
     rapidjson::Value schema(rapidjson::kObjectType);
@@ -217,7 +217,7 @@ void McpServer::HandleToolsList(int id) {
 void McpServer::HandleListCycles(int id) {
   const BfdbInventory& inv = registry_.inventory();
   // A cycle is "loaded" once Get has opened it; the inventory does not track
-  // that, so we only report cycle/build here (loaded state is transient and not
+  // that, so we only report the cycle here (loaded state is transient and not
   // essential for the client's choice).
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -228,8 +228,6 @@ void McpServer::HandleListCycles(int id) {
     writer.StartObject();
     writer.Key("cycle");
     writer.Uint(it->cycle);
-    writer.Key("build");
-    writer.Uint(it->build);
     writer.EndObject();
   }
   writer.EndArray();

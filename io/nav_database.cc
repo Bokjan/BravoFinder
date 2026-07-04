@@ -11,10 +11,11 @@
 #include "core/graph/nav_graph.h"
 #include "core/routing/route_string.h"
 #include "core/version.h"
-#include "io/cache/cifp_cache.h"
-#include "io/cache/graph_cache.h"
+#include "io/cache/cifp_codec.h"
+#include "io/cache/graph_codec.h"
 #include "io/cache/graph_snapshot.h"
-#include "io/cache/nav_detail_cache.h"
+#include "io/cache/nav_detail_codec.h"
+#include "io/cache/unified_cache.h"
 #include "io/graph_builder.h"
 #include "io/loaders/loader.h"
 #include "io/loaders/loader_registry.h"
@@ -40,7 +41,6 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   db.loader_ = std::move(loader).value();
   db.source_dir_ = source_dir;
   db.cycle_ = data.value().cycle;
-  db.build_ = data.value().build;
   db.mora_ = std::move(data.value().mora);
   db.msa_ = std::move(data.value().msa);
   db.builder_ = std::make_unique<GraphBuilder>(data.value());
@@ -52,100 +52,90 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
 }
 
 Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLoad cifp_load) {
-  Result<GraphSnapshot> snapshot = GraphCache::Open(bfdb_path);
-  if (!snapshot) {
-    return Result<NavDatabase>::Err(std::move(snapshot).error());
+  Result<UnifiedData> unified = UnifiedCache::Open(bfdb_path);
+  if (!unified) {
+    return Result<NavDatabase>::Err(std::move(unified).error());
   }
-  GraphSnapshot& arc = snapshot.value();
+  UnifiedData& u = unified.value();
+
   NavDatabase db;
-  db.cycle_ = arc.cycle;
-  db.build_ = arc.build;
-  db.mora_ = std::move(arc.mora);
-  db.msa_ = std::move(arc.msa);
-  db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromSnapshot(std::move(arc)));
+  db.cycle_ = u.header.cycle;
+  db.mora_ = std::move(u.graph.mora);
+  db.msa_ = std::move(u.graph.msa);
+  db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromSnapshot(std::move(u.graph)));
 
-  // Resolve the CIFP procedure cache: a sibling "<stem>_cifp.bfdb" next to the
-  // graph cache. Its absence is fine -- an airport then simply reports no
-  // procedures (the cached path never reads source .dat files).
-  {
-    std::filesystem::path p(bfdb_path);
-    const std::string cifp_path = (p.parent_path() / (p.stem().string() + "_cifp.bfdb")).string();
-    if (std::filesystem::exists(cifp_path)) {
-      Result<CifpArchive> cifp = CifpCache::Open(cifp_path);
-      if (!cifp) {
-        return Result<NavDatabase>::Err(std::move(cifp).error());
+  // CIFP procedures come from the file's CIFP section, if present. Its absence
+  // is fine -- an airport then simply reports no procedures (the cached path
+  // never reads source .dat files).
+  if (u.cifp.has_value()) {
+    if (cifp_load == CifpLoad::kEager) {
+      // Deserialize every airport up front into the procedure cache, then freeze
+      // it: subsequent ProceduresFor calls only read existing entries, so they
+      // need no lock (contract B holds with no shared mutable state).
+      std::unordered_map<std::string, CifpData> all = u.cifp->FetchAll();
+      db.procedure_cache_.reserve(all.size());
+      for (auto& entry : all) {
+        db.procedure_cache_.emplace(entry.first,
+                                    std::make_unique<CifpData>(std::move(entry.second)));
       }
-      if (cifp_load == CifpLoad::kEager) {
-        // Deserialize every airport up front into the procedure cache, then
-        // freeze it: subsequent ProceduresFor calls only read existing entries,
-        // so they need no lock (contract B holds with no shared mutable state).
-        std::unordered_map<std::string, CifpData> all = cifp.value().FetchAll();
-        db.procedure_cache_.reserve(all.size());
-        for (auto& entry : all) {
-          db.procedure_cache_.emplace(entry.first,
-                                      std::make_unique<CifpData>(std::move(entry.second)));
-        }
-        db.cifp_eager_ = true;
-        // The archive is not retained: everything is already in the cache.
-      } else {
-        db.cifp_archive_ = std::move(cifp).value();
-      }
+      db.cifp_eager_ = true;
+      // The archive is not retained: everything is already in the cache.
+    } else {
+      db.cifp_archive_ = std::move(u.cifp);
     }
   }
 
-  // Look for a sibling "<stem>_detail.bfdb" next to the graph cache. Absence is fine.
-  {
-    std::filesystem::path p(bfdb_path);
-    const std::string detail_path =
-        (p.parent_path() / (p.stem().string() + "_detail.bfdb")).string();
-    if (std::filesystem::exists(detail_path)) {
-      Result<NavDetailArchive> detail = NavDetailCache::Open(detail_path);
-      if (!detail) {
-        return Result<NavDatabase>::Err(std::move(detail).error());
-      }
-      db.detail_archive_ = std::move(detail).value();
-    }
+  // Navaid detail comes from the file's detail section, if present. Absence is fine.
+  if (u.detail.has_value()) {
+    db.detail_archive_ = std::move(u.detail);
   }
 
   db.BuildAirwayIndex();
   return Result<NavDatabase>::Ok(std::move(db));
 }
 
-Result<void> NavDatabase::WriteCache(const std::string& out_path) const {
+Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path, bool with_cifp) const {
   if (!builder_) {
-    return Result<void>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
+    return Result<uint32_t>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
-  GraphSnapshot snapshot = builder_->ToSnapshot(source_dir_, cycle_, build_);
-  snapshot.program_semver = kBravoFinderVersion;
-  snapshot.source_loader = loader_ ? loader_->name() : "";
+
+  // Graph section: the built graph plus MORA/MSA (owned by NavDatabase).
+  GraphSnapshot snapshot = builder_->ToSnapshot();
   snapshot.mora = mora_;
   snapshot.msa = msa_;
-  return GraphCache::Build(out_path, snapshot);
-}
 
-Result<uint32_t> NavDatabase::WriteCifpCache(const std::string& out_path) const {
-  if (!loader_) {
+  // CIFP section (optional): parse the full CIFP set on demand (heavy, ~100 MB),
+  // then hand the parsed per-airport data to the source-agnostic codec. Keeping
+  // the parse in the loader means the cache layer never depends on any source's
+  // on-disk layout. Requires a loader (a database opened from a cache has none).
+  std::vector<AirportProcedureData> cifp_procedures;
+  const bool emit_cifp = with_cifp && loader_ != nullptr;
+  if (with_cifp && loader_ == nullptr) {
     return Result<uint32_t>::Err(
         Error(ErrorCode::kDataMissing, "no loader (database opened from a cache)"));
   }
-  // Parse the full CIFP set on demand (heavy, ~100 MB), then hand the parsed
-  // per-airport data to the source-agnostic cache writer. Keeping the parse in
-  // the loader means the cache layer never depends on any source's on-disk
-  // layout, so a future loader can feed CifpCache::Build the same way.
-  Result<std::vector<AirportProcedureData>> procedures = loader_->LoadProcedures(source_dir_);
-  if (!procedures) {
-    return Result<uint32_t>::Err(std::move(procedures).error());
+  if (emit_cifp) {
+    Result<std::vector<AirportProcedureData>> procedures = loader_->LoadProcedures(source_dir_);
+    if (!procedures) {
+      return Result<uint32_t>::Err(std::move(procedures).error());
+    }
+    cifp_procedures = std::move(procedures).value();
   }
-  return CifpCache::Build(procedures.value(), out_path, loader_->name(), cycle_, build_,
-                          kBravoFinderVersion);
-}
 
-Result<void> NavDatabase::WriteDetailCache(const std::string& out_path) const {
-  if (!detail_archive_.has_value()) {
-    return Result<void>::Err(Error(ErrorCode::kDataMissing, "no navaid detail archive to write"));
+  UnifiedCache::BuildInput input;
+  input.graph = &snapshot;
+  input.cifp = emit_cifp ? &cifp_procedures : nullptr;
+  input.detail = detail_archive_.has_value() ? &detail_archive_.value() : nullptr;
+  input.header.cycle = cycle_;
+  input.header.program_semver = kBravoFinderVersion;
+  input.header.source_loader = loader_ ? loader_->name() : "";
+  input.header.data_dir = source_dir_;
+
+  Result<void> written = UnifiedCache::Build(out_path, input);
+  if (!written) {
+    return Result<uint32_t>::Err(std::move(written).error());
   }
-  const std::string source_loader = loader_ ? loader_->name() : "";
-  return NavDetailCache::Build(out_path, *detail_archive_, source_loader, kBravoFinderVersion);
+  return Result<uint32_t>::Ok(static_cast<uint32_t>(cifp_procedures.size()));
 }
 
 const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {

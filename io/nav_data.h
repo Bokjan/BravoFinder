@@ -27,10 +27,9 @@ struct AirwayConnection {
 // The raw navigation dataset produced by a loader: the inputs from which the
 // route graph is built. It owns no graph itself and performs no I/O.
 struct NavData {
-  // AIRAC provenance parsed from the data-file header line, e.g. cycle 2601 /
-  // build 20260112. Zero if not found. Carried into the .bfdb cache header.
+  // AIRAC cycle parsed from the data-file header line, e.g. cycle 2601. Zero if
+  // not found. Carried into the .bfdb container header.
   uint32_t cycle = 0;
-  uint32_t build = 0;
 
   std::vector<Waypoint> waypoints;
   std::vector<NavaidDetail> navaid_details;  // parallel to routable navaids in waypoints

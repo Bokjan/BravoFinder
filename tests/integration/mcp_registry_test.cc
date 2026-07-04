@@ -6,26 +6,28 @@
 
 #include "io/cache/bfdb_inventory.h"
 #include "io/cache/bfdb_naming.h"
-#include "io/cache/graph_cache.h"
 #include "io/cache/graph_snapshot.h"
+#include "io/cache/unified_cache.h"
 #include "registry.h"
 
 namespace {
 
 namespace fs = std::filesystem;
 
-// A minimal valid GraphSnapshot: an empty graph carrying AIRAC provenance. Enough
-// for OpenCached to build a (trivial) NavDatabase; the registry only cares that
-// it opens.
-bf::GraphSnapshot TinySnapshot(uint32_t cycle, uint32_t build) {
-  bf::GraphSnapshot arc;
-  arc.cycle = cycle;
-  arc.build = build;
-  arc.program_semver = "3.2.0";
-  arc.source_loader = "test";
-  arc.first_airport_vertex = 0;
-  arc.offsets = {0};
-  return arc;
+// A minimal valid graph-only unified cache carrying an AIRAC cycle. Enough for
+// OpenCached to build a (trivial) NavDatabase; the registry only cares that it
+// opens.
+void WriteCache(const fs::path& dir, uint32_t cycle) {
+  bf::GraphSnapshot g;
+  g.first_airport_vertex = 0;
+  g.offsets = {0};
+  bf::UnifiedCache::BuildInput in;
+  in.graph = &g;
+  in.header.cycle = cycle;
+  in.header.program_semver = "3.3.0";
+  in.header.source_loader = "test";
+  const std::string path = (dir / bf::FormatBfdbName(cycle)).string();
+  REQUIRE(bf::UnifiedCache::Build(path, in));
 }
 
 fs::path TempDir(const std::string& tag) {
@@ -34,11 +36,6 @@ fs::path TempDir(const std::string& tag) {
   fs::remove_all(dir, ec);
   fs::create_directories(dir, ec);
   return dir;
-}
-
-void WriteCache(const fs::path& dir, uint32_t cycle, uint32_t build) {
-  const std::string path = (dir / bf::FormatBfdbName(cycle, build)).string();
-  REQUIRE(bf::GraphCache::Build(path, TinySnapshot(cycle, build)));
 }
 
 bf::mcp::NavDatabaseRegistry MakeRegistry(const fs::path& dir) {
@@ -51,8 +48,8 @@ bf::mcp::NavDatabaseRegistry MakeRegistry(const fs::path& dir) {
 
 TEST_CASE("mcp registry: Get with no cycle serves the latest", "[integration][mcp]") {
   const fs::path dir = TempDir("latest");
-  WriteCache(dir, 2601, 20260112);
-  WriteCache(dir, 2602, 20260209);
+  WriteCache(dir, 2601);
+  WriteCache(dir, 2602);
   bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   bf::Result<const bf::NavDatabase*> db = reg.Get(std::nullopt);
@@ -62,8 +59,8 @@ TEST_CASE("mcp registry: Get with no cycle serves the latest", "[integration][mc
 
 TEST_CASE("mcp registry: Get by cycle serves that cycle", "[integration][mcp]") {
   const fs::path dir = TempDir("bycycle");
-  WriteCache(dir, 2601, 20260112);
-  WriteCache(dir, 2602, 20260209);
+  WriteCache(dir, 2601);
+  WriteCache(dir, 2602);
   bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   bf::Result<const bf::NavDatabase*> db = reg.Get(2601);
@@ -73,7 +70,7 @@ TEST_CASE("mcp registry: Get by cycle serves that cycle", "[integration][mcp]") 
 
 TEST_CASE("mcp registry: repeated Get returns the same cached instance", "[integration][mcp]") {
   const fs::path dir = TempDir("cache");
-  WriteCache(dir, 2601, 20260112);
+  WriteCache(dir, 2601);
   bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   bf::Result<const bf::NavDatabase*> a = reg.Get(2601);
@@ -85,7 +82,7 @@ TEST_CASE("mcp registry: repeated Get returns the same cached instance", "[integ
 
 TEST_CASE("mcp registry: unknown cycle is an error", "[integration][mcp]") {
   const fs::path dir = TempDir("unknown");
-  WriteCache(dir, 2601, 20260112);
+  WriteCache(dir, 2601);
   bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   CHECK_FALSE(reg.Get(9999));
@@ -98,9 +95,9 @@ TEST_CASE("mcp registry: concurrent Get is safe and consistent", "[integration][
   // those are not thread-safe -- so each stores its result and we assert after
   // the join.
   const fs::path dir = TempDir("concurrent");
-  WriteCache(dir, 2601, 20260112);
-  WriteCache(dir, 2602, 20260209);
-  WriteCache(dir, 2603, 20260309);
+  WriteCache(dir, 2601);
+  WriteCache(dir, 2602);
+  WriteCache(dir, 2603);
   bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   constexpr int kThreads = 8;

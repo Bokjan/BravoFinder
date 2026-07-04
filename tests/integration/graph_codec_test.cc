@@ -1,5 +1,3 @@
-#include "io/cache/graph_cache.h"
-
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
@@ -12,6 +10,7 @@
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/cache/graph_snapshot.h"
+#include "io/cache/unified_cache.h"
 #include "io/nav_database.h"
 
 namespace {
@@ -41,7 +40,8 @@ bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
   return r;
 }
 
-// Build a database, write it to a .bfdb, and return the path (or empty on SKIP).
+// Build a database and write it to a unified .bfdb, returning the path (empty on
+// SKIP). Includes the CIFP section so the cached path resolves procedures.
 std::string BuildCache(const std::string& tag) {
   const std::string dir = NavDataDir();
   bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
@@ -49,7 +49,7 @@ std::string BuildCache(const std::string& tag) {
     return {};
   }
   const std::string path = TempBfdb(tag);
-  bf::Result<void> written = db.value().WriteCache(path);
+  bf::Result<uint32_t> written = db.value().WriteUnified(path);
   REQUIRE(written);
   return path;
 }
@@ -63,11 +63,9 @@ TEST_CASE("bfdb: a cached route matches the freshly built route", "[integration]
     SKIP("navigation data not found in '" << dir << "' (set BRAVOFINDER_NAVDATA)");
   }
   const std::string path = TempBfdb("roundtrip");
-  REQUIRE(direct.value().WriteCache(path));
-  // Also write the sibling <stem>_cifp.bfdb so the cached path resolves the same
-  // procedures (SID/STAR) the direct path parses from CIFP files.
-  const std::string cifp_path = TempBfdb("roundtrip_cifp");
-  REQUIRE(direct.value().WriteCifpCache(cifp_path));
+  // The unified file carries graph + CIFP + detail, so the cached path resolves
+  // the same procedures (SID/STAR) the direct path parses from CIFP files.
+  REQUIRE(direct.value().WriteUnified(path));
 
   bf::Result<bf::NavDatabase> cached = bf::NavDatabase::OpenCached(path);
   REQUIRE(cached);
@@ -96,22 +94,19 @@ TEST_CASE("bfdb: a cached route matches the freshly built route", "[integration]
   }
 
   std::remove(path.c_str());
-  std::remove(cifp_path.c_str());
 }
 
-TEST_CASE("bfdb: the cache header preserves AIRAC provenance", "[integration][bfdb]") {
+TEST_CASE("bfdb: the container header preserves AIRAC provenance", "[integration][bfdb]") {
   const std::string path = BuildCache("meta");
   if (path.empty()) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::GraphSnapshot> arc = bf::GraphCache::Open(path);
-  REQUIRE(arc);
-  // cycle 2601 / build 20260112 for the test dataset; both should be non-zero
-  // and the graph non-empty.
-  CHECK(arc.value().cycle != 0);
-  CHECK(arc.value().build != 0);
-  CHECK_FALSE(arc.value().coords.empty());
-  CHECK(arc.value().offsets.size() == arc.value().coords.size() + 1);
+  bf::Result<bf::UnifiedData> u = bf::UnifiedCache::Open(path);
+  REQUIRE(u);
+  // cycle 2601 for the test dataset; should be non-zero and the graph non-empty.
+  CHECK(u.value().header.cycle != 0);
+  CHECK_FALSE(u.value().graph.coords.empty());
+  CHECK(u.value().graph.offsets.size() == u.value().graph.coords.size() + 1);
   std::remove(path.c_str());
 }
 
@@ -121,16 +116,16 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
   if (path.empty()) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  bf::Result<bf::GraphSnapshot> arc = bf::GraphCache::Open(path);
-  REQUIRE(arc);
-  const bf::GraphSnapshot& arcv = arc.value();
+  bf::Result<bf::UnifiedData> u = bf::UnifiedCache::Open(path);
+  REQUIRE(u);
+  const bf::GraphSnapshot& snapshot = u.value().graph;
 
   // Per-vertex kinds are present for every vertex.
-  REQUIRE(arcv.kinds.size() == arcv.coords.size());
+  REQUIRE(snapshot.kinds.size() == snapshot.coords.size());
   // Real AIRAC data has a mix of fixes and navaids, so at least one vertex must
   // be a navaid kind -- proving the field is populated, not defaulted to kFix.
   bool has_navaid = false;
-  for (bf::WaypointKind k : arcv.kinds) {
+  for (bf::WaypointKind k : snapshot.kinds) {
     if (k == bf::WaypointKind::kVor || k == bf::WaypointKind::kNdb || k == bf::WaypointKind::kDme) {
       has_navaid = true;
       break;
@@ -140,10 +135,11 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
 
   // Airport elevations: one per airport vertex, and at least one non-zero (most
   // airports sit above sea level), proving elevation survived the round-trip.
-  const size_t airport_count = arcv.coords.size() - static_cast<size_t>(arcv.first_airport_vertex);
-  REQUIRE(arcv.airport_elevations_ft.size() == airport_count);
+  const size_t airport_count =
+      snapshot.coords.size() - static_cast<size_t>(snapshot.first_airport_vertex);
+  REQUIRE(snapshot.airport_elevations_ft.size() == airport_count);
   bool has_nonzero_elev = false;
-  for (int e : arcv.airport_elevations_ft) {
+  for (int e : snapshot.airport_elevations_ft) {
     if (e != 0) {
       has_nonzero_elev = true;
       break;
@@ -178,7 +174,7 @@ TEST_CASE("bfdb: an airport without procedures still routes via the cache", "[in
 TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]") {
   // Missing file.
   {
-    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(TempBfdb("does_not_exist"));
+    bf::Result<bf::UnifiedData> r = bf::UnifiedCache::Open(TempBfdb("does_not_exist"));
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kDataMissing);
   }
@@ -188,7 +184,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     f << "NOPEnot a real bfdb file at all";
     f.close();
-    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(path);
+    bf::Result<bf::UnifiedData> r = bf::UnifiedCache::Open(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());
@@ -201,7 +197,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     const uint32_t bad_version = 0xDEADBEEF;
     f.write(reinterpret_cast<const char*>(&bad_version), sizeof(bad_version));
     f.close();
-    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(path);
+    bf::Result<bf::UnifiedData> r = bf::UnifiedCache::Open(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kFormatMismatch);
     std::remove(path.c_str());
@@ -212,36 +208,7 @@ TEST_CASE("bfdb: a corrupt or missing cache is rejected cleanly", "[unit][bfdb]"
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     f << "BF";
     f.close();
-    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(path);
-    CHECK_FALSE(r);
-    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
-    std::remove(path.c_str());
-  }
-  // Valid magic and version, but an absurd vertex count in the header. The
-  // counts must be range-checked against the file size BEFORE any resize, or a
-  // forged header would trigger a huge allocation and crash instead of a clean
-  // Result. (Regression guard for the header-count bounds check.)
-  {
-    const std::string path = TempBfdb("boguscount");
-    auto put_u32 = [](std::string& s, uint32_t v) {
-      for (int i = 0; i < 4; ++i) {
-        s.push_back(static_cast<char>((v >> (8 * i)) & 0xFF));
-      }
-    };
-    std::string buf;
-    buf.append("BFDB", 4);
-    put_u32(buf, bf::GraphCache::kFormatVersion);
-    put_u32(buf, 2601);        // cycle
-    put_u32(buf, 20260112);    // build
-    put_u32(buf, 0xFFFFFFFF);  // v: absurd vertex count
-    put_u32(buf, 0);           // e
-    put_u32(buf, 0);           // airway_count
-    put_u32(buf, 0);           // msa_count
-    put_u32(buf, 0);           // first_airport_vertex
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
-    f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
-    f.close();
-    bf::Result<bf::GraphSnapshot> r = bf::GraphCache::Open(path);
+    bf::Result<bf::UnifiedData> r = bf::UnifiedCache::Open(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     std::remove(path.c_str());

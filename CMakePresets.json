@@ -114,7 +114,7 @@
       },
       "filter": {
         "exclude": {
-          "name": "^bfdb:|^cifp cache:"
+          "name": "^bfdb:|^cifp section:"
         }
       }
     },
@@ -130,7 +130,7 @@
       },
       "filter": {
         "exclude": {
-          "name": "^bfdb:|^cifp cache:|^query:|^real data:"
+          "name": "^bfdb:|^cifp section:|^query:|^real data:"
         }
       }
     },

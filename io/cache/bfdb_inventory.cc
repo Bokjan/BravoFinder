@@ -6,7 +6,7 @@
 #include <unordered_map>
 
 #include "io/cache/bfdb_naming.h"
-#include "io/cache/graph_cache.h"
+#include "io/cache/unified_cache.h"
 
 namespace bf {
 
@@ -21,35 +21,34 @@ Result<BfdbInventory> BfdbInventory::Scan(const std::string& dir) {
   }
 
   BfdbInventory inv;
-  // Best cache seen per cycle so far. The header is authoritative for
-  // cycle/build; ParseBfdbName only gates which files we bother opening.
+  // Best cache seen per cycle so far. The header is authoritative for the cycle;
+  // ParseBfdbName only gates which files we bother opening.
   std::unordered_map<uint32_t, BfdbEntry> best;
 
   for (const fs::directory_entry& de : it) {
     if (!de.is_regular_file(ec) || ec) {
       continue;
     }
-    // Only "nav_<cycle>_<build>.bfdb" names are candidates; ParseBfdbName
-    // rejects the "*_cifp.bfdb" companions and anything else.
+    // Only "nav_<cycle>.bfdb" names are candidates.
     const std::string path = de.path().string();
     if (!ParseBfdbName(de.path().filename().string())) {
       continue;
     }
-    // The filename got us here; the header decides the real cycle/build.
-    Result<GraphCacheHeader> header = GraphCache::ReadHeader(path);
+    // The filename got us here; the header decides the real cycle.
+    Result<UnifiedHeader> header = UnifiedCache::ReadHeader(path);
     if (!header) {
       inv.skipped_.push_back(path);
       continue;
     }
-    BfdbEntry entry{path, header.value().cycle, header.value().build};
+    BfdbEntry entry{path, header.value().cycle};
     auto found = best.find(entry.cycle);
     if (found == best.end()) {
       best.emplace(entry.cycle, entry);
-    } else if (entry.build > found->second.build) {
-      inv.discarded_.push_back(found->second);  // the old winner is now shadowed
-      found->second = entry;
     } else {
-      inv.discarded_.push_back(entry);  // this one loses to the existing winner
+      // No build stamp to rank same-cycle files by: the later-scanned file wins
+      // and the previous one is surfaced in discarded() rather than dropped.
+      inv.discarded_.push_back(found->second);
+      found->second = entry;
     }
   }
 
@@ -66,8 +65,7 @@ std::optional<BfdbEntry> BfdbInventory::Latest() const {
   if (entries_.empty()) {
     return std::nullopt;
   }
-  // entries_ is sorted by cycle ascending and holds the highest build per
-  // cycle, so the last element is the newest overall.
+  // entries_ is sorted by cycle ascending, so the last element is the newest.
   return entries_.back();
 }
 

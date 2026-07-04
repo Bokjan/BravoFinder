@@ -1,0 +1,283 @@
+#include "io/cache/graph_codec.h"
+
+#include "io/cache/byte_io.h"
+#include "io/cache/graph_snapshot.h"
+
+namespace bf {
+
+namespace {
+
+// The vertex-record flags byte and the WaypointKind are each serialized as a
+// single U8; guard that the kind still fits, so adding enumerators past 255
+// fails to compile rather than silently truncating on write.
+static_assert(static_cast<int>(WaypointKind::kOther) < 256,
+              "WaypointKind no longer fits in the U8 vertex-record field");
+
+}  // namespace
+
+// The graph section body layout (all string refs point into the shared global
+// pool):
+//   header ints : U32 v, U32 e, U32 airway_count, U32 msa_count,
+//                 U32 first_airport_vertex
+//   vertex records [v] : F64 lat, F64 lon, U32 ident_off/len, U32 region_off/len,
+//                        U8 flags (bit0 = on_network), U8 kind
+//   airport records [v - first_airport_vertex] : I32 elevation_ft
+//   offsets [v + 1] : I32
+//   edges [e] : I32 to, F32 distance_nm, U16 airway_id, I16 base_fl, I16 top_fl,
+//               U8 flags
+//   airways [airway_count] : U32 name_off, U32 name_len
+//   mora : kLatCount * kLonCount I16 cells
+//   msa [msa_count] : U32 center ident off/len, U32 center region off/len,
+//                     U32 airport off/len, U32 arc_count, then per arc
+//                     I32 bearing_from, I32 alt_100ft, I32 radius_nm
+Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, StringPool& pool) {
+  const size_t v = snapshot.coords.size();
+  const size_t e = snapshot.edges.size();
+  if (snapshot.airway_names.size() > 0xFFFF) {
+    return Result<void>::Err(
+        Error(ErrorCode::kParseError, "too many airway names to serialize (> 65535)"));
+  }
+  if (snapshot.offsets.size() != v + 1 || snapshot.idents.size() != v ||
+      snapshot.on_network.size() != v || snapshot.kinds.size() != v) {
+    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent snapshot array sizes"));
+  }
+  const size_t airport_count = v - static_cast<size_t>(snapshot.first_airport_vertex);
+  if (snapshot.first_airport_vertex < 0 || static_cast<size_t>(snapshot.first_airport_vertex) > v ||
+      snapshot.airport_elevations_ft.size() != airport_count) {
+    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent airport array size"));
+  }
+
+  // Section counts, up front so Decode can allocate before reading bodies.
+  w.U32(static_cast<uint32_t>(v));
+  w.U32(static_cast<uint32_t>(e));
+  w.U32(static_cast<uint32_t>(snapshot.airway_names.size()));
+  w.U32(static_cast<uint32_t>(snapshot.msa.size()));
+  w.U32(static_cast<uint32_t>(snapshot.first_airport_vertex));
+
+  // Vertex records: one self-contained record per vertex, gathering all
+  // per-vertex attributes (position, ident, a flags byte, and the point kind).
+  // Adding a new per-vertex field means one more field in this record -- no new
+  // parallel array, no separate section. Airports (vertices
+  // [first_airport_vertex, V)) carry their airport-only attributes in a separate
+  // record section below.
+  for (size_t i = 0; i < v; ++i) {
+    const Coordinate& c = snapshot.coords[i];
+    w.F64(c.latitude);
+    w.F64(c.longitude);
+    const Ident& id = snapshot.idents[i];
+    const auto ir = pool.Add(id.ident);
+    const auto rr = pool.Add(id.region);
+    w.U32(ir.first);
+    w.U32(ir.second);
+    w.U32(rr.first);
+    w.U32(rr.second);
+    uint8_t flags = 0;
+    if (snapshot.on_network[i]) {
+      flags |= 0x01;
+    }
+    w.U8(flags);
+    w.U8(static_cast<uint8_t>(snapshot.kinds[i]));
+  }
+
+  // Airport records: one per airport vertex, in vertex order.
+  for (int elev : snapshot.airport_elevations_ft) {
+    w.I32(elev);
+  }
+
+  // CSR graph structure (not per-vertex attributes, kept as flat arrays):
+  for (int off : snapshot.offsets) {
+    w.I32(off);
+  }
+  for (const GraphEdge& ed : snapshot.edges) {
+    w.I32(ed.to);
+    w.F32(ed.distance_nm);
+    w.U16(ed.airway_id);
+    w.I16(ed.base_fl);
+    w.I16(ed.top_fl);
+    w.U8(ed.flags);
+  }
+  for (const std::string& name : snapshot.airway_names) {
+    const auto nr = pool.Add(name);
+    w.U32(nr.first);
+    w.U32(nr.second);
+  }
+  for (int16_t cell : snapshot.mora.cells()) {
+    w.I16(cell);
+  }
+  for (const MsaSector& s : snapshot.msa) {
+    const auto ci = pool.Add(s.center.ident);
+    const auto cr = pool.Add(s.center.region);
+    const auto ai = pool.Add(s.airport_icao);
+    w.U32(ci.first);
+    w.U32(ci.second);
+    w.U32(cr.first);
+    w.U32(cr.second);
+    w.U32(ai.first);
+    w.U32(ai.second);
+    w.U32(static_cast<uint32_t>(s.arcs.size()));
+    for (const MsaArc& arc : s.arcs) {
+      w.I32(arc.bearing_from);
+      w.I32(arc.alt_100ft);
+      w.I32(arc.radius_nm);
+    }
+  }
+  return Result<void>::Ok();
+}
+
+Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const char* pool,
+                                         size_t pool_len) {
+  ByteReader r(data, size);
+
+  auto bad = [](const char* why) {
+    return Result<GraphSnapshot>::Err(
+        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
+  };
+
+  GraphSnapshot snapshot;
+  const uint32_t v = r.U32();
+  const uint32_t e = r.U32();
+  const uint32_t airway_count = r.U32();
+  const uint32_t msa_count = r.U32();
+  snapshot.first_airport_vertex = static_cast<int>(r.U32());
+
+  // Sanity-check the counts against the bytes actually present BEFORE any
+  // resize, so a corrupt or forged section cannot trigger a huge allocation (and
+  // a bad_alloc/length_error that would bypass Result). Each count must fit in
+  // the remaining bytes at its minimum on-disk element size; this is a necessary
+  // condition, not an exact one -- a fuse, not a full validator. On-disk sizes:
+  // vertex record 34 B (coord 16 + ident refs 16 + flags 1 + kind 1), airport
+  // record 4 B (I32 elevation), offsets 4 B, GraphEdge 15 B (4+4+2+2+2+1), airway
+  // ref 8 B, MSA sector at least 28 B (6xU32 refs + a U32 arc count, EXCLUDING
+  // its variable-length arc array -- each sector's arcs are separately fused
+  // against the then-remaining bytes in the MSA read loop below).
+  //
+  // first_airport_vertex must lie in [0, v]; the airport record section then
+  // holds (v - first_airport_vertex) elevations. An out-of-range value is
+  // rejected here rather than clamped, so the airport count below is trustworthy.
+  if (!r.ok() || snapshot.first_airport_vertex < 0 ||
+      static_cast<uint32_t>(snapshot.first_airport_vertex) > v) {
+    return bad("corrupt .bfdb: first_airport_vertex out of range");
+  }
+  const uint32_t airport_count = v - static_cast<uint32_t>(snapshot.first_airport_vertex);
+  const size_t avail = r.remaining();
+  auto count_fits = [&](uint32_t count, size_t per_elem) {
+    return static_cast<size_t>(count) <= avail / per_elem;
+  };
+  if (!count_fits(v, 34) || !count_fits(airport_count, 4) || !count_fits(e, 15) ||
+      !count_fits(airway_count, 8) || !count_fits(msa_count, 28)) {
+    return bad("corrupt .bfdb: section counts exceed section size");
+  }
+
+  // Vertex records: coord + ident refs + flags + kind, one per vertex. Ident
+  // refs are resolved against the global string pool after the body is read.
+  struct IdentRef {
+    uint32_t io, il, ro, rl;
+  };
+  snapshot.coords.resize(v);
+  snapshot.on_network.assign(v, 0);
+  snapshot.kinds.resize(v);
+  std::vector<IdentRef> ident_refs(v);
+  for (uint32_t i = 0; i < v; ++i) {
+    snapshot.coords[i].latitude = r.F64();
+    snapshot.coords[i].longitude = r.F64();
+    ident_refs[i].io = r.U32();
+    ident_refs[i].il = r.U32();
+    ident_refs[i].ro = r.U32();
+    ident_refs[i].rl = r.U32();
+    const uint8_t flags = r.U8();
+    snapshot.on_network[i] = (flags & 0x01) != 0 ? 1 : 0;
+    snapshot.kinds[i] = static_cast<WaypointKind>(r.U8());
+  }
+  // Airport records: elevation per airport vertex, in vertex order.
+  snapshot.airport_elevations_ft.resize(airport_count);
+  for (uint32_t i = 0; i < airport_count; ++i) {
+    snapshot.airport_elevations_ft[i] = r.I32();
+  }
+  // offsets
+  snapshot.offsets.resize(static_cast<size_t>(v) + 1);
+  r.I32Span(snapshot.offsets.data(), static_cast<size_t>(v) + 1);
+  // edges
+  snapshot.edges.resize(e);
+  for (uint32_t i = 0; i < e; ++i) {
+    GraphEdge ed;
+    ed.to = r.I32();
+    ed.distance_nm = r.F32();
+    ed.airway_id = r.U16();
+    ed.base_fl = r.I16();
+    ed.top_fl = r.I16();
+    ed.flags = r.U8();
+    snapshot.edges[i] = ed;
+  }
+  // airways
+  struct NameRef {
+    uint32_t o, l;
+  };
+  std::vector<NameRef> airway_refs(airway_count);
+  for (uint32_t i = 0; i < airway_count; ++i) {
+    airway_refs[i].o = r.U32();
+    airway_refs[i].l = r.U32();
+  }
+  // mora
+  std::vector<int16_t> cells(static_cast<size_t>(MoraGrid::kLatCount) * MoraGrid::kLonCount);
+  r.I16Span(cells.data(), cells.size());
+  // msa
+  struct MsaRef {
+    uint32_t cio, cil, cro, crl, aio, ail;
+    std::vector<MsaArc> arcs;
+  };
+  std::vector<MsaRef> msa_refs(msa_count);
+  for (uint32_t i = 0; i < msa_count; ++i) {
+    MsaRef& m = msa_refs[i];
+    m.cio = r.U32();
+    m.cil = r.U32();
+    m.cro = r.U32();
+    m.crl = r.U32();
+    m.aio = r.U32();
+    m.ail = r.U32();
+    const uint32_t arc_count = r.U32();
+    // Fuse against the CURRENTLY remaining bytes (shrinks as prior sectors are
+    // consumed), each arc being 12 B (3xI32). A necessary, per-sector bound; the
+    // subsequent reads still degrade safely via r.ok() on any residual mismatch.
+    if (!r.ok() || arc_count > r.remaining() / 12) {
+      return bad("corrupt .bfdb msa section");
+    }
+    m.arcs.resize(arc_count);
+    for (uint32_t a = 0; a < arc_count; ++a) {
+      m.arcs[a].bearing_from = r.I32();
+      m.arcs[a].alt_100ft = r.I32();
+      m.arcs[a].radius_nm = r.I32();
+    }
+  }
+  if (!r.ok()) {
+    return bad("corrupt .bfdb graph section");
+  }
+
+  // Resolve all string references against the global pool.
+  bool refs_ok = true;
+  snapshot.idents.resize(v);
+  for (uint32_t i = 0; i < v; ++i) {
+    const IdentRef& ir = ident_refs[i];
+    snapshot.idents[i].ident = ResolveRef(pool, pool_len, ir.io, ir.il, refs_ok);
+    snapshot.idents[i].region = ResolveRef(pool, pool_len, ir.ro, ir.rl, refs_ok);
+  }
+  snapshot.airway_names.resize(airway_count);
+  for (uint32_t i = 0; i < airway_count; ++i) {
+    snapshot.airway_names[i] =
+        ResolveRef(pool, pool_len, airway_refs[i].o, airway_refs[i].l, refs_ok);
+  }
+  snapshot.mora = MoraGrid::FromCells(std::move(cells));
+  snapshot.msa.resize(msa_count);
+  for (uint32_t i = 0; i < msa_count; ++i) {
+    MsaRef& m = msa_refs[i];
+    snapshot.msa[i].center.ident = ResolveRef(pool, pool_len, m.cio, m.cil, refs_ok);
+    snapshot.msa[i].center.region = ResolveRef(pool, pool_len, m.cro, m.crl, refs_ok);
+    snapshot.msa[i].airport_icao = ResolveRef(pool, pool_len, m.aio, m.ail, refs_ok);
+    snapshot.msa[i].arcs = std::move(m.arcs);
+  }
+  if (!refs_ok) {
+    return bad("corrupt .bfdb: field or reference out of range");
+  }
+  return Result<GraphSnapshot>::Ok(std::move(snapshot));
+}
+
+}  // namespace bf

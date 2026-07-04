@@ -32,9 +32,10 @@ class GraphBuilder {
   // graph construction.
   static GraphBuilder FromSnapshot(GraphSnapshot&& snapshot);
 
-  // Export the built graph and metadata as a cache snapshot for GraphCache::Build
-  // (the `bf build` path). `data_dir`/`cycle`/`build` become the snapshot header.
-  GraphSnapshot ToSnapshot(const std::string& data_dir, uint32_t cycle, uint32_t build) const;
+  // Export the built graph as a cache snapshot for GraphCodec::Encode (the `bf
+  // build` path). The snapshot holds only graph data now; AIRAC/provenance lives
+  // in the unified container header, not the snapshot.
+  GraphSnapshot ToSnapshot() const;
 
   const NavGraph& graph() const { return graph_; }
 

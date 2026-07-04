@@ -149,14 +149,13 @@ TEST_CASE("query: navaid detail lookup carries freq/range/elevation", "[integrat
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  // The detail cache is a sibling of the graph cache; when opened from raw data
-  // it is built in-memory. Either way DGC (a VOR) must carry sane attributes.
+  // Navaid detail comes from the unified file's detail section (cache path) or
+  // is built in-memory (raw-data path). Either way DGC (a VOR) must carry sane
+  // attributes.
   auto r = db->LookupNavaidDetails({"DGC", "ZZ_NOT_REAL_ZZ"});
   REQUIRE(r.size() == 2);
   if (r[0].empty()) {
-    SKIP(
-        "no navaid detail cache available (raw-data path builds it; cache path "
-        "needs a sibling nav_detail.bfdb)");
+    SKIP("no navaid detail available (the .bfdb has no detail section)");
   }
   const bf::NavaidDetailInfo& d = r[0][0];
   CHECK(d.ident == "DGC");

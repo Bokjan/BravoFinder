@@ -13,12 +13,13 @@ add_executable(bf_tests
                unit/route_json_test.cc
                unit/small_vec_test.cc
                unit/bfdb_naming_test.cc
-               unit/nav_detail_cache_test.cc
+               unit/nav_detail_codec_test.cc
                integration/route_integration_test.cc
                integration/query_test.cc
-               integration/graph_cache_test.cc
+               integration/graph_codec_test.cc
                integration/bfdb_inventory_test.cc
-               integration/cifp_cache_test.cc
+               integration/cifp_codec_test.cc
+               integration/unified_cache_test.cc
                integration/mcp_registry_test.cc)
 
 target_link_libraries(bf_tests PRIVATE bf::io bf_mcp_lib Catch2::Catch2WithMain)
