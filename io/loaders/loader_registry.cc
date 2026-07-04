@@ -1,18 +1,51 @@
 #include "io/loaders/loader_registry.h"
 
+#include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "io/loaders/xplane12/xplane12_loader.h"
 
 namespace bf {
+namespace {
+
+using FactoryFn = std::unique_ptr<Loader> (*)();
+
+std::unique_ptr<Loader> MakeXPlane12Loader() {
+  return std::make_unique<XPlane12Loader>();
+}
+
+struct Entry {
+  std::string_view name;
+  FactoryFn factory;
+};
+
+// Sorted by name — enforced by the static_assert below. New loaders go here, in
+// alphabetical order.
+constexpr std::array kRegistry = {
+    Entry{"xplane12", MakeXPlane12Loader},
+};
+
+static_assert(std::is_sorted(kRegistry.begin(), kRegistry.end(),
+                             [](const Entry& a, const Entry& b) {
+                               return a.name < b.name;
+                             }),
+              "kRegistry entries must be sorted alphabetically by name");
+
+}  // namespace
 
 Result<std::unique_ptr<Loader>> MakeLoader(const std::string& name) {
-  if (name == "xplane12") {
-    return Result<std::unique_ptr<Loader>>::Ok(std::make_unique<XPlane12Loader>());
+  const auto it = std::lower_bound(
+      kRegistry.begin(), kRegistry.end(), name,
+      [](const Entry& entry, const std::string& key) { return entry.name < key; });
+
+  if (it == kRegistry.end() || it->name != name) {
+    return Result<std::unique_ptr<Loader>>::Err(
+        Error(ErrorCode::kInvalidArgument, "unknown loader: " + name));
   }
-  return Result<std::unique_ptr<Loader>>::Err(
-      Error(ErrorCode::kInvalidArgument, "unknown loader: " + name));
+  return Result<std::unique_ptr<Loader>>::Ok(it->factory());
 }
 
 }  // namespace bf
