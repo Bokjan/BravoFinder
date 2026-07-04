@@ -97,7 +97,7 @@ Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O
 据此**否决了几个直觉性优化**（数据说话）：
 
 - **栈局部 buffer / thread_local 复用搜索数组**——分配/初始化（`SeedTable` 类）合计仅 ~1%，且
-  省不掉躲不掉的 O(V) 初始化；thread_local 还违反"无全局可变状态"，线程池下每线程 ~5.4MB 永久
+  省不掉躲不掉的 O(V) 初始化；thread_local 还违反「无全局可变状态」，线程池下每线程 ~5.4MB 永久
   常驻。不做。
 - **Yen 禁集 `std::set` → 排序 vector**——仅 ~0.1%，噪声级收益。不做。
 - **`CostOfPath` 线性找边改二分**——profile 里 ~0.2%，且会改 `.bfdb` 布局需 bump
@@ -155,7 +155,7 @@ for i in 1 2 3 4 5; do /usr/bin/time -p bf route KJFK KLAX --db /tmp/nav.bfdb >/
 （`core/graph/astar.*` + `yen_kshortest.*`）已固化在 `bench/variants/{baseline,memoize,lawler}/`，
 `bench/decompose.sh` 用 `-DBRAVOFINDER_BENCH_VARIANT` 分别编译对照二进制，无需 checkout
 git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编译微基准（把 `core/`+`io/`
-的 .cc 与基准一起编，需 `-I build/<preset>/core` 找生成的 `version.h`），跑一轮后
+的 。cc 与基准一起编，需 `-I build/<preset>/core` 找生成的 `version.h`），跑一轮后
 `gprof <bin> gmon.out`。基准工具默认不入构建（`BRAVOFINDER_BUILD_BENCH=OFF`），复现步骤见
 `bench/README.md`。
 

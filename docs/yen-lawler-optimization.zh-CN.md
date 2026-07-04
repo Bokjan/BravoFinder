@@ -11,7 +11,7 @@ BravoFinder 用 Yen 算法求前 K 条候选航路（`FindKShortestPathsMulti`�
 
 - **A 集**：已接受的路径（最终结果）。
 - **B 集**：候选路径，按成本排序。
-- 每接受一条路径后，对它的**每个节点**做一次 "spur 搜索"（从该节点重新搜到终点，
+- 每接受一条路径后，对它的**每个节点**做一次 「spur 搜索」（从该节点重新搜到终点，
   并禁掉会重复已有路径的边），把结果塞进 B 集，再从 B 集取最便宜的作为下一条。
 
 在真实数据（V=270,821 顶点）上实测：
@@ -45,7 +45,7 @@ root 完全相同；而每一轮都会穷尽该 root 下的所有偏离 → 这�
 **三个正确性前提**（对照本仓库实现）：
 
 1. **B 集跨轮持久化，不清空。** ✅ `candidates` 定义在 `kth` 循环外。
-2. **edge-ban 用"同前缀才禁"语义、跨轮一致。** ✅ 见 `std::equal(root..., p.vertices...)`
+2. **edge-ban 用「同前缀才禁」语义、跨轮一致。** ✅ 见 `std::equal(root..., p.vertices...)`
    —— 只禁与当前 root 同前缀的已知路径的分叉边，**不是**禁全部已接受路径。这一点在引入
    Lawler 之前就写对了，是 Lawler 能成立的基础。
 3. **每条候选记住自己的 deviation index，接受后据此决定下轮 spur 起点。** 这是本次新增：
@@ -58,10 +58,10 @@ root 完全相同；而每一轮都会穷尽该 root 下的所有偏离 → 这�
 航路网的候选点）和**多个终止 fix**（STAR 接手点）之间求 K 条，每个端点带一个 seed 成本
 （程序段估算距离）。
 
-实现上用一个**概念超源**：循环索引 `i = -1` 表示"在超源处偏离"，即重跑多源搜索、禁掉
+实现上用一个**概念超源**：循环索引 `i = -1` 表示「在超源处偏离」，即重跑多源搜索、禁掉
 已用过的起始 fix，从而换一个不同的 SID/STAR 入口。`i ≥ 0` 是普通的单源→多汇 spur。
 
-**Lawler 对这个变体仍成立的论证**：把"超源 → 首个 fix"看作路径的第 `-1 → 0` 段，则多源
+**Lawler 对这个变体仍成立的论证**：把「超源 → 首个 fix」看作路径的第 `-1 → 0` 段，则多源
 Yen 与标准 Yen **同构**，deviation node 概念平移即可，唯一区别是 deviation index 的取值域
 要**含 -1**。所以：
 
@@ -69,8 +69,8 @@ Yen 与标准 Yen **同构**，deviation node 概念平移即可，唯一区别�
 - 一条候选若在 `i=-1` 生成，deviation = -1；在 `i≥0` 生成则 deviation = i。
 - 下一轮 `for (int i = last_deviation; ...)` 从该值起，自然涵盖 -1 的情形。
 
-超源无实体、不进 `banned_nodes`，唯一特殊处理就是 `i<0` 时走"重跑多源 + 禁起始 fix"分支
-——这与标准 Lawler 的"从最小 deviation index 起"完全一致。
+超源无实体、不进 `banned_nodes`，唯一特殊处理就是 `i<0` 时走「重跑多源 + 禁起始 fix」分支
+——这与标准 Lawler 的「从最小 deviation index 起」完全一致。
 
 ## 4. 实现要点（`core/graph/yen_kshortest.cc`）
 
@@ -84,13 +84,13 @@ Yen 与标准 Yen **同构**，deviation node 概念平移即可，唯一区别�
 
 ## 5. 验证：差分对拍（golden-reference testing）
 
-Lawler 是纯优化 → 前后结果必须逐条一致。这一点**必须**被测试锁死，否则"少算了一条候选"
+Lawler 是纯优化 → 前后结果必须逐条一致。这一点**必须**被测试锁死，否则「少算了一条候选」
 这种 bug 极难察觉。`tests/unit/yen_test.cc` 用两层验证：
 
 1. **固定黄金签名**：两个 4×3 lattice 图，硬编码优化前捕获的完整候选序列（cost + 顶点
    列表），改动后必须逐字节复现。
 2. **随机差分对拍**：测试文件内置一个**独立的朴素 Yen 参考实现**（从 i=0 / i=-1 全 spur、
-   无 deviation 跟踪，即"没有 Lawler 的教科书 Yen"），在 **400 组随机小图**（单源 200 +
+   无 deviation 跟踪，即「没有 Lawler 的教科书 Yen」），在 **400 组随机小图**（单源 200 +
    多源 200，k=1..10，固定种子可复现）上与 Lawler 版对拍，要求 tie-break **完全一致**
    （cost 后按 vertices）、结果逐条相同。两个独立实现互验，覆盖面远超固定样例。
 
@@ -112,6 +112,6 @@ Lawler 是纯优化 → 前后结果必须逐条一致。这一点**必须**被�
 
 ## 7. 参考
 
-- Yen, J. Y. (1971). "Finding the K Shortest Loopless Paths in a Network."
-- Lawler, E. L. (1972). 对 Yen 的改进（避免重复 spur 计算）。
-- 维基："Yen's algorithm"（含 Lawler 修改的描述）。
+- Yen, J. Y. (1971). 「Finding the K Shortest Loopless Paths in a Network.」
+- Lawler, E. L. (1972)。 对 Yen 的改进（避免重复 spur 计算）。
+- 维基：「Yen's algorithm」（含 Lawler 修改的描述）。

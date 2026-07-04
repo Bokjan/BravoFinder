@@ -12,7 +12,7 @@
 边界：契约保证的是*同一实例多线程查询* 与 *多实例并行*；**不**保证对 `NavDatabase` 做并发的
 移动赋值/析构等生命周期操作（构造/移动/析构仍须单线程编排）。
 
-## 2. 为什么这是"契约"而非"实现细节"
+## 2. 为什么这是「契约」而非「实现细节」
 
 v2 的重写动机之一就是它满是 `static` 局部变量跨实例共享状态，多数据集场景下读到错误的顶点表。
 v3 从第一天就立规矩：**无 `static`/全局可变状态，每个数据库实例自包含**。并发安全是这条规矩
@@ -57,10 +57,10 @@ mutex 放在 `unique_ptr` 里，是为了让 `NavDatabase` 保持可移动（`st
 - 之后 `ProceduresFor` 只读已存在项，**跳过锁**（`cifp_eager_` 标志决定是否加锁）；
 - **无插入 = 无 rehash = 无数据竞争** → 契约 B 天然成立，无需任何锁。
 
-> ⚠️ **这不是"缺锁"，是"冻结后无锁读"**——审计时勿误判。两种模式复用同一个
+> ⚠️ **这不是「缺锁」，是「冻结后无锁读」**——审计时勿误判。两种模式复用同一个
 > `procedure_cache_` 容器，由 `cifp_eager_` 标志决定读路径是否加锁。
 
-实测 eager 常驻 +102MB（192283 程序 / 764942 legs），on-demand 仅 +1.5MB。CLI 单次查询用
+实测 eager 常驻 +102MB（192283 程序 / 764942 legs），on-demand 仅 +1.5MB.CLI 单次查询用
 on-demand 最优；长驻服务用 eager。
 
 ## 6. CIFP 缓存的 Fetch：共享只读句柄 + 定位读
@@ -71,9 +71,9 @@ on-demand 最优；长驻服务用 eager。
 任何锁**。段体引用直指 `CifpArchive` 持有的只读全局字符串池（一个 const `std::string`），
 resolve 也无共享可变状态。
 
-早期版本是"每次 Fetch 开一个独立 `ifstream`"——也 race-free，但每次调用都付一次 `open` 系统
-调用。当年否决共享句柄的理由是"`ifstream`/`FILE*` 带一个共享文件游标 → seek+read 非原子 →
-需要加锁"；`pread`/`OVERLAPPED` 的定位读把偏移作为参数传入、不碰游标，正好绕过这个游标问题,
+早期版本是「每次 Fetch 开一个独立 `ifstream`」——也 race-free，但每次调用都付一次 `open` 系统
+调用。当年否决共享句柄的理由是「`ifstream`/`FILE*` 带一个共享文件游标 → seek+read 非原子 →
+需要加锁」；`pread`/`OVERLAPPED` 的定位读把偏移作为参数传入、不碰游标，正好绕过这个游标问题，
 于是共享句柄既省掉 per-fetch open、又不引入锁。句柄由 `PreadFile`（RAII）持有，使 `CifpArchive`
 成为 move-only。
 
@@ -90,7 +90,7 @@ closed 数组、优先队列、Yen 的候选集与 deviation 索引，全部在�
 
 ## 8. 验证：独立 tsan 预设 + 8 线程压测
 
-契约 B 不是靠"看起来对"，而是用 **ThreadSanitizer**（独立的 `tsan` 预设，与 ASan 的 `debug`
+契约 B 不是靠「看起来对」，而是用 **ThreadSanitizer**（独立的 `tsan` 预设，与 ASan 的 `debug`
 分开）+ 8 线程并发集成测试锁死：
 
 - 混同 key 压缓存竞争（多线程查同一机场）、异 key 压并行解析与 rehash（查不同机场）；

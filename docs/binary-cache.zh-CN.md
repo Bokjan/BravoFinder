@@ -1,6 +1,6 @@
-# 跨平台二进制缓存：统一 .bfdb
+# 跨平台二进制缓存：统一 。bfdb
 
-> 把 ~1.5s 的"解析 + 建图"变成 ~50ms 的"读文件"，且文件在 x86/ARM 之间可移植、单文件
+> 把 ~1.5s 的「解析 + 建图」变成 ~50ms 的「读文件」，且文件在 x86/ARM 之间可移植、单文件
 > 部署。面向想理解缓存格式取舍的读者。相关代码：`io/cache/`（`byte_io.h`、`unified_cache.*`
 > 容器 + `graph_codec.*`／`cifp_codec.*`／`nav_detail_codec.*` 三段 codec、`graph_snapshot.h`）、
 > `io/graph_builder.cc`（`FromSnapshot`/`ToSnapshot`）。
@@ -8,7 +8,7 @@
 ## 1. 问题：每次启动都要重新解析建图
 
 X-Plane 数据全量解析 + 建图有成本（解析 ARINC 424 尤甚）。冷启动 release 实测 ~2.27s、
-debug ~7.6s。对一个"快速出结果"的 CLI，这个启动开销不可接受——尤其你只想查一条航路。
+debug ~7.6s。对一个「快速出结果」的 CLI，这个启动开销不可接受——尤其你只想查一条航路。
 
 方案：`bf build` 把建好的图 + 程序 + 导航台细节序列化成**一个**紧凑二进制 `.bfdb`，
 `bf route --db` 直接反序列化跳过全部解析。实测 **release 2.27s → 0.20s（~11×）**，
@@ -18,13 +18,13 @@ debug 7.6s → 1.4s，两条路径产出逐字节相同。单文件 57.3MB（含
 ## 2. 核心取舍：显式定宽小端，而不是 mmap
 
 早期设想过 mmap（零拷贝、直接把文件映射成内存结构）。**M4 推翻了这个方向**，原因是它与
-"跨平台可移植"直接冲突：
+「跨平台可移植」直接冲突：
 
 - mmap 零拷贝要求**磁盘布局 = 内存布局**，会把 struct padding、字节序、`sizeof` 焊死进文件；
 - x86 和 ARM 的布局/对齐可能不同，一个平台产出的文件另一个平台读不了；
 - 而单进程 CLI 场景，mmap 省下的那点 memcpy（~10ms）相对建图成本可忽略。
 
-用户明确"可移植优先、mmap 不重要"，所以改为**显式逐字段序列化**：
+用户明确「可移植优先、mmap 不重要」，所以改为**显式逐字段序列化**：
 
 - 整数一律**定宽小端**（LSB first），与主机字节序无关；
 - 浮点写 **IEEE-754 位模式**（`memcpy` 到同宽无符号整数），当前所有平台共享，精确往返；
@@ -40,9 +40,9 @@ debug 7.6s → 1.4s，两条路径产出逐字节相同。单文件 57.3MB（含
 把冷热数据分开就不会把没用的 ident 拉进 cache 行。
 
 但**磁盘格式不必跟随内存布局**——它只在 `Open` 时顺序读一遍、再分发填回各 SoA 数组，磁盘上
-是 AoS 还是 SoA 对运行时零影响。早期版本盲目照抄内存 SoA，把每个属性写成一段独立的平行数组,
-于是"加一个 per-vertex 字段"= 多一条平行数组 + `Build`/`Open` 各加一段 + 手工维护 `size==V`
-不变量，越加越散。这正是第 2 节"mmap 焊死磁盘=内存布局"的反面教训在自研格式里的翻版。
+是 AoS 还是 SoA 对运行时零影响。早期版本盲目照抄内存 SoA，把每个属性写成一段独立的平行数组，
+于是「加一个 per-vertex 字段」= 多一条平行数组 + `Build`/`Open` 各加一段 + 手工维护 `size==V`
+不变量，越加越散。这正是第 2 节「mmap 焊死磁盘=内存布局」的反面教训在自研格式里的翻版。
 
 v3 起磁盘改为**逐顶点一条自包含 record**（`coord + ident 引用 + flags + kind`）：加一个
 per-vertex 字段就是 record 里多一个字段，没有新平行数组、没有 size 不变量。**机场专属字段**
@@ -56,7 +56,7 @@ per-vertex 字段就是 record 里多一个字段，没有新平行数组、没�
 
 ## 4. 与 protobuf 的异同
 
-同样是"逐字段、不 dump struct、浮点 IEEE754 小端"。但我们刻意不同：
+同样是「逐字段、不 dump struct、浮点 IEEE754 小端」。但我们刻意不同：
 
 - **定宽而非 varint**：我们的 offsets/顶点索引普遍是大整数，定宽更快、且能配合扩容前置分配；
 - **无 per-field tag**：`.bfdb` 是单一生产者 + 单一消费者的本地私有缓存，格式演进靠文件头的
@@ -79,7 +79,7 @@ per-vertex 字段就是 record 里多一个字段，没有新平行数组、没�
 曾考虑把 idents/airway 名全改成 `string_view` + 集中字符串池省内存。**实测否决**：cycle 2601
 数据里 ident 最长 5 字符、region 1–2、airway 名 99%+ ≤10 字符，**全部落在 libc++ SSO（22B）
 阈值内 → 本就零堆分配**。view 化的主收益（消堆分配）不存在，代价却是贯穿全 API 的 lifetime
-契约，还逆了"领域类型是不可变值类型"的设计宪法。
+契约，还逆了「领域类型是不可变值类型」的设计宪法。
 
 结论：**运行时保持拥有型 `Ident`（全 SSO，无碎片）；只在序列化文件层**用 `{u32 offset, u32 len}`
 引用字符串池令文件紧凑，加载后重建回拥有型。鱼与熊掌部分兼得、零 lifetime 风险、零 API 改动。
@@ -112,7 +112,7 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 
 早期是**三个文件**（图 `nav_*.bfdb`、程序 `*_cifp.bfdb`、细节 `*_detail.bfdb`），靠文件名
 派生关联。问题：部署要管三个文件、文件名派生是隐式契约、三段可能来自不同 AIRAC cycle 而错配、
-且 CIFP 每段局部池导致字符串大量重复。现在合并为**一个统一 `.bfdb`**（magic 仍 "BFDB"）：
+且 CIFP 每段局部池导致字符串大量重复。现在合并为**一个统一 `.bfdb`**（magic 仍 「BFDB」）：
 
 ```
 [file header]   magic "BFDB", format_version, section_count, cycle,
@@ -174,7 +174,7 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 - **容器 `UnifiedCache`**：唯一做文件 I/O 的一层，拥有文件头、段表、全局池、以及**唯一**的容器级
   `format_version`。`Build` 编排三段 codec 写盘，`Open` 读回并分发，`ReadHeader` 只读容器头
   （cycle + provenance）供 `BfdbInventory` 廉价编目。
-- **三段 codec `GraphCodec`/`CifpCodec`/`NavDetailCodec`**：只管"结构体 ↔ bytes"，不碰文件、不写
+- **三段 codec `GraphCodec`/`CifpCodec`/`NavDetailCodec`**：只管「结构体 ↔ bytes」，不碰文件、不写
   文件头、无自己的版本号。`Encode(…, ByteWriter&, StringPool&)` 把段体追加进容器给的 writer、
   把串 intern 进容器给的全局池；`Decode(bytes, pool)` 反之。
 
@@ -188,9 +188,9 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 
 1. **程序 semver**（CMake `project VERSION` → `core/version.h` 的 `kBravoFinderVersion` →
    `bf --version`）；
-2. **容器 `format_version`**（magic "BFDB"，当前 = 4），机器校验，不符走
+2. **容器 `format_version`**（magic 「BFDB」，当前 = 4），机器校验，不符走
    `Result::Err(kFormatMismatch)`，提示重跑 `bf build`。**只此一个版本号**管全部布局——
-   统一容器一次性产出三段，不存在"只改 graph 段但 CIFP 段保持旧版"的场景，故不设 per-section
+   统一容器一次性产出三段，不存在「只改 graph 段但 CIFP 段保持旧版」的场景，故不设 per-section
    版本号（那是过度设计）；
 3. **provenance**：程序 semver + source_loader + AIRAC cycle 写进容器头。
 
@@ -204,9 +204,9 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 ## 11. 健壮性：损坏文件优雅报错，不崩溃
 
 反序列化面对的是可能损坏/截断/伪造的文件。所有从文件头读出的**计数字段**（顶点/边/airway/
-段数、串长）在 `resize` 之前都用"剩余字节 ÷ 每元素最小磁盘字节数"设上界，越界即走
+段数、串长）在 `resize` 之前都用「剩余字节 ÷ 每元素最小磁盘字节数」设上界，越界即走
 `Result::Err`，绝不因 `bad_alloc`/`length_error` 崩溃。段表里每个存在的段偏移/段长在 `Open`
-时与文件大小交叉校验；CIFP 段内相对偏移与 CIFP 段长交叉校验。这条"损坏走 Result 而非崩溃"
+时与文件大小交叉校验；CIFP 段内相对偏移与 CIFP 段长交叉校验。这条「损坏走 Result 而非崩溃」
 是格式的正确性契约。
 
 ## 12. 小结
