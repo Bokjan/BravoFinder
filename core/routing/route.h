@@ -33,9 +33,9 @@ inline const char* ToString(ConnectionKind k) {
 // A single leg of a computed route: a segment from one point to the next via a
 // named airway (or "DCT" for a direct leg).
 struct RouteLeg {
-  std::string from;
-  std::string to;
-  std::string via;  // the single filed ATS route designator, or "DCT"
+  std::string from{};
+  std::string to{};
+  std::string via{};  // the single filed ATS route designator, or "DCT"
   double distance_nm = 0.0;
 
   // When the underlying airway segment is a concurrency (two or more named
@@ -47,8 +47,8 @@ struct RouteLeg {
 
 // A point along a computed route, for display / export.
 struct RoutePoint {
-  std::string ident;
-  Coordinate coord;
+  std::string ident{};
+  Coordinate coord{};
 };
 
 // A computed route between two endpoints.

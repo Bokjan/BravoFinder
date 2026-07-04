@@ -99,17 +99,17 @@ enum class ProcedureType {
 // (runway transition, common segment, enroute transition).
 struct Procedure {
   ProcedureType type = ProcedureType::kSid;
-  std::string name;              // procedure name, e.g. "DEEZZ5" (column 3)
-  std::string transition_ident;  // runway "RW31L", fix "CANDR", or "ALL" (col 4)
-  std::string runway;            // resolved runway ident if transition is one
-  int route_type = 0;            // ARINC 424 route type (column 2), kept raw
+  std::string name{};              // procedure name, e.g. "DEEZZ5" (column 3)
+  std::string transition_ident{};  // runway "RW31L", fix "CANDR", or "ALL" (col 4)
+  std::string runway{};            // resolved runway ident if transition is one
+  int route_type = 0;              // ARINC 424 route type (column 2), kept raw
   std::vector<ProcedureLeg> legs;
 };
 
 // A runway threshold, parsed from a CIFP "RWY:" record. Used as a graph vertex
 // when wiring procedures so a route can begin/end at the actual runway.
 struct Runway {
-  std::string ident;     // e.g. "RW31L"
+  std::string ident{};   // e.g. "RW31L"
   Coordinate threshold;  // threshold position
   int elevation_ft = 0;
 };

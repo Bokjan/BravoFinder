@@ -43,15 +43,16 @@ bf::GraphSnapshot MakeGraph() {
 // A CifpData with one procedure and one runway, its strings drawn to overlap
 // with the graph's idents so the global pool dedupes across sections.
 bf::CifpData MakeCifp() {
-  bf::CifpData d;
-  bf::Procedure p;
-  p.type = bf::ProcedureType::kSid;
-  p.name = "TESTSID";
-  p.runway = "04L";
-  bf::ProcedureLeg leg;
+  bf::CifpData d{};
+  bf::ProcedureLeg leg{};
   leg.fix = bf::Ident("WAYPT", "K6");  // same string as a graph ident
   leg.path_term = bf::PathTerminator::kTF;
-  p.legs.push_back(leg);
+  bf::Procedure p{
+      .type = bf::ProcedureType::kSid,
+      .name = "TESTSID",
+      .runway = "04L",
+      .legs = {leg},
+  };
   d.procedures.push_back(std::move(p));
   bf::Runway rwy;
   rwy.ident = "04L";

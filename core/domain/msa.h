@@ -23,7 +23,7 @@ struct MsaArc {
 // earth_msa.dat and indexed by airport ICAO.
 struct MsaSector {
   Ident center;  // the fix the sectors are measured from
-  std::string airport_icao;
+  std::string airport_icao{};
   std::vector<MsaArc> arcs;
 };
 

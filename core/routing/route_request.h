@@ -28,8 +28,8 @@ struct FlRange {
 // a waypoint ident, plus optional altitude/level preferences that drive the
 // constraint layer.
 struct RouteRequest {
-  std::string departure;
-  std::string arrival;
+  std::string departure{};
+  std::string arrival{};
 
   // Cruise altitude as an inclusive flight-level range, e.g. {350, 350} for a
   // single FL350 or {300, 400} for "anywhere FL300-FL400". When unset,
@@ -45,8 +45,8 @@ struct RouteRequest {
   // Optional runway filters for procedure selection. When set, only SIDs/STARs
   // serving that runway (or runway-independent ones) are considered for the
   // departure/arrival airport. Empty means "any runway".
-  std::string departure_runway;
-  std::string arrival_runway;
+  std::string departure_runway{};
+  std::string arrival_runway{};
 
   // Optional SID/STAR selection by name. When set, only the named procedure is
   // used to connect the departure/arrival airport; a bare name ("DEEZZ5")
@@ -54,8 +54,8 @@ struct RouteRequest {
   // transition. Empty means "choose automatically". Composes with the runway
   // filters. If the airport publishes no matching procedure, FindRoutes returns
   // an Error rather than silently falling back.
-  std::string departure_sid;
-  std::string arrival_star;
+  std::string departure_sid{};
+  std::string arrival_star{};
 
   // Waypoints the route must not pass through, as an ident ("BOTON") or a full
   // "IDENT/REGION" key ("BOTON/LF"). A bare ident avoids every region's match,

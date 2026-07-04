@@ -12,8 +12,8 @@ namespace bf {
 // region) pair is what uniquely identifies a point, so it is modeled as one
 // value type and used as the lookup key throughout.
 struct Ident {
-  std::string ident;
-  std::string region;  // two-letter ICAO region code, e.g. "K6"
+  std::string ident{};
+  std::string region{};  // two-letter ICAO region code, e.g. "K6"
 
   Ident() = default;
   Ident(std::string id, std::string reg) : ident(std::move(id)), region(std::move(reg)) {}

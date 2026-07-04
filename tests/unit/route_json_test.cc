@@ -30,7 +30,7 @@ TEST_CASE("WriteRouteJson emits concurrent_airways only on concurrency legs", "[
   plain.from = "A";
   plain.to = "B";
   plain.via = "Y28";
-  bf::RouteLeg concurrent;
+  bf::RouteLeg concurrent{};
   concurrent.from = "B";
   concurrent.to = "C";
   concurrent.via = "Y28";
