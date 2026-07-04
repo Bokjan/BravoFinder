@@ -1,7 +1,7 @@
 # 线程安全契约 B：一个数据库，多线程并发查询
 
 > 从一开始就立的设计约束，不是事后补丁。面向想在 Web / 批量场景并发调用 BravoFinder 的
-> 读者。相关代码：`io/nav_database.{h,cc}`、`io/cache/cifp_cache.*`、`core/graph/`。
+> 读者。相关代码：`io/nav_database.{h,cc}`、`io/cache/cifp_codec.*`、`core/graph/`。
 
 ## 1. 契约内容
 
@@ -65,9 +65,11 @@ on-demand 最优；长驻服务用 eager。
 
 ## 6. CIFP 缓存的 Fetch：共享只读句柄 + 定位读
 
-按需加载从 `nav_cifp.bfdb` 取段时，`CifpArchive::Fetch` 在 `Open` 时打开的**一个只读句柄**上做
-**定位读**（POSIX `pread` / Windows `ReadFile` + `OVERLAPPED`）：两者都按显式偏移读、**不改动
-任何共享文件位置**，故并发 Fetch 不同机场无数据竞争，**这一层不需要任何锁**。
+按需加载从统一 `.bfdb` 的 CIFP 段取段时，`CifpArchive::Fetch` 在 `Open` 时打开的**一个只读句柄**
+（指向整个 `.bfdb`）上做**定位读**（POSIX `pread` / Windows `ReadFile` + `OVERLAPPED`）：两者都按
+显式绝对偏移读、**不改动任何共享文件位置**，故并发 Fetch 不同机场无数据竞争，**这一层不需要
+任何锁**。段体引用直指 `CifpArchive` 持有的只读全局字符串池（一个 const `std::string`），
+resolve 也无共享可变状态。
 
 早期版本是"每次 Fetch 开一个独立 `ifstream`"——也 race-free，但每次调用都付一次 `open` 系统
 调用。当年否决共享句柄的理由是"`ifstream`/`FILE*` 带一个共享文件游标 → seek+read 非原子 →

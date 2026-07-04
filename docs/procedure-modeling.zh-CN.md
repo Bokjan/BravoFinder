@@ -94,9 +94,9 @@ CLI/JSON 会显式标注 "RADAR VECTORS"，把"雷达引导"和"缺数据"两种
 
 ## 7. 单文件部署：CIFP 分段缓存
 
-14838 个 CIFP 散文件不便部署。引擎把它们打包成一个分段索引缓存 `nav_cifp.bfdb`，按需加载
-单机场程序段，启动仍是毫秒级。这属于缓存工程，单独成文见
-[binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
+14838 个 CIFP 散文件不便部署。引擎把它们打包成统一 `.bfdb` 里的一个**分段 CIFP 段**（与 graph、
+detail 同处一个文件、共用全局字符串池），按需加载单机场程序段，启动仍是毫秒级。这属于缓存
+工程，单独成文见 [binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
 
 ## 8. 小结
 

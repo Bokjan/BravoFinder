@@ -25,16 +25,17 @@ X-Plane 数据的解析 + 建图有固定成本（ARINC 424 解析尤重）。`b
 `.bfdb` 缓存，`bf route --db` 反序列化跳过全部解析。
 
 **方法**：`bf route KJFK KLAX` 端到端墙钟时间（含进程启动/退出），各 5 次取稳定值。
+release 构建，cycle 2601，32 核工作站。
 
 | 路径 | release | 说明 |
 |---|---|---|
-| 冷启动 `--data navdata`（解析 + 建图） | **~1.58 s** | 每次都重新解析 |
-| 缓存加载 `--db nav.bfdb` | **~0.07 s** | 反序列化，跳过解析 |
+| 冷启动 `--data navdata`（解析 + 建图） | **~2.27 s** | 每次都重新解析 |
+| 缓存加载 `--db nav.bfdb`（on-demand） | **~0.20 s** | 反序列化，跳过解析 |
 
-**约 23× 端到端提速**（1.58s → 0.07s）。`bf build` 本身（一次性，换 AIRAC 周期才跑）
-在此机上 ~2.7s，产出图缓存 17.9 MB + CIFP 缓存 46.6 MB。
+**约 11× 端到端提速**（2.27s → 0.20s）。`bf build` 本身（一次性，换 AIRAC 周期才跑）
+在此机上 ~3.2s，产出一个统一 `.bfdb`（graph + CIFP + detail）57.3 MB。
 
-> debug 预设（含 ASan/UBSan）下冷启动 ~7.7s、缓存 ~0.9s，量级一致。
+> debug 预设（含 ASan/UBSan）下冷启动 ~7.6s、缓存 ~1.4s，量级一致。
 
 ## 3. 查询耗时与优化分解
 
@@ -113,12 +114,17 @@ Lawler 之后再做了一轮带符号采样（`sample`，KJFK→KLAX k=10）。�
 
 ## 6. 缓存文件大小
 
-| 文件 | 大小 | 内容 |
-|---|---:|---|
-| `nav.bfdb` | 17.9 MB | 图（CSR coords/offsets/edges + on-network + idents + airway 名 + MORA + MSA + 字符串池） |
-| `nav_cifp.bfdb` | 46.6 MB | 14838 机场分段程序（结构化后远小于 ~105MB 原始 CIFP 文本） |
+一个统一 `nav_<cycle>.bfdb` 装三段（graph + CIFP + detail），共用一个全局字符串池：
 
-格式与取舍见 [binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
+| 段 | 约占 | 内容 |
+|---|---:|---|
+| graph | ~16 MB | CSR coords/offsets/edges + on-network + idents + airway 名 + MORA + MSA |
+| cifp | ~40 MB | 14838 机场分段程序（结构化后远小于 ~105MB 原始 CIFP 文本） |
+| detail | ~2 MB | 导航台细节 + 等待航线 |
+| 全局池 | ~1.5 MB | 三段共用，去重后（三段各自局部池之和 ~8.7MB → −83%） |
+
+整文件实测 ~57 MB（cycle 2601），比旧三文件分离省 ~8MB（全局池去重）。格式与取舍见
+[binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
 
 ## 7. 如何复现
 
@@ -144,7 +150,7 @@ for i in 1 2 3 4 5; do /usr/bin/time -p bf route KJFK KLAX --db /tmp/nav.bfdb >/
 
 ## 8. 小结
 
-- **启动**：缓存把冷启动 1.58s 降到 0.07s，**~23×**（换 AIRAC 才需重建，2.7s 一次性）。
+- **启动**：缓存把冷启动 2.27s 降到 0.20s，**~11×**（换 AIRAC 才需重建，3.2s 一次性）。
 - **查询**：memoize + Lawler 叠加，k=10 从 62.8ms 降到 24.6ms，**2.55×**；k=1 零退化；收益随 k 增长。
 - **止步有据**：profile 显示剩余 ~74% 是 A* 遍历固有成本，据此否决了三个直觉性微优化。
 - **内存/文件**：on-demand ~94MB / eager ~240MB 峰值 RSS；图缓存 17.9MB + 程序缓存 46.6MB。

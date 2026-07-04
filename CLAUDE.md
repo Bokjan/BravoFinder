@@ -37,9 +37,9 @@
 
 ## 版本纪律（三层）
 - ① 程序 semver（CMake `project VERSION` → `core/version.h` 的 `kBravoFinderVersion` → `bf --version`）。
-- ② 每类缓存 `format_version`（图 "BFDB"、CIFP "BFCP"，校验不符走 `Result::Err`）。
-- ③ 程序 semver + source_loader 写进缓存 header 作 provenance。
-- **改缓存磁盘布局 → bump 对应 `format_version`；发布行为变更 → bump 程序 semver。**
+- ② 统一容器 `format_version`（唯一一个，magic "BFDB"，校验不符走 `Result::Err(kFormatMismatch)`）。三段（graph/cifp/detail）合一文件、共用此版本号，不设 per-section 版本。
+- ③ 程序 semver + source_loader + AIRAC cycle 写进容器 header 作 provenance（`build` 已删除，X-Plane 专有字段）。
+- **改缓存磁盘布局 → bump 容器 `format_version`；发布行为变更 → bump 程序 semver。**
   仅读取侧/内部函数改动不动布局，不 bump。
 
 ## 测试
@@ -62,7 +62,7 @@ ctest --preset <debug|release|tsan>
 依赖纯 CMake + FetchContent（Catch2 v3 / CLI11 / RapidJSON），不 vendor、不 vcpkg。
 
 ### 按改动范围选测试范围（省时间，见「测试」节的 scope 原则）
-ctest 每个 case 独立进程；缓存 round-trip 测试（`bfdb:` / `cifp cache:` 共 12 个）各 20–40s，
+ctest 每个 case 独立进程；缓存 round-trip 测试（`bfdb:` / `cifp section:` 共 11 个）各 20–40s，
 是墙钟大头，仅在**动缓存磁盘布局 / 序列化**时才需跑。日常按改动挑 preset：
 ```
 ctest --preset unit    # 纯逻辑单测（~1.4s）：只改算法/约束/纯函数

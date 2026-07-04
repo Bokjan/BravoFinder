@@ -114,7 +114,7 @@ cmake --preset release && cmake --build --preset release   # or: debug
 ```
 
 Point it at a directory and run it (it fails fast at startup if the directory
-holds no `nav_<cycle>_<build>.bfdb` cache):
+holds no `nav_<cycle>.bfdb` cache):
 
 ```bash
 # The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
@@ -133,28 +133,28 @@ full tool reference, argument semantics, and client configuration.
 ### CLI (`bf`)
 
 ```bash
-# Build binary caches once per AIRAC cycle for fast startup (~1.5s -> ~50ms).
-# The default name encodes the cycle/build so a directory of caches can hold
-# several AIRACs; both the graph cache and its nav_..._cifp.bfdb companion are
-# written, so deployment needs only the cache files, not the CIFP/ directory.
-bf build navdata                    # writes navdata/nav_<cycle>_<build>.bfdb (+ _cifp)
-bf build /path/to/xplane -o my.bfdb # explicit name: writes my.bfdb + my_cifp.bfdb
-bf build navdata --without-cifp     # graph cache only
+# Build a binary cache once per AIRAC cycle for fast startup (~1.5s -> ~50ms).
+# The default name encodes the cycle so a directory of caches can hold several
+# AIRACs. One unified .bfdb holds the graph, the CIFP procedures, and the navaid
+# detail, so deployment needs only that file, not the CIFP/ directory.
+bf build navdata                    # writes navdata/nav_<cycle>.bfdb
+bf build /path/to/xplane -o my.bfdb # explicit name: writes my.bfdb
+bf build navdata --without-cifp     # omit the CIFP procedure section
 
 # Find a route (reads navigation data from ./navdata by default)
 bf route KJFK KLAX
 bf route EGLL LFPG --format json
 bf route KSEA KBOS --data /path/to/xplane/data
 
-# Load a prebuilt cache to skip parsing. The sibling <stem>_cifp.bfdb and
-# <stem>_detail.bfdb are auto-discovered next to --db, so the CIFP/ directory is
-# not needed at all.
-bf route KJFK KLAX --db navdata/nav_2601_20260112.bfdb
+# Load a prebuilt cache to skip parsing. The one .bfdb carries the graph, the
+# CIFP procedures, and the navaid detail, so the CIFP/ directory is not needed
+# at all.
+bf route KJFK KLAX --db navdata/nav_2601.bfdb
 
 # Procedure cache load mode: on-demand (default, ~1.5 MB, best for one-shot
 # queries) or eager (loads all procedures up front, ~100 MB then lock-free,
 # best for servers / batch routing)
-bf route KJFK KLAX --db navdata/nav_2601_20260112.bfdb --cifp-load eager
+bf route KJFK KLAX --db navdata/nav_2601.bfdb --cifp-load eager
 
 # Constrain by cruise altitude (enables altitude-band and MORA filtering).
 # A single level or an inclusive range (any level in the band is acceptable).
@@ -188,19 +188,19 @@ bf route KJFK KLAX --seed 42
 # Validate and expand a filed route string (the reverse of route): checks that
 # each airway connects its bracketing fixes, expands airways to their
 # intermediate points, and totals the distance. Errors name the bad token.
-bf parse-route "KJFK DEEZZ5 CANDR Q480 HOTEE J80 MCI ... KLAX" --db navdata/nav_2601_20260112.bfdb
+bf parse-route "KJFK DEEZZ5 CANDR Q480 HOTEE J80 MCI ... KLAX" --db navdata/nav_2601.bfdb
 
 # Look up navigation data: waypoints, airports, procedures, airways, navaid
 # details, or holds. Each accepts one or more ids (a batch), and --format json
 # emits an array parallel to the input (a not-found id becomes null).
-bf query waypoint --db navdata/nav_2601_20260112.bfdb NINOX DGC
-bf query airport  --db navdata/nav_2601_20260112.bfdb KJFK KLAX
-bf query procedure --db navdata/nav_2601_20260112.bfdb KJFK
-bf query airway   --db navdata/nav_2601_20260112.bfdb Y28 --format json
+bf query waypoint --db navdata/nav_2601.bfdb NINOX DGC
+bf query airport  --db navdata/nav_2601.bfdb KJFK KLAX
+bf query procedure --db navdata/nav_2601.bfdb KJFK
+bf query airway   --db navdata/nav_2601.bfdb Y28 --format json
 # navaid_detail: frequency, service range, elevation, station variation/bearing.
-bf query navaid_detail --db navdata/nav_2601_20260112.bfdb SEA DGC
+bf query navaid_detail --db navdata/nav_2601.bfdb SEA DGC
 # hold: holding-pattern parameters (inbound course, leg length, turn, altitude).
-bf query hold --db navdata/nav_2601_20260112.bfdb AE701
+bf query hold --db navdata/nav_2601.bfdb AE701
 
 # Print the program version
 bf --version
@@ -210,13 +210,13 @@ Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an
 airport has procedure data, the route and its legs name the SID and STAR used (and
 the interchangeable procedures that share the same connection fix).
 
-The `.bfdb` caches are portable, little-endian binary snapshots (the graph cache
-holds the graph; its `_cifp.bfdb` companion holds per-airport procedures, loaded
-on demand; its `_detail.bfdb` companion holds radio-navaid attributes and holding
-patterns for the `navaid_detail` / `hold` lookups). The canonical name is
-`nav_<cycle>_<build>.bfdb`, encoding the AIRAC provenance so a directory can hold
-several cycles. They are derived from Navigraph/Jeppesen data and, like the source
-data, must not be redistributed (they are git-ignored).
+The `.bfdb` cache is a portable, little-endian binary snapshot. One unified file
+holds three sections sharing a global string pool: the route graph, the
+per-airport CIFP procedures (loaded on demand), and the radio-navaid attributes
+and holding patterns for the `navaid_detail` / `hold` lookups. The canonical name
+is `nav_<cycle>.bfdb`, encoding the AIRAC cycle so a directory can hold several
+cycles. It is derived from Navigraph/Jeppesen data and, like the source data,
+must not be redistributed (it is git-ignored).
 
 ## Navigation Data
 
