@@ -47,11 +47,12 @@ release 构建，cycle 2601。
   取平均 ms/search；
 - 用 `std::chrono::steady_clock` 只包住 `FindRoutes` 调用。
 
-**优化分解**：三个版本同机、同数据、同工作负载对照（用 git 历史文件编译对照二进制）：
+**优化分解**：三个版本同机、同数据、同工作负载对照（三版算法源码已固化入库，见
+`bench/variants/`，用 `bench/decompose.sh` 一键复现，无需 checkout git 历史）：
 
-- **baseline** — commit `2918c86`（Yen，无 heuristic memoization、无 Lawler）；
-- **+memoize** — commit `ee3afb4`（多目标 heuristic 跨 spur memoization）；
-- **+Lawler**（当前）— commit `f7a42c9`（再叠加 Lawler 优化）。
+- **baseline** — 源自 commit `2918c86`（Yen，无 heuristic memoization、无 Lawler）；
+- **+memoize** — 源自 commit `ee3afb4`（多目标 heuristic 跨 spur memoization）；
+- **+Lawler**（当前）— 源自 commit `f7a42c9`，算法等价于当前 HEAD（再叠加 Lawler 优化）。
 
 | k | baseline | +memoize | +Lawler（当前） | 累计加速 |
 |---:|---:|---:|---:|---:|
@@ -149,12 +150,14 @@ for i in 1 2 3 4 5; do /usr/bin/time -p bf route KJFK KLAX --db /tmp/nav.bfdb >/
 /usr/bin/time -v bf route KJFK KLAX --db /tmp/nav.bfdb --cifp-load eager >/dev/null
 ```
 
-纯搜索的分解需要一个进程内微基准（`OpenCached` 一次 + 循环 `FindRoutes` 10 城市对 × 30 轮，
-`steady_clock` 只包 `FindRoutes`），并用 git 历史 commit（`2918c86` / `ee3afb4` / `f7a42c9`）
-的 `core/graph/astar.*` + `yen_kshortest.*` 编译对照二进制（把这 4 个文件 checkout 到对应
-commit、重编 `bf_core`、重链微基准即可，接口跨三版一致）。profile 用 gprof：`-pg -O2` 全量
-编译微基准（把 `core/`+`io/` 的 .cc 与基准一起编，需 `-I build/<preset>/core` 找生成的
-`version.h`），跑一轮后 `gprof <bin> gmon.out`。基准程序不入库（避免污染构建目标）。
+纯搜索的分解用进程内微基准 `bench/route_bench.cc`（`OpenCached` 一次 + 循环 `FindRoutes`
+10 城市对 × 30 轮，`steady_clock` 只包 `FindRoutes`）。三版对照的算法源码
+（`core/graph/astar.*` + `yen_kshortest.*`）已固化在 `bench/variants/{baseline,memoize,lawler}/`，
+`bench/decompose.sh` 用 `-DBRAVOFINDER_BENCH_VARIANT` 分别编译对照二进制，无需 checkout
+git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编译微基准（把 `core/`+`io/`
+的 .cc 与基准一起编，需 `-I build/<preset>/core` 找生成的 `version.h`），跑一轮后
+`gprof <bin> gmon.out`。基准工具默认不入构建（`BRAVOFINDER_BUILD_BENCH=OFF`），复现步骤见
+`bench/README.md`。
 
 ## 8. 小结
 

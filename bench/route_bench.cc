@@ -6,11 +6,10 @@
 // over a fixed workload of 10 real city pairs.
 //
 // This is the tool behind the "查询耗时与优化分解" table in
-// docs/performance.zh-CN.md. To reproduce the optimization decomposition, check
-// the four algorithm files (core/graph/astar.* + yen_kshortest.*) out to a
-// historical commit, rebuild bf_core, and re-run this binary against the same
-// cache -- the FindRoutes interface is stable across the compared commits. See
-// bench/README.md.
+// docs/performance.zh-CN.md. To reproduce the optimization decomposition across
+// the baseline / +memoize / +Lawler variants, use bench/decompose.sh, which
+// builds this binary against the vendored search snapshots under
+// bench/variants/. See bench/README.md.
 //
 // Not part of the default build; enable with -DBRAVOFINDER_BUILD_BENCH=ON.
 
