@@ -22,6 +22,11 @@ else()
   option(BRAVOFINDER_BUILD_TESTS "Build BravoFinder tests" OFF)
 endif()
 
+# The performance microbenchmark (bench/) is a developer tool, off by default so
+# it never pollutes normal builds, tests, or CI. Enable with
+# -DBRAVOFINDER_BUILD_BENCH=ON to reproduce docs/performance.zh-CN.md.
+option(BRAVOFINDER_BUILD_BENCH "Build the route-search microbenchmark" OFF)
+
 # ---------------------------------------------------------------------------
 # Dependencies (fetched at build time; not vendored into the repository)
 # ---------------------------------------------------------------------------
@@ -65,6 +70,10 @@ add_subdirectory(core)
 add_subdirectory(io)
 add_subdirectory(apps/cli)
 add_subdirectory(apps/mcp_stdio)
+
+if(BRAVOFINDER_BUILD_BENCH)
+  add_subdirectory(bench)
+endif()
 
 if(BRAVOFINDER_BUILD_TESTS)
   enable_testing()

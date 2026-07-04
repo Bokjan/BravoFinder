@@ -7,17 +7,16 @@
 
 | 项 | 配置 |
 |---|---|
-| 机器 | Apple Mac14,9（Mac mini / MacBook Pro 级） |
-| 芯片 | Apple M2 Pro，10 核（物理=逻辑 10） |
-| 内存 | 32 GB |
-| 系统 | macOS 26.5.1（build 25F80） |
-| 编译器 | Apple clang 21.0.0，`arm64-apple-darwin` |
-| CMake | 4.3.4 |
+| 机器 | AMD EPYC 9K65（单路，本会话分到 16 物理核 / 32 逻辑核） |
+| 内存 | 64 GB |
+| 系统 | Linux（内核 6.6） |
+| 编译器 | gcc 12.3，`x86_64-linux` |
+| CMake | 3.26 |
 | 构建配置 | `release` 预设（`-O2`），除非另注 |
 | 导航数据 | X-Plane 12 native，AIRAC cycle 2601；图 V=270,821 顶点 / E=345,801 边；14838 个机场 CIFP |
 
-> 数字与绝对时间是这台 M2 Pro 上的结果；换机器绝对值会变，但**相对关系与量级**
-> （启动提速、各优化的相对贡献）应当稳定。
+> 所有数字都在这台 EPYC 9K65、同一份 cycle 2601 数据、同一轮测量下取得。换机器绝对值会变，
+> 但**相对关系与量级**（启动提速、各优化的相对贡献）应当稳定。
 
 ## 2. 启动时间：冷启动 vs 缓存加载
 
@@ -25,7 +24,7 @@ X-Plane 数据的解析 + 建图有固定成本（ARINC 424 解析尤重）。`b
 `.bfdb` 缓存，`bf route --db` 反序列化跳过全部解析。
 
 **方法**：`bf route KJFK KLAX` 端到端墙钟时间（含进程启动/退出），各 5 次取稳定值。
-release 构建，cycle 2601，32 核工作站。
+release 构建，cycle 2601。
 
 | 路径 | release | 说明 |
 |---|---|---|
@@ -56,75 +55,82 @@ release 构建，cycle 2601，32 核工作站。
 
 | k | baseline | +memoize | +Lawler（当前） | 累计加速 |
 |---:|---:|---:|---:|---:|
-| 1 | 5.48 | 5.50 | 5.39 | 1.0× |
-| 3 | 17.93 | 12.16 | 10.95 | **1.64×** |
-| 5 | 30.36 | 18.89 | 15.11 | **2.01×** |
-| 10 | 62.78 | 37.02 | 24.61 | **2.55×** |
+| 1 | 8.10 | 8.08 | 8.07 | 1.0× |
+| 3 | 25.67 | 15.56 | 14.34 | **1.79×** |
+| 5 | 43.08 | 22.78 | 18.77 | **2.29×** |
+| 10 | 87.58 | 42.16 | 28.53 | **3.07×** |
 
 （单位 ms/search。）
 
 读这张表：
 
-- **k=1 三版几乎相同**（~5.4ms）。单次搜索里 heuristic 每顶点最多算一次、也没有 spur，
+- **k=1 三版几乎相同**（~8.1ms）。单次搜索里 heuristic 每顶点最多算一次、也没有 spur，
   两个优化都不改单次搜索路径——这正是它们**零退化**的证据。
 - **memoize** 主要吃掉 k≥3 的重复 heuristic 计算：goals 集合在整轮 Yen 里恒定，`h(v)` 是常量
-  却被数百个 spur 重复 O(goals) 扫描。k=10 从 62.8→37.0ms。
-- **Lawler** 再砍掉冗余的 spur 搜索本身（只从 deviation index 起 spur）：k=10 从 37.0→24.6ms。
-- **收益随 k 增长**：k 越大、spur 越多、重复越多，两个优化的空间越大。k=10 累计 **2.55×**。
+  却被数百个 spur 重复 O(goals) 扫描。k=10 从 87.6→42.2ms。
+- **Lawler** 再砍掉冗余的 spur 搜索本身（只从 deviation index 起 spur）：k=10 从 42.2→28.5ms。
+- **收益随 k 增长**：k 越大、spur 越多、重复越多，两个优化的空间越大。k=10 累计 **3.07×**。
 
 > 两个优化的原理与正确性论证分别见
 > [yen-lawler-optimization.zh-CN.md](yen-lawler-optimization.zh-CN.md)（Lawler + memoize）。
 
 ## 4. 已止步：profile 指向的固有成本
 
-Lawler 之后再做了一轮带符号采样（`sample`，KJFK→KLAX k=10）。按符号归类 ~3400 样本：
+Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O2` 全量编译）。按符号
+归类 self time：
 
-| 符号 | 占比 | 说明 |
+| 符号 | self time | 说明 |
 |---|---:|---|
-| A* 主循环本身（边松弛 / g 更新 / 堆 push，`RunMultiSearch` 内联） | **~74%** | Yen 的固有成本 |
-| malloc/free | ~3.9% | 分配，不大 |
-| `DistanceTo` | ~1% | memoize 后已压下 |
-| `std::set` 红黑树（Yen 候选集 + spur 禁集） | ~0.8% | 噪声级 |
-| memset（O(V) 初始化） | ~0.7% | 很小 |
+| A* 主循环 `RunMultiSearch`（边松弛 / g 更新 / 堆 push，重度内联） | **~93.7%** | Yen 的固有成本 |
+| `SeedTable`（每次 spur 前初始化搜索表） | ~0.9% | O(V) 初始化 |
+| `Coordinate::DistanceTo` | ~0.6% | memoize 后已压下 |
+| heuristic `h(v)`（`MultiGoalHeuristic::operator()`） | ~0.5% | memoize 后已压下 |
+| 堆 push（`priority_queue`） | ~0.3% | 已计入主循环 |
+| `CostOfPath` | ~0.2% | 噪声级 |
+| `std::set` 红黑树（Yen 候选集 + spur 禁集） | ~0.1% | 噪声级 |
 
-**结论**：两个真热点（重复 heuristic、重复 spur）已被拿掉，剩下 ~74% 是 A* 遍历的固有成本。
+（gprof 把内联进主循环的边松弛/g 更新/堆操作都归到 `RunMultiSearch`，且不采样 malloc/系统调用，
+故 A* 主循环占比比按调用栈采样的工具更高；量级结论一致：**A* 遍历本身是绝对热点**。）
+
+**结论**：两个真热点（重复 heuristic、重复 spur）已被拿掉，剩下几乎全是 A* 遍历的固有成本。
 据此**否决了几个直觉性优化**（数据说话）：
 
-- **栈局部 buffer / thread_local 复用搜索数组**——分配仅 ~3.9%，且省不掉躲不掉的 O(V) 初始化；
-  thread_local 还违反"无全局可变状态"，线程池下每线程 ~5.4MB 永久常驻。不做。
-- **Yen 禁集 `std::set` → 排序 vector**——仅 ~0.8%，噪声级收益。不做。
-- **`CostOfPath` 线性找边改二分**——profile 里根本没出现，且会改 `.bfdb` 布局需 bump
+- **栈局部 buffer / thread_local 复用搜索数组**——分配/初始化（`SeedTable` 类）合计仅 ~1%，且
+  省不掉躲不掉的 O(V) 初始化；thread_local 还违反"无全局可变状态"，线程池下每线程 ~5.4MB 永久
+  常驻。不做。
+- **Yen 禁集 `std::set` → 排序 vector**——仅 ~0.1%，噪声级收益。不做。
+- **`CostOfPath` 线性找边改二分**——profile 里 ~0.2%，且会改 `.bfdb` 布局需 bump
   format_version。不做。
 
 再压性能需换算法层（如 Eppstein，或 A* 遍历的预取/SIMD），属大改，不在 v3.0.0 范围。
 
 ## 5. 内存占用
 
-**方法**：`/usr/bin/time -l` 的 maximum resident set size（进程峰值 RSS，非纯增量），
+**方法**：`/usr/bin/time -v` 的 maximum resident set size（进程峰值 RSS，非纯增量），
 `bf route KJFK KLAX --db`。
 
-| 模式 | 进程峰值 RSS | 缓存部分增量（DESIGN 记） |
+| 模式 | 进程峰值 RSS | 缓存部分增量 |
 |---|---:|---:|
-| on-demand（默认） | ~94 MB | 程序缓存仅头 + 目录，+1.5 MB |
-| eager（`--cifp-load eager`） | ~240 MB | 全量程序反序列化，+102 MB |
+| on-demand（默认） | ~128 MB | 程序段仅头 + 目录，+~1.5 MB |
+| eager（`--cifp-load eager`） | ~234 MB | 全量程序反序列化，+~100 MB |
 
-- 峰值 RSS 含图（~30MB lookup map + CSR 数组）、进程基线、以及程序缓存部分。
+- 峰值 RSS 含图（~30MB lookup map + CSR 数组）、进程基线、以及程序段部分。
 - on-demand 适合一次性 CLI 查询（启动省、只加载查到的机场）；eager 适合长驻服务/批量并发
   （全量常驻、之后无锁读），见 [thread-safety.zh-CN.md](thread-safety.zh-CN.md)。
 
 ## 6. 缓存文件大小
 
-一个统一 `nav_<cycle>.bfdb` 装三段（graph + CIFP + detail），共用一个全局字符串池：
+一个统一 `nav_<cycle>.bfdb` 装三段（graph + CIFP + detail），共用一个全局字符串池。实测
+cycle 2601 整文件 **57.3 MB**；`--without-cifp`（仅 graph + detail + 池）**18.9 MB**，反推
+CIFP 段 **~38 MB**：
 
 | 段 | 约占 | 内容 |
 |---|---:|---|
-| graph | ~16 MB | CSR coords/offsets/edges + on-network + idents + airway 名 + MORA + MSA |
-| cifp | ~40 MB | 14838 机场分段程序（结构化后远小于 ~105MB 原始 CIFP 文本） |
-| detail | ~2 MB | 导航台细节 + 等待航线 |
-| 全局池 | ~1.5 MB | 三段共用，去重后（三段各自局部池之和 ~8.7MB → −83%） |
+| graph + detail + 全局池 | ~18.9 MB | CSR coords/offsets/edges + on-network + idents + airway 名 + MORA + MSA + 导航台细节 + 等待航线 + 全局池（~1.5MB） |
+| cifp | ~38 MB | 14838 机场分段程序（结构化后远小于 ~105MB 原始 CIFP 文本） |
 
-整文件实测 ~57 MB（cycle 2601），比旧三文件分离省 ~8MB（全局池去重）。格式与取舍见
-[binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
+全局池三段共用、去重后 ~1.5MB（三段各自局部池之和 ~8.7MB → −83%），是整文件比旧三文件分离
+省 ~8MB 的主因。格式与取舍见 [binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
 
 ## 7. 如何复现
 
@@ -138,19 +144,21 @@ bf build navdata -o /tmp/nav.bfdb              # 一次性建缓存，计时见 
 for i in 1 2 3 4 5; do /usr/bin/time -p bf route KJFK KLAX --data navdata >/dev/null; done
 for i in 1 2 3 4 5; do /usr/bin/time -p bf route KJFK KLAX --db /tmp/nav.bfdb >/dev/null; done
 
-# 内存
-/usr/bin/time -l bf route KJFK KLAX --db /tmp/nav.bfdb >/dev/null
-/usr/bin/time -l bf route KJFK KLAX --db /tmp/nav.bfdb --cifp-load eager >/dev/null
+# 内存（Linux 用 /usr/bin/time -v 的 Maximum resident set size；macOS 用 -l）
+/usr/bin/time -v bf route KJFK KLAX --db /tmp/nav.bfdb >/dev/null
+/usr/bin/time -v bf route KJFK KLAX --db /tmp/nav.bfdb --cifp-load eager >/dev/null
 ```
 
 纯搜索的分解需要一个进程内微基准（`OpenCached` 一次 + 循环 `FindRoutes` 10 城市对 × 30 轮，
 `steady_clock` 只包 `FindRoutes`），并用 git 历史 commit（`2918c86` / `ee3afb4` / `f7a42c9`）
-的 `core/graph/astar.*` + `yen_kshortest.*` 编译对照二进制。基准程序不入库（避免污染
-构建目标）；上面的方法描述足以重建。
+的 `core/graph/astar.*` + `yen_kshortest.*` 编译对照二进制（把这 4 个文件 checkout 到对应
+commit、重编 `bf_core`、重链微基准即可，接口跨三版一致）。profile 用 gprof：`-pg -O2` 全量
+编译微基准（把 `core/`+`io/` 的 .cc 与基准一起编，需 `-I build/<preset>/core` 找生成的
+`version.h`），跑一轮后 `gprof <bin> gmon.out`。基准程序不入库（避免污染构建目标）。
 
 ## 8. 小结
 
 - **启动**：缓存把冷启动 2.27s 降到 0.20s，**~11×**（换 AIRAC 才需重建，3.2s 一次性）。
-- **查询**：memoize + Lawler 叠加，k=10 从 62.8ms 降到 24.6ms，**2.55×**；k=1 零退化；收益随 k 增长。
-- **止步有据**：profile 显示剩余 ~74% 是 A* 遍历固有成本，据此否决了三个直觉性微优化。
-- **内存/文件**：on-demand ~94MB / eager ~240MB 峰值 RSS；图缓存 17.9MB + 程序缓存 46.6MB。
+- **查询**：memoize + Lawler 叠加，k=10 从 87.6ms 降到 28.5ms，**3.07×**；k=1 零退化；收益随 k 增长。
+- **止步有据**：gprof 显示 A* 主循环 ~93.7% self time（遍历固有成本），据此否决了三个直觉性微优化。
+- **内存/文件**：on-demand ~128MB / eager ~234MB 峰值 RSS；统一 `.bfdb` 57.3MB（CIFP 段 ~38MB）。
