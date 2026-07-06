@@ -346,7 +346,9 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
         if (path.back() != seg.vertices.front()) {
           return out;  // seam mismatch (should not happen: seam == forced fix)
         }
-        path.insert(path.end(), seg.vertices.begin() + 1, seg.vertices.end());
+        if (seg.vertices.size() > 1) {
+          path.insert(path.end(), seg.vertices.begin() + 1, seg.vertices.end());
+        }
       }
       dist += seg.distance_nm;
       cost += seg.cost;
