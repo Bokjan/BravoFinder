@@ -15,17 +15,11 @@ namespace {
 
 using FactoryFn = std::unique_ptr<Loader> (*)();
 
-std::unique_ptr<Loader> MakeDfd1Loader() {
-  return std::make_unique<Dfd1Loader>();
-}
+std::unique_ptr<Loader> MakeDfd1Loader() { return std::make_unique<Dfd1Loader>(); }
 
-std::unique_ptr<Loader> MakeDfd2Loader() {
-  return std::make_unique<Dfd2Loader>();
-}
+std::unique_ptr<Loader> MakeDfd2Loader() { return std::make_unique<Dfd2Loader>(); }
 
-std::unique_ptr<Loader> MakeXPlane12Loader() {
-  return std::make_unique<XPlane12Loader>();
-}
+std::unique_ptr<Loader> MakeXPlane12Loader() { return std::make_unique<XPlane12Loader>(); }
 
 struct Entry {
   std::string_view name;
@@ -41,17 +35,15 @@ constexpr std::array kRegistry = {
 };
 
 static_assert(std::is_sorted(kRegistry.begin(), kRegistry.end(),
-                             [](const Entry& a, const Entry& b) {
-                               return a.name < b.name;
-                             }),
+                             [](const Entry& a, const Entry& b) { return a.name < b.name; }),
               "kRegistry entries must be sorted alphabetically by name");
 
 }  // namespace
 
 Result<std::unique_ptr<Loader>> MakeLoader(const std::string& name) {
-  const auto it = std::lower_bound(
-      kRegistry.begin(), kRegistry.end(), name,
-      [](const Entry& entry, const std::string& key) { return entry.name < key; });
+  const auto it =
+      std::lower_bound(kRegistry.begin(), kRegistry.end(), name,
+                       [](const Entry& entry, const std::string& key) { return entry.name < key; });
 
   if (it == kRegistry.end() || it->name != name) {
     return Result<std::unique_ptr<Loader>>::Err(

@@ -40,4 +40,3 @@ inline bool SetEnv(const char* name, const std::string& value) {
 }
 
 }  // namespace bf
-

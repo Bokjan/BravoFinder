@@ -34,8 +34,8 @@ Result<sqlite3*> AcquireConn(std::string_view loader_name, const std::string& db
     return Result<sqlite3*>::Ok(it->second.get());
   }
   sqlite3* raw = nullptr;
-  const int rc = sqlite3_open_v2(db_path.c_str(), &raw,
-                                 SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nullptr);
+  const int rc =
+      sqlite3_open_v2(db_path.c_str(), &raw, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nullptr);
   if (rc != SQLITE_OK) {
     const std::string msg = raw != nullptr ? sqlite3_errmsg(raw) : "cannot open database";
     if (raw != nullptr) {
@@ -53,8 +53,8 @@ Result<SqliteStmt> Prepare(sqlite3* conn, std::string_view sql) {
   sqlite3_stmt* stmt = nullptr;
   const int rc = sqlite3_prepare_v2(conn, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
   if (rc != SQLITE_OK) {
-    return Result<SqliteStmt>::Err(
-        Error(ErrorCode::kParseError, std::string("SQLite prepare failed: ") + sqlite3_errmsg(conn)));
+    return Result<SqliteStmt>::Err(Error(
+        ErrorCode::kParseError, std::string("SQLite prepare failed: ") + sqlite3_errmsg(conn)));
   }
   return Result<SqliteStmt>::Ok(SqliteStmt(stmt));
 }

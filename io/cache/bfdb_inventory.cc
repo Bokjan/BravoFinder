@@ -68,18 +68,14 @@ std::optional<BfdbEntry> BfdbInventory::Latest() const {
   }
   // entries_ is sorted by cycle ascending, so the last element is the newest.
   assert(std::is_sorted(entries_.begin(), entries_.end(),
-                        [](const BfdbEntry& a, const BfdbEntry& b) {
-                          return a.cycle < b.cycle;
-                        }));
+                        [](const BfdbEntry& a, const BfdbEntry& b) { return a.cycle < b.cycle; }));
   return entries_.back();
 }
 
 std::optional<BfdbEntry> BfdbInventory::Find(uint32_t cycle) const {
   // entries_ is sorted by cycle ascending, so binary-search for the cycle.
   assert(std::is_sorted(entries_.begin(), entries_.end(),
-                        [](const BfdbEntry& a, const BfdbEntry& b) {
-                          return a.cycle < b.cycle;
-                        }));
+                        [](const BfdbEntry& a, const BfdbEntry& b) { return a.cycle < b.cycle; }));
   auto it = std::lower_bound(entries_.begin(), entries_.end(), cycle,
                              [](const BfdbEntry& e, uint32_t c) { return e.cycle < c; });
   if (it != entries_.end() && it->cycle == cycle) {

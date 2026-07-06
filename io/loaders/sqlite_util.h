@@ -6,11 +6,11 @@
 // and null/blank-safe column accessors. The DFD loaders add only their own
 // row-to-domain mapping on top of this; nothing here is DFD-version-specific.
 
+#include <sqlite3.h>
+
 #include <memory>
 #include <string>
 #include <string_view>
-
-#include <sqlite3.h>
 
 #include "core/result.h"
 

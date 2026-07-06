@@ -31,8 +31,6 @@ inline std::string NavDataDir() {
 }
 
 // Set the navigation-data directory for the current process (and its children).
-inline void SetNavDataDir(const std::string& dir) {
-  bf::SetEnv("BRAVOFINDER_NAVDATA", dir);
-}
+inline void SetNavDataDir(const std::string& dir) { bf::SetEnv("BRAVOFINDER_NAVDATA", dir); }
 
 }  // namespace bf::test

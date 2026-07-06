@@ -4,9 +4,8 @@
 // Jeppesen data is never committed, so each case SKIPs when the data is absent
 // (CLAUDE.md: real data, no mocks).
 
-#include <catch2/catch_test_macros.hpp>
-
 #include <algorithm>
+#include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <filesystem>
 #include <memory>
@@ -82,7 +81,7 @@ TEST_CASE("dfd1: LoadProcedures returns per-airport procedures", "[integration][
   CHECK(procs.value().size() > 10000);  // ~17k airports with procedures in 2601
   // KJFK must be present with SID/STAR/approach procedures and runways.
   auto it = std::find_if(procs.value().begin(), procs.value().end(),
-                          [](const bf::AirportProcedureData& ap) { return ap.first == "KJFK"; });
+                         [](const bf::AirportProcedureData& ap) { return ap.first == "KJFK"; });
   REQUIRE(it != procs.value().end());
   CHECK(!it->second.procedures.empty());
   CHECK(!it->second.runways.empty());
