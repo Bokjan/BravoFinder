@@ -12,18 +12,12 @@
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/unified_cache.h"
 #include "io/nav_database.h"
+#include "test_xplane12.h"
 
 namespace {
 
-// Resolve the navigation data directory: BRAVOFINDER_NAVDATA if set, else the
-// repository's navdata/ folder. Real data is not committed, so these tests SKIP
-// (rather than fail) when it is absent.
-std::string NavDataDir() {
-  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
-    return env;
-  }
-  return "navdata";
-}
+using bf::test::EnsureXPlane12;
+using bf::test::NavDataDir;
 
 // A unique temp path for a .bfdb produced by a test. Uses the test name so
 // parallel cases do not collide. Uses the platform temp dir so the test runs on
@@ -43,7 +37,7 @@ bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
 // Build a database and write it to a unified .bfdb, returning the path (empty on
 // SKIP). Includes the CIFP section so the cached path resolves procedures.
 std::string BuildCache(const std::string& tag) {
-  const std::string dir = NavDataDir();
+  const std::string dir = EnsureXPlane12();
   bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(dir);
   if (!db) {
     return {};
@@ -57,7 +51,7 @@ std::string BuildCache(const std::string& tag) {
 }  // namespace
 
 TEST_CASE("bfdb: a cached route matches the freshly built route", "[integration][bfdb]") {
-  const std::string dir = NavDataDir();
+  const std::string dir = EnsureXPlane12();
   bf::Result<bf::NavDatabase> direct = bf::NavDatabase::Open(dir);
   if (!direct) {
     SKIP("navigation data not found in '" << dir << "' (set BRAVOFINDER_NAVDATA)");
@@ -151,7 +145,7 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
 }
 
 TEST_CASE("bfdb: an airport without procedures still routes via the cache", "[integration][bfdb]") {
-  const std::string dir = NavDataDir();
+  const std::string dir = EnsureXPlane12();
   const std::string path = BuildCache("nocifp");
   if (path.empty()) {
     SKIP("navigation data not found in '" << dir << "'");

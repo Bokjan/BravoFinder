@@ -8,17 +8,15 @@
 
 namespace bf {
 
-// The procedures and runways parsed from one airport's CIFP file.
-struct CifpData {
-  std::vector<Procedure> procedures;
-  std::vector<Runway> runways;
-};
-
 // Parses an X-Plane CIFP file (CIFP/<ICAO>.dat), the ARINC 424-derived terminal
 // procedure format. Each line is `TYPE:seq,field,field,...;` where TYPE is one
 // of SID/STAR/APPCH/RWY/PRDAT. SID/STAR/APPCH lines are legs; consecutive legs
 // sharing (name, transition, route type) form one Procedure. RWY lines give
 // runway thresholds. PRDAT (approach metadata) is ignored.
+//
+// `CifpData` (the procedures + runways assembled here) is defined in
+// core/domain/procedure.h so the DFD SQLite loaders can produce it without
+// depending on the X-Plane CIFP parser.
 class CifpParser {
  public:
   // Parse the file at `path`. Returns the assembled procedures and runways, or

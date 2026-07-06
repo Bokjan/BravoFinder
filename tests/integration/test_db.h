@@ -4,13 +4,25 @@
 #include <string>
 
 #include "core/env.h"
-#include "io/nav_database.h"
 
 namespace bf::test {
 
-// Resolve the navigation data directory: BRAVOFINDER_NAVDATA if set, else the
-// repository's navdata/ folder. Real Navigraph/Jeppesen data is not committed,
-// so tests SKIP (rather than fail) when the data is absent.
+// The navigation-data root: BRAVOFINDER_NAVDATA if set, else the repository's
+// navdata/ folder. The dev checkout keeps each source format in its own
+// subdirectory (xplane12/, dfd1/, dfd2/, bfdb/); the per-type test helpers
+// (test_xplane.h, test_dfd.h, test_bfdb.h) pin BRAVOFINDER_NAVDATA to one of
+// them via SetNavDataDir. Real Navigraph/Jeppesen data is never committed, so
+// tests SKIP (rather than fail) when the data is absent.
+inline std::string NavDataRoot() {
+  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
+    return env;
+  }
+  return "navdata";
+}
+
+// The navigation-data directory currently selected (the value of
+// BRAVOFINDER_NAVDATA, or "navdata" by default). Read fresh each call so a test
+// can switch sources at runtime via SetNavDataDir / SetEnv.
 inline std::string NavDataDir() {
   if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
     return env;
@@ -18,24 +30,23 @@ inline std::string NavDataDir() {
   return "navdata";
 }
 
-// Open a database for read-only integration tests, preferring a prebuilt
-// `<dir>/nav.bfdb` cache (loads in ~1.5s) over parsing the raw .dat files
-// (~8.5s). The unified cache holds the graph, CIFP procedures, and navaid detail
-// in one file. Falls back to Open() when no cache is present, so a fresh
-// checkout without a built cache still runs (just slower). Behavior is identical
-// either way; only load time differs. Returns an errored Result when the data is
-// absent so callers can SKIP.
-//
-// Note: this is for tests that only READ the database. The cache round-trip
-// tests (graph_codec_test / cifp_codec_test / unified_cache_test) deliberately
-// build and open their own caches to exercise that path and must not use this
-// helper.
-inline bf::Result<bf::NavDatabase> OpenReadOnlyDb(const std::string& dir) {
-  const std::string cache = dir + "/nav.bfdb";
-  if (std::filesystem::exists(cache)) {
-    return bf::NavDatabase::OpenCached(cache);
+// Set the navigation-data directory for the current process (and its children).
+inline void SetNavDataDir(const std::string& dir) { bf::SetEnv("BRAVOFINDER_NAVDATA", dir); }
+
+// Whether `dir` holds at least one *.s3db file (a DFD SQLite database). Real
+// Jeppesen data is never committed, so the DFD test helpers use this to return
+// an empty path and let callers SKIP when the data is absent.
+inline bool HasS3db(const std::string& dir) {
+  std::error_code ec;
+  if (!std::filesystem::is_directory(dir, ec)) {
+    return false;
   }
-  return bf::NavDatabase::Open(dir);
+  for (const auto& de : std::filesystem::directory_iterator(dir, ec)) {
+    if (de.is_regular_file() && de.path().extension() == ".s3db") {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace bf::test

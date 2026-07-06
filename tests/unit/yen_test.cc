@@ -297,7 +297,9 @@ struct RefCandidate {
   double distance;
   std::vector<int> vertices;
   bool operator<(const RefCandidate& o) const {
-    if (cost != o.cost) return cost < o.cost;
+    if (cost != o.cost) {
+      return cost < o.cost;
+    }
     return vertices < o.vertices;
   }
 };
@@ -317,7 +319,9 @@ bool RefCostOfPath(const bf::NavGraph& g, const std::vector<int>& path, double& 
         break;
       }
     }
-    if (found == nullptr) return false;
+    if (found == nullptr) {
+      return false;
+    }
     cost += found->distance_nm;
     dist += found->distance_nm;
   }
@@ -328,9 +332,13 @@ bool RefCostOfPath(const bf::NavGraph& g, const std::vector<int>& path, double& 
 std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int start, int goal,
                                              int k) {
   std::vector<bf::ShortestPath> result;
-  if (k <= 0) return result;
+  if (k <= 0) {
+    return result;
+  }
   bf::ShortestPath first = bf::FindShortestPath(graph, start, goal, bf::SearchOptions{});
-  if (!first.found) return result;
+  if (!first.found) {
+    return result;
+  }
   result.push_back(std::move(first));
   std::set<RefCandidate> candidates;
   for (int kth = 1; kth < k; ++kth) {
@@ -348,7 +356,9 @@ std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int star
       opts.node_blocked = [banned_nodes](int v) { return banned_nodes.count(v) != 0; };
       opts.edge_blocked = [banned_edges](int f, int t) { return banned_edges.count({f, t}) != 0; };
       const bf::ShortestPath spur = bf::FindShortestPath(graph, prev[i], goal, opts);
-      if (!spur.found) continue;
+      if (!spur.found) {
+        continue;
+      }
       std::vector<int> total(root.begin(), root.end() - 1);
       total.insert(total.end(), spur.vertices.begin(), spur.vertices.end());
       double cost = 0.0, dist = 0.0;
@@ -356,7 +366,9 @@ std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int star
         candidates.insert(RefCandidate{cost, dist, std::move(total)});
       }
     }
-    if (candidates.empty()) break;
+    if (candidates.empty()) {
+      break;
+    }
     auto best = candidates.begin();
     bf::ShortestPath next;
     next.vertices = best->vertices;
@@ -373,8 +385,12 @@ std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int star
 std::vector<double> RefSeedTable(const std::vector<bf::SeededEndpoint>& eps, int n) {
   std::vector<double> seed(n, -1.0);
   for (const bf::SeededEndpoint& e : eps) {
-    if (e.vertex < 0 || e.vertex >= n) continue;
-    if (seed[e.vertex] < 0.0 || e.cost < seed[e.vertex]) seed[e.vertex] = e.cost;
+    if (e.vertex < 0 || e.vertex >= n) {
+      continue;
+    }
+    if (seed[e.vertex] < 0.0 || e.cost < seed[e.vertex]) {
+      seed[e.vertex] = e.cost;
+    }
   }
   return seed;
 }
@@ -382,12 +398,18 @@ std::vector<double> RefSeedTable(const std::vector<bf::SeededEndpoint>& eps, int
 bool RefCostOfPathMulti(const bf::NavGraph& g, const std::vector<int>& path,
                         const std::vector<double>& src_seed, const std::vector<double>& goal_seed,
                         double& cost, double& dist) {
-  if (path.empty()) return false;
+  if (path.empty()) {
+    return false;
+  }
   const double s = src_seed[path.front()];
   const double gg = goal_seed[path.back()];
-  if (s < 0.0 || gg < 0.0) return false;
+  if (s < 0.0 || gg < 0.0) {
+    return false;
+  }
   double ec = 0.0, ed = 0.0;
-  if (!RefCostOfPath(g, path, ec, ed)) return false;
+  if (!RefCostOfPath(g, path, ec, ed)) {
+    return false;
+  }
   cost = s + ec + gg;
   dist = s + ed + gg;
   return true;
@@ -399,16 +421,22 @@ std::vector<bf::ShortestPath> NaiveKShortestMulti(const bf::NavGraph& graph,
                                                   const std::vector<bf::SeededEndpoint>& goals,
                                                   int k) {
   std::vector<bf::ShortestPath> result;
-  if (k <= 0 || sources.empty() || goals.empty()) return result;
+  if (k <= 0 || sources.empty() || goals.empty()) {
+    return result;
+  }
   const int n = graph.VertexCount();
   const std::vector<double> src_seed = RefSeedTable(sources, n);
   const std::vector<double> goal_seed = RefSeedTable(goals, n);
   bf::ShortestPath first = bf::FindShortestPathMulti(graph, sources, goals, bf::SearchOptions{});
-  if (!first.found) return result;
+  if (!first.found) {
+    return result;
+  }
   result.push_back(std::move(first));
   std::set<RefCandidate> candidates;
   auto add = [&](const std::vector<int>& root, const bf::ShortestPath& tail) {
-    if (!tail.found || tail.vertices.empty()) return;
+    if (!tail.found || tail.vertices.empty()) {
+      return;
+    }
     std::vector<int> total(root.begin(), root.empty() ? root.end() : root.end() - 1);
     total.insert(total.end(), tail.vertices.begin(), tail.vertices.end());
     double cost = 0.0, dist = 0.0;
@@ -422,13 +450,19 @@ std::vector<bf::ShortestPath> NaiveKShortestMulti(const bf::NavGraph& graph,
       if (i < 0) {
         std::set<int> banned_sources;
         for (const bf::ShortestPath& p : result) {
-          if (!p.vertices.empty()) banned_sources.insert(p.vertices.front());
+          if (!p.vertices.empty()) {
+            banned_sources.insert(p.vertices.front());
+          }
         }
         std::vector<bf::SeededEndpoint> spur_sources;
         for (const bf::SeededEndpoint& s : sources) {
-          if (banned_sources.count(s.vertex) == 0) spur_sources.push_back(s);
+          if (banned_sources.count(s.vertex) == 0) {
+            spur_sources.push_back(s);
+          }
         }
-        if (spur_sources.empty()) continue;
+        if (spur_sources.empty()) {
+          continue;
+        }
         add({}, bf::FindShortestPathMulti(graph, spur_sources, goals, bf::SearchOptions{}));
         continue;
       }
@@ -446,7 +480,9 @@ std::vector<bf::ShortestPath> NaiveKShortestMulti(const bf::NavGraph& graph,
       opts.edge_blocked = [banned_edges](int f, int t) { return banned_edges.count({f, t}) != 0; };
       add(root, bf::FindShortestPathMulti(graph, {bf::SeededEndpoint{prev[i], 0.0}}, goals, opts));
     }
-    if (candidates.empty()) break;
+    if (candidates.empty()) {
+      break;
+    }
     auto best = candidates.begin();
     bf::ShortestPath next;
     next.vertices = best->vertices;
@@ -503,7 +539,9 @@ TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (single-source)
     std::uniform_int_distribution<int> vpick(0, n - 1);
     const int start = vpick(rng);
     const int goal = vpick(rng);
-    if (start == goal) continue;
+    if (start == goal) {
+      continue;
+    }
     const int k = 1 + (trial % 10);  // k = 1..10
     const std::vector<bf::ShortestPath> opt =
         bf::FindKShortestPaths(builder.graph(), start, goal, k, bf::SearchOptions{});
@@ -532,13 +570,19 @@ TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (multi-source)"
     std::vector<bf::SeededEndpoint> sources, goals;
     for (int t = 0; t < 2; ++t) {
       const int v = vpick(rng);
-      if (used.insert(v).second) sources.push_back({v, seed(rng)});
+      if (used.insert(v).second) {
+        sources.push_back({v, seed(rng)});
+      }
     }
     for (int t = 0; t < 2; ++t) {
       const int v = vpick(rng);
-      if (used.insert(v).second) goals.push_back({v, seed(rng)});
+      if (used.insert(v).second) {
+        goals.push_back({v, seed(rng)});
+      }
     }
-    if (sources.empty() || goals.empty()) continue;
+    if (sources.empty() || goals.empty()) {
+      continue;
+    }
     const int k = 1 + (trial % 10);
     const std::vector<bf::ShortestPath> opt =
         bf::FindKShortestPathsMulti(builder.graph(), sources, goals, k, bf::SearchOptions{});

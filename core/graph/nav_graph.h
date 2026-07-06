@@ -9,8 +9,9 @@ namespace bf {
 
 // Bit flags packed into GraphEdge::flags.
 enum EdgeFlag : uint8_t {
-  kEdgeHigh = 1u << 0,  // Jet (high) airway; clear = Victor (low). Remaining
-                        // bits are reserved for future constraints (RAD/CDR).
+  kEdgeHigh = 1u << 0,  // Jet (high) airway; clear = Victor (low).
+  kEdgeBoth = 1u << 1,  // usable at both high and low (DFD flightlevel 'B'); never
+                        // penalized by level preference. Remaining bits reserved.
 };
 
 // A directed edge in the navigation graph, stored in compressed-sparse-row
@@ -36,6 +37,9 @@ static_assert(sizeof(GraphEdge) == 16, "GraphEdge is expected to be 16 bytes");
 
 // Whether an edge belongs to a high (Jet) airway.
 inline bool EdgeIsHigh(const GraphEdge& e) { return (e.flags & kEdgeHigh) != 0; }
+
+// Whether an edge is usable at both high and low levels (never level-filtered).
+inline bool EdgeIsBoth(const GraphEdge& e) { return (e.flags & kEdgeBoth) != 0; }
 
 // An immutable directed graph over navigation waypoints, stored as CSR for
 // cache-friendly traversal. Vertices are integer indices; each vertex carries

@@ -11,26 +11,19 @@
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/nav_database.h"
-#include "test_db.h"
+#include "test_bfdb.h"
 
 namespace {
 
 using bf::test::NavDataDir;
 
-bool HasCifp(const std::string& dir, const std::string& icao) {
-  std::ifstream f(dir + "/CIFP/" + icao + ".dat");
-  return f.is_open();
-}
-
 // Open the navigation database once and share it across all integration cases.
 // NavDatabase is read-only after Open and FindRoutes is const, so a single
 // instance is safe to reuse; this avoids re-loading ~20 MB of data per case,
-// which dominated the suite's run time. Prefers a prebuilt cache for fast
-// startup. Returns nullptr when the data directory has no usable data, so
-// callers SKIP.
+// which dominated the suite's run time. Loads from the prebuilt bfdb cache.
+// Returns nullptr when the cache is absent so callers SKIP.
 const bf::NavDatabase* SharedDb() {
-  static const std::string dir = NavDataDir();
-  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb(dir);
+  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb();
   return db ? &db.value() : nullptr;
 }
 
@@ -102,9 +95,6 @@ TEST_CASE("real data: an arrival joins the STAR at a near fix, not a far entry",
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  if (!HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("KLAX CIFP not present in '" << NavDataDir() << "'");
-  }
 
   // A STAR exposes every on-network fix it passes as a candidate connection, not
   // just its published entry fix. KLAX BASET5, for instance, enters from PGS
@@ -131,9 +121,6 @@ TEST_CASE("real data: K candidates can use different procedures", "[integration]
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
-  }
-  if (!HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("KLAX CIFP not present in '" << NavDataDir() << "'");
   }
 
   // The multi-endpoint K-shortest lets candidates join the network through
@@ -213,9 +200,6 @@ TEST_CASE("real data: avoiding a SID connection fix picks another entry", "[inte
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
-  }
-  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
   }
 
   bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
@@ -381,9 +365,6 @@ TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integra
   }
   // This assertion needs the CIFP procedure files, extracted separately from
   // the enroute data; skip if KJFK's/KLAX's procedures are not present.
-  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
-  }
 
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
   REQUIRE(routes);
@@ -428,9 +409,6 @@ TEST_CASE("real data: a departure runway filter still yields a route", "[integra
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
-  }
 
   bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
   req.departure_runway = "RW31L";  // a real KJFK runway served by DEEZZ5
@@ -444,9 +422,6 @@ TEST_CASE("real data: a named SID is used when requested", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
-  }
-  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
   }
 
   bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
@@ -465,9 +440,6 @@ TEST_CASE("real data: a bare SID name pins the procedure but leaves transitions 
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
-  }
-  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
   }
 
   // "DEEZZ5.TOWIN" pins the transition; the offered options should all be that
@@ -488,9 +460,6 @@ TEST_CASE("real data: an unknown SID name is an error, not a silent fallback", "
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
-  }
 
   bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
   req.departure_sid = "NOSUCH9";
@@ -507,12 +476,6 @@ TEST_CASE("real data: an airport without procedures stays the endpoint via DCT",
   // at all, so its arrival connects by a direct link. The airport must remain
   // the route endpoint rather than being replaced by its connection fix, and the
   // connection is classified kDirect (no data) rather than radar vectors.
-  if (!HasCifp(NavDataDir(), "KJFK")) {
-    SKIP("KJFK CIFP not present in '" << NavDataDir() << "'");
-  }
-  if (HasCifp(NavDataDir(), "KIKR")) {
-    SKIP("KIKR CIFP is present; this case tests the no-procedure fallback");
-  }
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KIKR"));
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
@@ -534,9 +497,6 @@ TEST_CASE("real data: a route does not transit through an intermediate airport",
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
-  }
-  if (!HasCifp(NavDataDir(), "KJFK") || !HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("CIFP procedures not present in '" << NavDataDir() << "'");
   }
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
   REQUIRE(routes);
@@ -562,9 +522,6 @@ TEST_CASE("real data: a radar-vectored departure is flagged, not shown as missin
   // reaches an on-network fix and the departure falls back to a DCT link. That
   // fallback must be reported as radar vectors (procedures exist) rather than
   // kDirect (no data), so a user can tell the two apart.
-  if (!HasCifp(NavDataDir(), "KPHL") || !HasCifp(NavDataDir(), "KLAX")) {
-    SKIP("KPHL/KLAX CIFP not present in '" << NavDataDir() << "'");
-  }
 
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KPHL", "KLAX"));
   REQUIRE(routes);

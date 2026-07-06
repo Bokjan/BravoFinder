@@ -10,13 +10,13 @@
 
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
+#include "core/domain/procedure.h"
 #include "core/query/query_types.h"
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/cache/cifp_codec.h"
 #include "io/cache/nav_detail_codec.h"
-#include "io/loaders/xplane12/cifp/cifp_parser.h"
 
 namespace bf {
 
@@ -66,12 +66,14 @@ class NavDatabase {
                                         CifpLoad cifp_load = CifpLoad::kOnDemand);
 
   // Serialize the whole database -- graph, CIFP procedures, and navaid detail --
-  // into ONE unified `.bfdb` file. Called by `bf build` after Open(). When
-  // `with_cifp` is false the CIFP section is omitted (the `--without-cifp` flag).
-  // Reads the CIFP procedures via the loader from the source dir passed to Open.
-  // Returns the number of airports written into the CIFP section (0 when
-  // omitted), or an Error if the file cannot be written.
-  Result<uint32_t> WriteUnified(const std::string& out_path, bool with_cifp = true) const;
+  // into ONE unified `.bfdb` file. Called by `bf build` after Open(). The CIFP
+  // procedure section is always written: building a cache without procedures is
+  // not useful (routes cannot resolve SID/STAR), so the section is mandatory.
+  // Reads the CIFP procedures via the loader from the source dir passed to Open,
+  // so a database opened from a cache (no loader) cannot write -- returns an
+  // Error in that case. Returns the number of airports written into the CIFP
+  // section, or an Error if the file cannot be written.
+  Result<uint32_t> WriteUnified(const std::string& out_path) const;
 
   // AIRAC provenance parsed from the source data (or restored from a cache): the
   // cycle number (e.g. 2601). Zero when the source carried no parsable

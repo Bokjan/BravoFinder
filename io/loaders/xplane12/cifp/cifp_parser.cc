@@ -73,33 +73,13 @@ std::string FieldStr(const std::vector<std::string>& f, int idx) {
 }
 
 ProcedureType TypeFromTag(std::string_view tag) {
-  if (tag == "STAR") return ProcedureType::kStar;
-  if (tag == "APPCH") return ProcedureType::kApproach;
-  return ProcedureType::kSid;
-}
-
-// Parse the altitude restriction from descriptor + the two altitude columns.
-AltitudeConstraint ParseAltConstraint(const std::vector<std::string>& f) {
-  AltitudeConstraint ac;
-  const std::string desc = FieldStr(f, kAltDesc);
-  const int a1 = FieldInt(f, kAlt1);
-  const int a2 = FieldInt(f, kAlt2);
-  if (desc == "+") {
-    ac.kind = AltConstraintKind::kAtOrAbove;
-    ac.alt1_ft = a1;
-  } else if (desc == "-") {
-    ac.kind = AltConstraintKind::kAtOrBelow;
-    ac.alt1_ft = a1;
-  } else if (desc == "B") {
-    ac.kind = AltConstraintKind::kBetween;
-    ac.alt1_ft = a1;  // upper
-    ac.alt2_ft = a2;  // lower
-  } else if (a1 != 0) {
-    // '@' or blank descriptor with an altitude present means "cross at".
-    ac.kind = AltConstraintKind::kAt;
-    ac.alt1_ft = a1;
+  if (tag == "STAR") {
+    return ProcedureType::kStar;
   }
-  return ac;
+  if (tag == "APPCH") {
+    return ProcedureType::kApproach;
+  }
+  return ProcedureType::kSid;
 }
 
 // Convert an X-Plane packed coordinate (e.g. "N40372318" = 40 deg 37 min
@@ -231,7 +211,7 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
     leg.path_term = ParsePathTerminator(FieldStr(f, kPathTerm));
     leg.course_deg = FieldInt(f, kCourse) / 10.0;
     leg.distance_nm = FieldInt(f, kDistance) / 10.0;
-    leg.alt = ParseAltConstraint(f);
+    leg.alt = ParseAltConstraint(FieldStr(f, kAltDesc), FieldInt(f, kAlt1), FieldInt(f, kAlt2));
     current.legs.push_back(std::move(leg));
   }
   flush(current);

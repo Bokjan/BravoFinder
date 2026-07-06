@@ -72,6 +72,13 @@ struct AltitudeConstraint {
   int alt2_ft = 0;
 };
 
+// Parse the altitude restriction from the descriptor and the two altitude
+// values. `desc` is '+', '-', '@'/blank, or 'B' (the CIFP/DFD altitude
+// descriptor); alt1/alt2 are feet as stored. Shared by the X-Plane CIFP parser
+// and the DFD SQLite loaders so the column-extraction differs but the
+// descriptor logic does not.
+AltitudeConstraint ParseAltConstraint(std::string_view desc, int alt1, int alt2);
+
 // One leg of a procedure: the path terminator, its (possibly empty) fix, and
 // the course/distance/altitude data parsed from the CIFP row. Legs that do not
 // terminate at a fix leave `fix` empty and rely on course/distance.
@@ -112,6 +119,14 @@ struct Runway {
   std::string ident{};   // e.g. "RW31L"
   Coordinate threshold;  // threshold position
   int elevation_ft = 0;
+};
+
+// The procedures and runways parsed from one airport's terminal-procedure data
+// (X-Plane CIFP files or DFD SQLite procedure tables). Pure data, not specific
+// to any source format, so it lives in core rather than under a single loader.
+struct CifpData {
+  std::vector<Procedure> procedures;
+  std::vector<Runway> runways;
 };
 
 }  // namespace bf

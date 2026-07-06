@@ -134,8 +134,8 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
   仍毫秒级，不常驻全部程序；
 - **eager 模式**：`Open` 时 `FetchAll` 全量反序列化进内存并冻结（~102MB），之后无锁读，面向
   Web/批量并发。
-- **段可缺席**：`--without-cifp` 时 CIFP 段的段表项 offset/length 置 0，`Open` 见 0 即知无此段，
-  airport 报告无程序。
+- **CIFP 段强制写入**：无程序的缓存无法解析 SID/STAR，故 CIFP 段始终写入、段表项 offset/length
+  非零；airport 程序由该段提供，缺席即报告无程序。
 
 `--data` 指空目录仍能从缓存出全 SID/STAR、与文件路径逐字节一致。
 

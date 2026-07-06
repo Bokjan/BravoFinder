@@ -122,8 +122,7 @@ Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O
 ## 6. 缓存文件大小
 
 一个统一 `nav_<cycle>.bfdb` 装三段（graph + CIFP + detail），共用一个全局字符串池。实测
-cycle 2601 整文件 **57.3 MB**；`--without-cifp`（仅 graph + detail + 池）**18.9 MB**，反推
-CIFP 段 **~38 MB**：
+cycle 2601 整文件 **57.3 MB**，其中 CIFP 段约 ~38 MB：
 
 | 段 | 约占 | 内容 |
 |---|---:|---|
