@@ -197,19 +197,22 @@ NavDetailArchive NavDetailArchive::FromData(const NavData& data) {
 void NavDetailArchive::Finalize() {
   // Sort both arrays for binary-search lookup.
   std::sort(navaids_.begin(), navaids_.end(), [](const auto& a, const auto& b) {
-    if (a.first.ident != b.first.ident) return a.first.ident < b.first.ident;
+    if (a.first.ident != b.first.ident) {
+      return a.first.ident < b.first.ident;
+    }
     return a.first.region < b.first.region;
   });
   assert(std::is_sorted(navaids_.begin(), navaids_.end(), [](const auto& a, const auto& b) {
-    if (a.first.ident != b.first.ident) return a.first.ident < b.first.ident;
+    if (a.first.ident != b.first.ident) {
+      return a.first.ident < b.first.ident;
+    }
     return a.first.region < b.first.region;
   }));
   std::sort(holds_.begin(), holds_.end(),
             [](const HoldInfo& a, const HoldInfo& b) { return a.fix_ident < b.fix_ident; });
-  assert(std::is_sorted(holds_.begin(), holds_.end(),
-                        [](const HoldInfo& a, const HoldInfo& b) {
-                          return a.fix_ident < b.fix_ident;
-                        }));
+  assert(std::is_sorted(holds_.begin(), holds_.end(), [](const HoldInfo& a, const HoldInfo& b) {
+    return a.fix_ident < b.fix_ident;
+  }));
   loaded_ = true;
 }
 
@@ -221,7 +224,9 @@ std::vector<NavaidDetailInfo> NavDetailArchive::FindNavaids(const std::string& i
     return out;
   }
   assert(std::is_sorted(navaids_.begin(), navaids_.end(), [](const auto& a, const auto& b) {
-    if (a.first.ident != b.first.ident) return a.first.ident < b.first.ident;
+    if (a.first.ident != b.first.ident) {
+      return a.first.ident < b.first.ident;
+    }
     return a.first.region < b.first.region;
   }));
   // lower_bound on ident string; collect all matching ident (any region).
@@ -239,10 +244,9 @@ std::vector<HoldInfo> NavDetailArchive::FindHolds(const std::string& ident) cons
   if (!loaded_) {
     return out;
   }
-  assert(std::is_sorted(holds_.begin(), holds_.end(),
-                        [](const HoldInfo& a, const HoldInfo& b) {
-                          return a.fix_ident < b.fix_ident;
-                        }));
+  assert(std::is_sorted(holds_.begin(), holds_.end(), [](const HoldInfo& a, const HoldInfo& b) {
+    return a.fix_ident < b.fix_ident;
+  }));
   // holds_ is sorted by fix_ident; use lower/upper_bound to find the range.
   auto cmp = [](const HoldInfo& h, const std::string& key) { return h.fix_ident < key; };
   auto lo = std::lower_bound(holds_.begin(), holds_.end(), ident, cmp);

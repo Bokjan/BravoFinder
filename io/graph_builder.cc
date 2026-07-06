@@ -100,8 +100,12 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   auto add_edge = [&](int from, int to, uint16_t airway_id, const AirwaySegment& s) {
     const double dist = graph_.coords_[from].DistanceTo(graph_.coords_[to]);
     uint8_t flags = 0;
-    if (s.level == AirwayLevel::kHigh) flags |= kEdgeHigh;
-    if (s.level == AirwayLevel::kBoth) flags |= kEdgeBoth;  // DFD flightlevel 'B'
+    if (s.level == AirwayLevel::kHigh) {
+      flags |= kEdgeHigh;
+    }
+    if (s.level == AirwayLevel::kBoth) {
+      flags |= kEdgeBoth;  // DFD flightlevel 'B'
+    }
     adj[from].push_back(GraphEdge{to, static_cast<float>(dist), airway_id,
                                   static_cast<int16_t>(s.base_fl), static_cast<int16_t>(s.top_fl),
                                   flags});

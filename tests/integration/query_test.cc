@@ -138,7 +138,9 @@ TEST_CASE("query: concurrent airway is found by each of its designators", "[inte
         break;
       }
     }
-    if (shared) break;
+    if (shared) {
+      break;
+    }
   }
   CHECK(shared);
 }

@@ -73,8 +73,12 @@ std::string FieldStr(const std::vector<std::string>& f, int idx) {
 }
 
 ProcedureType TypeFromTag(std::string_view tag) {
-  if (tag == "STAR") return ProcedureType::kStar;
-  if (tag == "APPCH") return ProcedureType::kApproach;
+  if (tag == "STAR") {
+    return ProcedureType::kStar;
+  }
+  if (tag == "APPCH") {
+    return ProcedureType::kApproach;
+  }
   return ProcedureType::kSid;
 }
 

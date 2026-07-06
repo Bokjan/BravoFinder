@@ -99,7 +99,9 @@ void PrintRoutesJson(const std::vector<Route>& routes) {
 std::optional<FlRange> ParseAltSpec(const std::string& spec) {
   const size_t dash = spec.find('-');
   auto to_int = [](const std::string& s, int& out) -> bool {
-    if (s.empty()) return false;
+    if (s.empty()) {
+      return false;
+    }
     try {
       size_t pos = 0;
       out = std::stoi(s, &pos);
@@ -110,7 +112,9 @@ std::optional<FlRange> ParseAltSpec(const std::string& spec) {
   };
   if (dash == std::string::npos) {
     int fl = 0;
-    if (!to_int(spec, fl)) return std::nullopt;
+    if (!to_int(spec, fl)) {
+      return std::nullopt;
+    }
     return FlRange{fl, fl};
   }
   int lo = 0;
@@ -118,7 +122,9 @@ std::optional<FlRange> ParseAltSpec(const std::string& spec) {
   if (!to_int(spec.substr(0, dash), lo) || !to_int(spec.substr(dash + 1), hi)) {
     return std::nullopt;
   }
-  if (lo > hi) return std::nullopt;
+  if (lo > hi) {
+    return std::nullopt;
+  }
   return FlRange{lo, hi};
 }
 
