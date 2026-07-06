@@ -6,7 +6,7 @@ should follow them.
 > Note on language: the project front matter (README, this file, THIRD_PARTY_LICENSES)
 > is maintained in **English**; in-depth technical articles under `docs/` are written
 > in **Chinese** (`*.zh-CN.md`). **Code comments and commit messages must be in
-> English** (see §2).
+> English**.
 
 ---
 
@@ -59,10 +59,9 @@ Indicates the module affected, taken from the project layering:
 
 ### 1.5 footer
 
-- Keep the Claude co-author trailer:
-  ```
-  Co-Authored-By: Claude <noreply@anthropic.com>
-  ```
+- If AI assistance was used, add a co-author trailer reflecting the actual tool
+  (e.g. `Co-Authored-By: Claude <noreply@anthropic.com>`). Do not fabricate one
+  when no AI was involved.
 - Reference issues if any: `Closes #12`.
 
 ### 1.6 Examples
@@ -85,19 +84,7 @@ build: wire up Catch2 and CLI11 via FetchContent
 
 ---
 
-## 2. Language Rules
-
-| Content type | Language |
-|---|---|
-| Project front matter (README, this file, THIRD_PARTY_LICENSES) | **English** |
-| In-depth technical articles under `docs/` | **Chinese** (`*.zh-CN.md`) |
-| Code comments (all comments in `.h`/`.cc`: file header, class/function docs, inline) | **English (required)** |
-| git commit message (subject + body) | **English** |
-| Identifiers (types, functions, variable names) | English (C++ convention) |
-
----
-
-## 3. Code Style
+## 2. Code Style
 
 - **Base**: [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 - **Semantics**: follow the
@@ -107,7 +94,7 @@ build: wire up Catch2 and CLI11 via FetchContent
   Code should be formatted before committing.
 - **Language standard**: C++20.
 
-### 3.1 Naming and Files
+### 2.1 Naming and Files
 
 - **Source file names**: snake_case; headers `.h`, implementations `.cc`
   (e.g. `coordinate.h`, `nav_graph.cc`, `a_star.cc`).
@@ -116,7 +103,7 @@ build: wire up Catch2 and CLI11 via FetchContent
 - Types `PascalCase`, variables `snake_case`, constants `kPascalCase`, member
   variables with trailing underscore `member_` (per Google convention).
 
-### 3.2 Error Handling
+### 2.2 Error Handling
 
 - Use the in-house `bf::Result<T, E>` (`core/result.h`); do not use `std::expected`
   or `tl::expected`.
@@ -126,7 +113,7 @@ build: wire up Catch2 and CLI11 via FetchContent
 
 ---
 
-## 4. Branching and Versioning
+## 3. Branching and Versioning
 
 - **Branching**: single-developer workflow; commit directly to the `v3` branch,
   keeping a linear history; no feature branches.
@@ -139,7 +126,7 @@ build: wire up Catch2 and CLI11 via FetchContent
 
 ---
 
-## 5. License and Data Compliance
+## 4. License and Data Compliance
 
 - This project is open-sourced under the **MIT** license (see `LICENSE` at the root).
 - All third-party dependencies use permissive licenses (see `THIRD_PARTY_LICENSES.md`)
