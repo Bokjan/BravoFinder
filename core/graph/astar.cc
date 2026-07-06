@@ -19,13 +19,13 @@ struct QueueNode {
 
 // Evaluate all constraints for an edge. Returns false if any blocks it;
 // otherwise accumulates soft penalties into `extra_cost`.
-bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coordinate& to_coord,
-                 double& extra_cost) {
+bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coordinate& from_coord,
+                 const Coordinate& to_coord, double& extra_cost) {
   extra_cost = 0.0;
   if (options.constraints.empty() || options.request == nullptr) {
     return true;
   }
-  const EdgeContext ctx{edge, to_coord};
+  const EdgeContext ctx{edge, from_coord, to_coord};
   for (const Constraint* c : options.constraints) {
     const EdgeVerdict v = c->Evaluate(ctx, *options.request);
     if (!v.allowed) {
@@ -85,7 +85,7 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
         continue;
       }
       double extra_cost = 0.0;
-      if (!EdgeAllowed(options, *e, graph.CoordOf(v), extra_cost)) {
+      if (!EdgeAllowed(options, *e, graph.CoordOf(u), graph.CoordOf(v), extra_cost)) {
         continue;
       }
       const double tentative = g[u] + e->distance_nm + extra_cost;
@@ -228,7 +228,7 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
         continue;
       }
       double extra_cost = 0.0;
-      if (!EdgeAllowed(options, *e, graph.CoordOf(v), extra_cost)) {
+      if (!EdgeAllowed(options, *e, graph.CoordOf(u), graph.CoordOf(v), extra_cost)) {
         continue;
       }
       const double tentative = g[u] + e->distance_nm + extra_cost;

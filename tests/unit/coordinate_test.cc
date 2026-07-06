@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cmath>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -37,6 +38,17 @@ TEST_CASE("one degree of latitude is about 60 NM", "[coordinate]") {
   const bf::Coordinate a{0.0, 0.0};
   const bf::Coordinate b{1.0, 0.0};
   CHECK_THAT(a.DistanceTo(b), WithinRel(60.0, 0.005));
+}
+
+TEST_CASE("antipodal points are finite and near half-circumference", "[coordinate]") {
+  // Antipodal points push the haversine `a` term to ~1.0, where floating-point
+  // error can push it just past 1.0 and make asin(sqrt(a)) NaN. The atan2 form
+  // stays finite. Half-circumference is ~10800 NM.
+  const bf::Coordinate a{40.0, -100.0};
+  const bf::Coordinate b{-40.0, 80.0};  // antipode of (40, -100) is (-40, 80)
+  const double d = a.DistanceTo(b);
+  CHECK(std::isfinite(d));
+  CHECK_THAT(d, WithinRel(10800.0, 0.01));
 }
 
 }  // namespace

@@ -20,29 +20,33 @@ class McpServer {
  public:
   // Takes the registry to serve from. The registry must outlive the server.
   // Each database it holds is read-only per NavDatabase contract B.
-  explicit McpServer(NavDatabaseRegistry& registry) : registry_(registry) {}
+  explicit McpServer(NavDatabaseRegistry& registry) : registry_(registry), tools_(MakeTools()) {}
 
   // Run the stdio request/response loop until stdin closes. Returns the process
   // exit status.
   int Run();
 
  private:
-  // A persistent allocator host. Tool schemas are deep-copied into this
-  // Document's allocator so each Tool owns its schema independently of whatever
-  // temporary Document parsed the schema string.
-  rapidjson::Document schema_store_;
-
+  // The registry to serve from. Each database it holds is read-only per
+  // NavDatabase contract B.
   NavDatabaseRegistry& registry_;
 
-  void HandleInitialize(int id);
-  void HandleToolsList(int id);
-  void HandleToolsCall(int id, const rapidjson::Value& params);
-  void HandleListCycles(int id);
+  // The tool list, built once in the constructor (no function-level static
+  // mutable state). Each Tool owns its rapidjson::Document schema, so the vector
+  // holds move-only, non-copyable elements.
+  std::vector<Tool> tools_;
 
-  // JSON-RPC response helpers.
-  void SendResult(int id, rapidjson::Value& result);
-  void SendError(int id, int code, const std::string& message);
-  void SendToolResult(int id, const std::string& json_text, bool is_error);
+  void HandleInitialize(const rapidjson::Value& id);
+  void HandleToolsList(const rapidjson::Value& id);
+  void HandleToolsCall(const rapidjson::Value& id, const rapidjson::Value& params);
+  void HandleListCycles(const rapidjson::Value& id);
+
+  // JSON-RPC response helpers. `id` is written back verbatim (int, string, or
+  // null) so a client's request id round-trips unchanged; notifications (no id)
+  // never reach these because Run() does not call them.
+  void SendResult(const rapidjson::Value& id, rapidjson::Value& result);
+  void SendError(const rapidjson::Value& id, int code, const std::string& message);
+  void SendToolResult(const rapidjson::Value& id, const std::string& json_text, bool is_error);
 };
 
 }  // namespace bf::mcp

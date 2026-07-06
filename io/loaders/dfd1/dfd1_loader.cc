@@ -101,45 +101,45 @@ WaypointKind NavaidKindFromClass(const std::string& cls) {
 
 // --- Per-table loaders. Each runs one query and appends to `data`. ---
 
-void LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
+Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
   // 0=icao_code 1=waypoint_identifier 2=lat 3=lon
   Result<SqliteStmt> s =
       Prepare(conn,
               "SELECT icao_code, waypoint_identifier, waypoint_latitude, waypoint_longitude "
               "FROM tbl_enroute_waypoints");
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
     if (seen.insert(key).second) {
       data.waypoints.push_back(Waypoint{
           key, Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)}, WaypointKind::kFix});
     }
-  }
+  });
 }
 
-void LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
+Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
   // 0=region_code 1=waypoint_identifier 2=lat 3=lon
   Result<SqliteStmt> s =
       Prepare(conn,
               "SELECT region_code, waypoint_identifier, waypoint_latitude, waypoint_longitude "
               "FROM tbl_terminal_waypoints");
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
     if (seen.insert(key).second) {
       data.waypoints.push_back(Waypoint{
           key, Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)}, WaypointKind::kFix});
     }
-  }
+  });
 }
 
-void LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
+Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
   // 0=icao_code 1=vor_identifier 2=vor_frequency 3=navaid_class 4=range
   // 5=station_declination 6=dme_elevation 7=vor_lat 8=vor_lon
   Result<SqliteStmt> s = Prepare(
@@ -147,17 +147,17 @@ void LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ident>& see
       "SELECT icao_code, vor_identifier, vor_frequency, navaid_class, range, "
       "station_declination, dme_elevation, vor_latitude, vor_longitude FROM tbl_vhfnavaids");
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     const WaypointKind kind = NavaidKindFromClass(ColumnText(stmt, 3));
     if (kind == WaypointKind::kOther) {
-      continue;  // ILS/LOC component: not enroute-routable
+      return;  // ILS/LOC component: not enroute-routable
     }
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
     if (!seen.insert(key).second) {
-      continue;
+      return;
     }
     data.waypoints.push_back(
         Waypoint{key, Coordinate{ColumnDouble(stmt, 7), ColumnDouble(stmt, 8)}, kind});
@@ -165,11 +165,11 @@ void LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ident>& see
     const int freq_raw = static_cast<int>(std::lround(ColumnDouble(stmt, 2) * 100.0));
     data.navaid_details.push_back(NavaidDetail{key, kind, ColumnInt(stmt, 6), freq_raw,
                                                ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)});
-  }
+  });
 }
 
-void LoadNdbNavaids(sqlite3* conn, NavData& data, const char* table,
-                    std::unordered_set<Ident>& seen) {
+Result<void> LoadNdbNavaids(sqlite3* conn, NavData& data, const char* table,
+                            std::unordered_set<Ident>& seen) {
   // 0=icao_code 1=ndb_identifier 2=ndb_frequency 3=range 4=lat 5=lon
   const std::string sql = std::string(
                               "SELECT icao_code, ndb_identifier, ndb_frequency, range, "
@@ -177,23 +177,23 @@ void LoadNdbNavaids(sqlite3* conn, NavData& data, const char* table,
                           table;
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
     if (!seen.insert(key).second) {
-      continue;
+      return;
     }
     data.waypoints.push_back(Waypoint{key, Coordinate{ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)},
                                       WaypointKind::kNdb});
     // NDB frequency is kHz; freq_raw stores kHz as-is.
     data.navaid_details.push_back(
         NavaidDetail{key, WaypointKind::kNdb, 0, ColumnInt(stmt, 2), ColumnDouble(stmt, 3), 0.0});
-  }
+  });
 }
 
-void LoadAirways(sqlite3* conn, NavData& data) {
+Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   // One row per waypoint on an airway; consecutive same-route_identifier rows (by
   // seqno) form segments. 0=route_identifier 1=seqno 2=waypoint_identifier
   // 3=icao_code 4=direction_restriction 5=flightlevel 6=minimum_altitude1
@@ -205,13 +205,13 @@ void LoadAirways(sqlite3* conn, NavData& data) {
               "outbound_course, inbound_course FROM tbl_enroute_airways "
               "ORDER BY route_identifier, seqno");
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
   bool have_prev = false;
   std::string prev_route, prev_ident, prev_icao;
   AirwaySegment seg;
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     const std::string route = ColumnText(stmt, 0);
     const std::string ident = ColumnText(stmt, 2);
     const std::string icao = ColumnText(stmt, 3);
@@ -233,26 +233,26 @@ void LoadAirways(sqlite3* conn, NavData& data) {
     prev_ident = ident;
     prev_icao = icao;
     have_prev = true;
-  }
+  });
 }
 
-void LoadAirports(sqlite3* conn, NavData& data) {
+Result<void> LoadAirports(sqlite3* conn, NavData& data) {
   // 0=icao_code 1=airport_identifier 2=lat 3=lon 4=elevation
   Result<SqliteStmt> s = Prepare(conn,
                                  "SELECT icao_code, airport_identifier, airport_ref_latitude, "
                                  "airport_ref_longitude, elevation FROM tbl_airports");
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     data.airports.push_back(Airport{ColumnText(stmt, 1), ColumnText(stmt, 0),
                                     Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)},
                                     ColumnInt(stmt, 4)});
-  }
+  });
 }
 
-void LoadHoldings(sqlite3* conn, NavData& data) {
+Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
   // 0=region_code 1=icao_code 2=waypoint_identifier 3=inbound_holding_course
   // 4=turn_direction 5=leg_length 6=leg_time 7=minimum_altitude 8=maximum_altitude
   // 9=holding_speed
@@ -262,10 +262,10 @@ void LoadHoldings(sqlite3* conn, NavData& data) {
               "turn_direction, leg_length, leg_time, minimum_altitude, maximum_altitude, "
               "holding_speed FROM tbl_holdings");
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     HoldFix h;
     h.fix = Ident(ColumnText(stmt, 2), ColumnText(stmt, 1));  // region = icao_code
     h.airport_icao = ColumnText(stmt, 0);                     // region_code = airport/ENRT
@@ -280,10 +280,10 @@ void LoadHoldings(sqlite3* conn, NavData& data) {
     h.max_alt_ft = (max_alt >= 99999) ? 0 : max_alt;
     h.speed_limit_kt = ColumnInt(stmt, 9);
     data.hold_fixes.push_back(std::move(h));
-  }
+  });
 }
 
-void LoadMsa(sqlite3* conn, NavData& data) {
+Result<void> LoadMsa(sqlite3* conn, NavData& data) {
   // 0=airport_identifier 1=msa_center 2=msa_center_latitude 3=msa_center_longitude
   // 4=radius_limit 5..6=sector1(bearing,alt) 7..8=sector2 ...
   Result<SqliteStmt> s =
@@ -294,10 +294,10 @@ void LoadMsa(sqlite3* conn, NavData& data) {
               "sector_bearing_3, sector_altitude_3, sector_bearing_4, sector_altitude_4, "
               "sector_bearing_5, sector_altitude_5 FROM tbl_airport_msa");
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     MsaSector sector;
     // center latitude/longitude are available but MsaSector.center is an Ident
     // with no coordinate slot (matching X-Plane, which also discards them); the
@@ -316,10 +316,10 @@ void LoadMsa(sqlite3* conn, NavData& data) {
     if (!sector.arcs.empty()) {
       data.msa.push_back(std::move(sector));
     }
-  }
+  });
 }
 
-void LoadGridMora(sqlite3* conn, NavData& data) {
+Result<void> LoadGridMora(sqlite3* conn, NavData& data) {
   // v1: starting_latitude/longitude are INTEGER. mora01..mora30 are TEXT(3) ("010"
   // or "UNK"). Each row covers 30 one-degree cells of longitude from lon0.
   Result<SqliteStmt> s =
@@ -330,16 +330,16 @@ void LoadGridMora(sqlite3* conn, NavData& data) {
               "mora21, mora22, mora23, mora24, mora25, mora26, mora27, mora28, mora29, mora30 "
               "FROM tbl_grid_mora");
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     const int lat = ColumnInt(stmt, 0);
     const int lon0 = ColumnInt(stmt, 1);
     for (int i = 0; i < 30; ++i) {
       const std::string v = ColumnText(stmt, 2 + i);
       if (v.empty() || v == "UNK") {
-        continue;
+        continue;  // inner loop: skip this cell, not the whole row
       }
       int value = 0;
       std::from_chars(v.data(), v.data() + v.size(), value);
@@ -347,7 +347,7 @@ void LoadGridMora(sqlite3* conn, NavData& data) {
         data.mora.SetCell(lat, lon0 + i, static_cast<int16_t>(value));
       }
     }
-  }
+  });
 }
 
 }  // namespace
@@ -370,7 +370,11 @@ Result<NavData> Dfd1Loader::LoadNavData(const std::string& source_dir) const {
   // AIRAC cycle from tbl_header.current_airac (e.g. "2601").
   Result<SqliteStmt> s = Prepare(conn.value(), "SELECT current_airac FROM tbl_header LIMIT 1");
   if (s) {
-    if (Step(s.value().get()).value_or(false)) {
+    Result<bool> row = Step(s.value().get());
+    if (!row) {
+      return Result<NavData>::Err(row.error());
+    }
+    if (row.value()) {
       const std::string cyc = ColumnText(s.value().get(), 0);
       unsigned int cycle = 0;
       std::from_chars(cyc.data(), cyc.data() + cyc.size(), cycle);
@@ -378,17 +382,50 @@ Result<NavData> Dfd1Loader::LoadNavData(const std::string& source_dir) const {
     }
   }
 
+  // Each per-table loader returns Result<void>; a step error (corruption, IO)
+  // propagates as a load failure rather than silently producing partial data.
   std::unordered_set<Ident> seen;
-  LoadEnrouteWaypoints(conn.value(), data, seen);
-  LoadTerminalWaypoints(conn.value(), data, seen);
-  LoadVhfNavaids(conn.value(), data, seen);
-  LoadNdbNavaids(conn.value(), data, "tbl_enroute_ndbnavaids", seen);
-  LoadNdbNavaids(conn.value(), data, "tbl_terminal_ndbnavaids", seen);
-  LoadAirways(conn.value(), data);
-  LoadAirports(conn.value(), data);
-  LoadHoldings(conn.value(), data);
-  LoadMsa(conn.value(), data);
-  LoadGridMora(conn.value(), data);
+  Result<void> load = Result<void>::Ok();
+  load = LoadEnrouteWaypoints(conn.value(), data, seen);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadTerminalWaypoints(conn.value(), data, seen);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadVhfNavaids(conn.value(), data, seen);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadNdbNavaids(conn.value(), data, "tbl_enroute_ndbnavaids", seen);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadNdbNavaids(conn.value(), data, "tbl_terminal_ndbnavaids", seen);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadAirways(conn.value(), data);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadAirports(conn.value(), data);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadHoldings(conn.value(), data);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadMsa(conn.value(), data);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  load = LoadGridMora(conn.value(), data);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
   return Result<NavData>::Ok(std::move(data));
 }
 
@@ -420,8 +457,12 @@ struct ProcCols {
 // change in (airport, name, transition, route_type) flushes the current
 // Procedure, and a change in airport emits the previous airport's accumulated
 // CifpData. This avoids per-airport `Prepare` (~7k airports x 3 tables).
-void LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
-                   std::vector<AirportProcedureData>& out) {
+Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
+                           std::vector<AirportProcedureData>& out) {
+  // route_type is part of the flush key, so it must be in the ORDER BY to give
+  // the partitioning a total order: without it, rows sharing (name, transition)
+  // but differing in route_type could interleave and split one procedure across
+  // two records (the SQL engine is free to return same-key rows in any order).
   const std::string sql =
       std::string(
           "SELECT airport_identifier, procedure_identifier, route_type, "
@@ -430,10 +471,10 @@ void LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
           "distance_time, altitude_description, altitude1, altitude2 FROM ") +
       table +
       " ORDER BY airport_identifier, procedure_identifier, "
-      "transition_identifier, seqno";
+      "transition_identifier, route_type, seqno";
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
-    return;
+    return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
   const ProcCols c;
@@ -460,7 +501,7 @@ void LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     cifp = CifpData{};
   };
 
-  while (Step(stmt).value_or(false)) {
+  return ForEachRow(stmt, [&]() {
     const std::string airport = ColumnText(stmt, c.airport);
     const std::string name = ColumnText(stmt, c.proc);
     const std::string trans = ColumnText(stmt, c.transition);
@@ -502,30 +543,35 @@ void LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                  ColumnInt(stmt, c.alt2));
     current.legs.push_back(std::move(leg));
-  }
+  });
+  // Flush the last airport's accumulated procedures.
   flush_airport();
+  return Result<void>::Ok();
 }
 
 // All runways, indexed by airport, so LoadProcedures can merge them into each
 // airport's CifpData in one pass (no per-airport query).
-std::unordered_map<std::string, std::vector<Runway>> LoadAllRunways(sqlite3* conn) {
+Result<std::unordered_map<std::string, std::vector<Runway>>> LoadAllRunways(sqlite3* conn) {
   std::unordered_map<std::string, std::vector<Runway>> by_airport;
   Result<SqliteStmt> s = Prepare(conn,
                                  "SELECT airport_identifier, runway_identifier, runway_latitude, "
                                  "runway_longitude, landing_threshold_elevation FROM tbl_runways "
                                  "ORDER BY airport_identifier");
   if (!s) {
-    return by_airport;
+    return Result<std::unordered_map<std::string, std::vector<Runway>>>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  while (Step(stmt).value_or(false)) {
+  Result<void> rows = ForEachRow(stmt, [&]() {
     Runway rwy;
     rwy.ident = ColumnText(stmt, 1);  // already "RW04L"-prefixed in DFD
     rwy.threshold = Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)};
     rwy.elevation_ft = ColumnInt(stmt, 4);
     by_airport[ColumnText(stmt, 0)].push_back(std::move(rwy));
+  });
+  if (!rows) {
+    return Result<std::unordered_map<std::string, std::vector<Runway>>>::Err(rows.error());
   }
-  return by_airport;
+  return Result<std::unordered_map<std::string, std::vector<Runway>>>::Ok(std::move(by_airport));
 }
 
 // Merge each airport's runways into its CifpData entry, in place. Runways go
@@ -553,12 +599,16 @@ void MergeRunways(std::vector<AirportProcedureData>& out,
 
 // Load one airport's procedures + runways on demand (LoadProcedure path). A
 // single per-airport prepare per table is fine here: this is the on-demand path,
-// called once per airport the routing touches.
+// called once per airport the routing touches. Returns nullopt when the airport
+// has no procedures/runways; a SQLite step error degrades to nullopt too (this
+// path is best-effort -- the full LoadProcedures path propagates such errors).
 std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& airport) {
   CifpData cifp;
   for (const auto& [table, type] : {std::pair{"tbl_sids", ProcedureType::kSid},
                                     {"tbl_stars", ProcedureType::kStar},
                                     {"tbl_iaps", ProcedureType::kApproach}}) {
+    // route_type is part of the flush key, so include it in the ORDER BY (see
+    // LoadProcTable for why a total order matters).
     const std::string sql =
         std::string(
             "SELECT airport_identifier, procedure_identifier, route_type, "
@@ -567,7 +617,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
             "distance_time, altitude_description, altitude1, altitude2 FROM ") +
         table +
         " WHERE airport_identifier = ? ORDER BY procedure_identifier, "
-        "transition_identifier, seqno";
+        "transition_identifier, route_type, seqno";
     Result<SqliteStmt> s = Prepare(conn, sql);
     if (!s) {
       continue;
@@ -579,17 +629,20 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
     current.type = type;
     bool have_current = false;
     std::string cur_name, cur_trans, cur_route;
-    while (Step(stmt).value_or(false)) {
+    auto flush_current = [&]() {
+      if (have_current && !current.legs.empty()) {
+        cifp.procedures.push_back(std::move(current));
+      }
+      current = Procedure{};
+      current.type = type;
+      have_current = false;
+    };
+    Result<void> rows = ForEachRow(stmt, [&]() {
       const std::string name = ColumnText(stmt, c.proc);
       const std::string trans = ColumnText(stmt, c.transition);
       const std::string route = ColumnText(stmt, c.route_type);
       if (have_current && (name != cur_name || trans != cur_trans || route != cur_route)) {
-        if (!current.legs.empty()) {
-          cifp.procedures.push_back(std::move(current));
-        }
-        current = Procedure{};
-        current.type = type;
-        have_current = false;
+        flush_current();
       }
       if (!have_current) {
         cur_name = name;
@@ -616,10 +669,11 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
       leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                    ColumnInt(stmt, c.alt2));
       current.legs.push_back(std::move(leg));
+    });
+    if (!rows) {
+      return std::nullopt;  // step error: treat as load failure for this airport
     }
-    if (have_current && !current.legs.empty()) {
-      cifp.procedures.push_back(std::move(current));
-    }
+    flush_current();
   }
   // Runways for this airport.
   Result<SqliteStmt> rs =
@@ -629,12 +683,15 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
   if (rs) {
     sqlite3_stmt* stmt = rs.value().get();
     sqlite3_bind_text(stmt, 1, airport.c_str(), -1, SQLITE_TRANSIENT);
-    while (Step(stmt).value_or(false)) {
+    Result<void> rows = ForEachRow(stmt, [&]() {
       Runway rwy;
       rwy.ident = ColumnText(stmt, 0);
       rwy.threshold = Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)};
       rwy.elevation_ft = ColumnInt(stmt, 3);
       cifp.runways.push_back(std::move(rwy));
+    });
+    if (!rows) {
+      return std::nullopt;
     }
   }
   if (cifp.procedures.empty() && cifp.runways.empty()) {
@@ -656,9 +713,19 @@ Result<std::vector<AirportProcedureData>> Dfd1Loader::LoadProcedures(
     return Result<std::vector<AirportProcedureData>>::Err(std::move(conn).error());
   }
   std::vector<AirportProcedureData> out;
-  LoadProcTable(conn.value(), "tbl_sids", ProcedureType::kSid, out);
-  LoadProcTable(conn.value(), "tbl_stars", ProcedureType::kStar, out);
-  LoadProcTable(conn.value(), "tbl_iaps", ProcedureType::kApproach, out);
+  Result<void> load = Result<void>::Ok();
+  load = LoadProcTable(conn.value(), "tbl_sids", ProcedureType::kSid, out);
+  if (!load) {
+    return Result<std::vector<AirportProcedureData>>::Err(load.error());
+  }
+  load = LoadProcTable(conn.value(), "tbl_stars", ProcedureType::kStar, out);
+  if (!load) {
+    return Result<std::vector<AirportProcedureData>>::Err(load.error());
+  }
+  load = LoadProcTable(conn.value(), "tbl_iaps", ProcedureType::kApproach, out);
+  if (!load) {
+    return Result<std::vector<AirportProcedureData>>::Err(load.error());
+  }
   // The three tables were scanned independently, so `out` is grouped per table,
   // not globally ordered by airport. Sort so each airport's procedures are
   // contiguous, then merge runways.
@@ -678,8 +745,12 @@ Result<std::vector<AirportProcedureData>> Dfd1Loader::LoadProcedures(
       merged.push_back(std::move(ap));
     }
   }
-  std::unordered_map<std::string, std::vector<Runway>> runways = LoadAllRunways(conn.value());
-  MergeRunways(merged, runways);
+  Result<std::unordered_map<std::string, std::vector<Runway>>> runways =
+      LoadAllRunways(conn.value());
+  if (!runways) {
+    return Result<std::vector<AirportProcedureData>>::Err(runways.error());
+  }
+  MergeRunways(merged, runways.value());
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(merged));
 }
 

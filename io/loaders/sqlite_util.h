@@ -42,6 +42,26 @@ Result<SqliteStmt> Prepare(sqlite3* conn, std::string_view sql);
 // (SQLITE_DONE); any other SQLite result is an Error (kParseError).
 Result<bool> Step(sqlite3_stmt* stmt);
 
+// Repeatedly step `stmt`, invoking `on_row` for each row, until SQLITE_DONE.
+// A step error (corruption, IO, schema mismatch) propagates as kParseError
+// instead of being silently swallowed as "no more rows". This replaces the
+// `while (Step(stmt).value_or(false))` pattern, which collapsed errors into
+// normal row exhaustion and returned partial data as Ok -- violating the
+// "parse error -> wrong route" invariant when a database page is corrupt.
+template <class F>
+Result<void> ForEachRow(sqlite3_stmt* stmt, F&& on_row) {
+  for (;;) {
+    Result<bool> r = Step(stmt);
+    if (!r) {
+      return Result<void>::Err(r.error());
+    }
+    if (!r.value()) {
+      return Result<void>::Ok();
+    }
+    on_row();
+  }
+}
+
 // Column accessors: null/blank-safe. Text is space-trimmed (DFD pads fixed-width
 // text columns); Int/Double treat null as 0.
 std::string ColumnText(sqlite3_stmt* stmt, int col);

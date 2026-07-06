@@ -26,17 +26,24 @@ std::vector<std::string> Intersect(const std::vector<std::string>& a,
 // is encoded "A593-Y592"; a single airway is just "Y592"; "DCT" yields {"DCT"}.
 // Real ATS route designators are letter+number with no internal hyphen, so '-'
 // is an unambiguous separator. Source order is preserved (the sets are tiny --
-// at most ~10 designators -- so a vector beats a tree here).
+// at most ~10 designators -- so a vector beats a tree here). Empty segments
+// (a leading/trailing/double hyphen, or an empty input) are dropped, since an
+// empty designator is never a valid airway and would otherwise be written into
+// the route string and mistaken for a real name.
 std::vector<std::string> SplitDesignators(const std::string& via) {
   std::vector<std::string> out;
   size_t start = 0;
   while (start <= via.size()) {
     const size_t dash = via.find('-', start);
     if (dash == std::string::npos) {
-      out.push_back(via.substr(start));
+      if (start < via.size()) {
+        out.push_back(via.substr(start));
+      }
       break;
     }
-    out.push_back(via.substr(start, dash - start));
+    if (dash > start) {
+      out.push_back(via.substr(start, dash - start));
+    }
     start = dash + 1;
   }
   return out;
@@ -58,6 +65,13 @@ std::string BuildRouteString(const std::string& first_point, std::vector<RouteLe
     // Grow a group of consecutive legs whose designator lists keep a non-empty
     // running intersection (i.e. they stay on a shared physical airway).
     std::vector<std::string> running = SplitDesignators(legs[i].via);
+    if (running.empty()) {
+      // An empty via is not a real airway; treat the leg as DCT to stay safe.
+      legs[i].concurrent_airways.clear();
+      rs += " DCT " + legs[i].to;
+      ++i;
+      continue;
+    }
     size_t j = i;
     while (j + 1 < legs.size() && legs[j + 1].via != "DCT") {
       std::vector<std::string> inter = Intersect(running, SplitDesignators(legs[j + 1].via));

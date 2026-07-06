@@ -64,6 +64,11 @@ class Result {
 
   // Return the success value if present, otherwise the supplied fallback.
   T value_or(T fallback) const& { return has_value() ? std::get<0>(data_) : std::move(fallback); }
+  // Move the success value out when present on an rvalue Result, so move-only
+  // T (e.g. unique_ptr) can be extracted without copying.
+  T value_or(T fallback) && {
+    return has_value() ? std::get<0>(std::move(data_)) : std::move(fallback);
+  }
 
  private:
   template <std::size_t I, class U>

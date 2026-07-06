@@ -11,38 +11,57 @@ namespace bf {
 namespace {
 
 // Compute the effective cost (geographic distance + soft penalties) of a fully
-// specified path, and its geographic distance. Returns false if any step is not
-// a real edge or is blocked by a constraint, in which case the path is invalid.
+// specified path, and its geographic distance. Returns false if any step has no
+// usable edge to the next vertex, or is blocked by a constraint on every
+// parallel edge. For each step, when several parallel edges connect u->v (the
+// same airway over different flight-level bands, or two airways sharing both
+// endpoints), the cheapest allowed one is chosen -- matching how A* relaxes the
+// edge with the least (distance_nm + soft penalty), rather than the first
+// matching edge (which could be the wrong band and mis-cost the candidate).
 bool CostOfPath(const NavGraph& graph, const std::vector<int>& path, const SearchOptions& options,
                 double& cost, double& distance) {
   cost = 0.0;
   distance = 0.0;
+  const bool use_constraints = !options.constraints.empty() && options.request != nullptr;
   for (size_t i = 0; i + 1 < path.size(); ++i) {
     const int u = path[i];
     const int v = path[i + 1];
-    const GraphEdge* found = nullptr;
+    // Among all parallel u->v edges, pick the cheapest allowed one (A* does the
+    // same on relaxation); if none is allowed the path is invalid.
+    double best_total = std::numeric_limits<double>::infinity();
+    double best_dist = 0.0;
+    bool found = false;
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
-      if (e->to == v) {
-        found = e;
-        break;
+      if (e->to != v) {
+        continue;
       }
-    }
-    if (found == nullptr) {
-      return false;
-    }
-    double extra = 0.0;
-    if (!options.constraints.empty() && options.request != nullptr) {
-      const EdgeContext ctx{*found, graph.CoordOf(v)};
-      for (const Constraint* c : options.constraints) {
-        const EdgeVerdict verdict = c->Evaluate(ctx, *options.request);
-        if (!verdict.allowed) {
-          return false;
+      double extra = 0.0;
+      if (use_constraints) {
+        const EdgeContext ctx{*e, graph.CoordOf(u), graph.CoordOf(v)};
+        for (const Constraint* c : options.constraints) {
+          const EdgeVerdict verdict = c->Evaluate(ctx, *options.request);
+          if (!verdict.allowed) {
+            extra = std::numeric_limits<double>::infinity();  // edge blocked
+            break;
+          }
+          extra += verdict.extra_cost;
         }
-        extra += verdict.extra_cost;
+      }
+      if (extra == std::numeric_limits<double>::infinity()) {
+        continue;  // this parallel edge is blocked; try the next
+      }
+      const double total = e->distance_nm + extra;
+      if (total < best_total) {
+        best_total = total;
+        best_dist = e->distance_nm;
+        found = true;
       }
     }
-    cost += found->distance_nm + extra;
-    distance += found->distance_nm;
+    if (!found) {
+      return false;  // no allowed edge u->v
+    }
+    cost += best_total;
+    distance += best_dist;
   }
   return true;
 }

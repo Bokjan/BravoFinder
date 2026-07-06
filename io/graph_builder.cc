@@ -78,26 +78,33 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   // --- Airway-name table; "DCT" reserved at index 0 for synthetic edges. ---
   airway_names_.push_back("DCT");
   std::unordered_map<std::string, int> name_to_id;
-  auto airway_id_for = [&](const std::string& name) -> uint16_t {
+  auto airway_id_for = [&](const std::string& name) -> int {
     auto it = name_to_id.find(name);
     if (it != name_to_id.end()) {
-      return static_cast<uint16_t>(it->second);
+      return it->second;
     }
     const int id = static_cast<int>(airway_names_.size());
     // airway_id is a uint16 in GraphEdge; guard against overflow. Real AIRAC
     // data has ~12k distinct airway names, far under the limit, so this is a
-    // fuse rather than an expected condition.
+    // fuse rather than an expected condition. On overflow we flag it (checked
+    // by NavDatabase::Open, which returns an error) rather than silently
+    // mapping the airway to "DCT" -- a silent DCT fallback would route over it
+    // as a synthetic direct edge and produce wrong routes with no signal.
     if (id > 0xFFFF) {
-      return 0;  // fall back to "DCT"; should never happen with real data
+      airway_overflow_ = true;
+      return -1;  // sentinel: caller skips the edge rather than emitting a wrong DCT
     }
     airway_names_.push_back(name);
     name_to_id.emplace(name, id);
-    return static_cast<uint16_t>(id);
+    return id;
   };
 
   // --- Adjacency list (built first, then flattened to CSR). ---
   std::vector<std::vector<GraphEdge>> adj(total);
-  auto add_edge = [&](int from, int to, uint16_t airway_id, const AirwaySegment& s) {
+  auto add_edge = [&](int from, int to, int airway_id, const AirwaySegment& s) {
+    if (airway_id < 0) {
+      return;  // airway overflow: drop this edge rather than emit a wrong DCT
+    }
     const double dist = graph_.coords_[from].DistanceTo(graph_.coords_[to]);
     uint8_t flags = 0;
     if (s.level == AirwayLevel::kHigh) {
@@ -106,7 +113,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     if (s.level == AirwayLevel::kBoth) {
       flags |= kEdgeBoth;  // DFD flightlevel 'B'
     }
-    adj[from].push_back(GraphEdge{to, static_cast<float>(dist), airway_id,
+    adj[from].push_back(GraphEdge{to, static_cast<float>(dist), static_cast<uint16_t>(airway_id),
                                   static_cast<int16_t>(s.base_fl), static_cast<int16_t>(s.top_fl),
                                   flags});
   };
@@ -119,7 +126,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     }
     const int from = from_it->second;
     const int to = to_it->second;
-    const uint16_t id = airway_id_for(conn.segment.name);
+    const int id = airway_id_for(conn.segment.name);
     // Honor directionality: kForward = from->to only, kBackward = to->from only,
     // kBoth = both directions.
     if (conn.segment.direction != AirwayDirection::kBackward) {

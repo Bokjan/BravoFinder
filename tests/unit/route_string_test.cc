@@ -123,4 +123,21 @@ TEST_CASE("empty legs yield just the first point", "[route_string]") {
   CHECK(bf::BuildRouteString("KJFK", legs) == "KJFK");
 }
 
+TEST_CASE("SplitDesignators drops empty segments", "[route_string]") {
+  // A leading/trailing/double hyphen or an empty input must not produce empty
+  // designators: an empty string would be written into the route string and
+  // mistaken for a real airway name.
+  CHECK(bf::SplitDesignators("").empty());
+  CHECK(bf::SplitDesignators("A593-").size() == 1);
+  CHECK(bf::SplitDesignators("A593-")[0] == "A593");
+  CHECK(bf::SplitDesignators("-A593").size() == 1);
+  CHECK(bf::SplitDesignators("-A593")[0] == "A593");
+  CHECK(bf::SplitDesignators("A593--Y592").size() == 2);
+  CHECK(bf::SplitDesignators("A593--Y592")[0] == "A593");
+  CHECK(bf::SplitDesignators("A593--Y592")[1] == "Y592");
+  // A normal concurrency and a single designator are unaffected.
+  CHECK(bf::SplitDesignators("A593-Y592").size() == 2);
+  CHECK(bf::SplitDesignators("DCT").size() == 1);
+}
+
 }  // namespace

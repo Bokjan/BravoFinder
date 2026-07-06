@@ -90,6 +90,13 @@ class GraphBuilder {
   // an airport.
   int ElevationOf(int vertex) const;
 
+  // True when the distinct-airway-name count exceeded the uint16 airway_id space
+  // during construction. Real AIRAC data (~12k names) never triggers this; when
+  // it does, overflowed airways are dropped (not silently mapped to DCT) and the
+  // caller (NavDatabase::Open) should reject the build rather than emit a graph
+  // that routes over half-dropped airways.
+  bool airway_overflow() const { return airway_overflow_; }
+
  private:
   // For FromSnapshot: constructs an empty builder to be populated from a snapshot.
   GraphBuilder() = default;
@@ -106,6 +113,7 @@ class GraphBuilder {
   std::vector<int>
       airport_elevations_ft_;  // per-airport elevation, size = V - first_airport_vertex_
   std::vector<std::string> airway_names_;
+  bool airway_overflow_ = false;                // set when distinct airway names exceed uint16
   std::unordered_map<Ident, int> ident_index_;  // (ident,region) -> vertex
   std::unordered_map<std::string, SmallVec<int, kIdentRegionInline>>
       ident_all_;                                       // ident -> all vertices

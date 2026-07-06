@@ -3,7 +3,7 @@
 // Each Tool binds its MCP name, description, JSON-Schema input descriptor, and
 // handler in one place. Handlers are pure with respect to server state: they
 // receive the request arguments and a read-only NavDatabase, and return
-// {json_text, is_error}. Adding a tool means adding one entry to AllTools();
+// {json_text, is_error}. Adding a tool means adding one entry to MakeTools();
 // nothing else in the server needs to change.
 
 #include "tools.h"
@@ -34,6 +34,22 @@ rapidjson::Document ParseSchema(const char* json) {
 }
 
 }  // namespace
+
+// Build a tool-error JSON payload `{"error":"<message>"}` using RapidJSON's
+// Writer so the message is auto-escaped. Tool error messages may carry
+// user-controlled strings (an unknown departure airport, a bad route token, an
+// unknown tool name), and the previous hand-rolled `R"({"error":")" + msg +
+// R"("})"` concatenation let a quote/backslash in the message break the JSON
+// frame.
+std::string JsonError(const std::string& message) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("error");
+  writer.String(message.c_str(), static_cast<unsigned>(message.size()));
+  writer.EndObject();
+  return buffer.GetString();
+}
 
 Tool::Tool(std::string tool_name, std::string tool_description, rapidjson::Document schema,
            ToolHandler tool_handler)
@@ -134,7 +150,7 @@ Tool MakeLookupTool(const char* name, const char* description, const char* schem
                        const NavDatabase& db) -> std::pair<std::string, bool> {
                 auto ids = ParseIdList(args, "ids");
                 if (!ids) {
-                  return {R"({"error":"ids (array of strings) is required"})", true};
+                  return {JsonError("ids (array of strings) is required"), true};
                 }
                 auto results = lookup(db, *ids);
                 return RunLookup(results, [](auto& w, const Info& x) {
@@ -159,7 +175,7 @@ Tool MakeGroupedLookupTool(const char* name, const char* description, const char
                                   const NavDatabase& db) -> std::pair<std::string, bool> {
                 auto ids = ParseIdList(args, "ids");
                 if (!ids) {
-                  return {R"({"error":"ids (array of strings) is required"})", true};
+                  return {JsonError("ids (array of strings) is required"), true};
                 }
                 return RunGroupedLookup<Info>(lookup(db, *ids), write_one);
               });
@@ -171,7 +187,7 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
   bf::RouteRequest request;
   if (!args.HasMember("departure") || !args["departure"].IsString() || !args.HasMember("arrival") ||
       !args["arrival"].IsString()) {
-    return {R"({"error":"departure and arrival are required"})", true};
+    return {JsonError("departure and arrival are required"), true};
   }
   request.departure = args["departure"].GetString();
   request.arrival = args["arrival"].GetString();
@@ -185,7 +201,7 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
       const int min_fl = has_min ? args["min_fl"].GetInt() : args["max_fl"].GetInt();
       const int max_fl = has_max ? args["max_fl"].GetInt() : args["min_fl"].GetInt();
       if (min_fl > max_fl) {
-        return {R"({"error":"min_fl must not exceed max_fl"})", true};
+        return {JsonError("min_fl must not exceed max_fl"), true};
       }
       request.altitude = bf::FlRange{min_fl, max_fl};
     }
@@ -200,6 +216,11 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
   }
   if (args.HasMember("k") && args["k"].IsInt()) {
     request.k = args["k"].GetInt();
+  }
+  // The schema declares minimum:1, but enforce it server-side too: Yen K-shortest
+  // is undefined for k <= 0, and a non-positive value must not reach FindRoutes.
+  if (request.k < 1) {
+    return {JsonError("k must be a positive integer (>= 1)"), true};
   }
   if (args.HasMember("departure_runway") && args["departure_runway"].IsString()) {
     request.departure_runway = args["departure_runway"].GetString();
@@ -230,7 +251,9 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
   if (!result) {
     // A failed route computation is a tool-level error: the LLM should see
     // isError=true rather than a 200-like payload carrying an "error" string.
-    return {R"({"error":")" + result.error().message + R"("})", true};
+    // The message may contain user-controlled strings (unknown departure, a bad
+    // forced point token), so emit it through the Writer for auto-escaping.
+    return {JsonError(result.error().message), true};
   }
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -247,11 +270,12 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
 std::pair<std::string, bool> ParseRouteHandler(const rapidjson::Value& args,
                                                const NavDatabase& db) {
   if (!args.HasMember("route") || !args["route"].IsString()) {
-    return {R"({"error":"route (string) is required"})", true};
+    return {JsonError("route (string) is required"), true};
   }
   bf::Result<bf::Route> result = db.ParseRoute(args["route"].GetString());
   if (!result) {
-    return {R"({"error":")" + result.error().message + R"("})", true};
+    // The message names the offending token (user-controlled), so escape it.
+    return {JsonError(result.error().message), true};
   }
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -260,14 +284,11 @@ std::pair<std::string, bool> ParseRouteHandler(const rapidjson::Value& args,
   return {buffer.GetString(), false};
 }
 
-const std::vector<Tool>& AllTools() {
-  // Lazily build the tool list once. We emplace (move) rather than use an
-  // initializer list, because Tool holds a rapidjson::Document, which is
-  // movable but not copyable.
-  static std::vector<Tool> tools;
-  if (!tools.empty()) {
-    return tools;
-  }
+std::vector<Tool> MakeTools() {
+  // Build the tool list once for the server to own as a member. We emplace
+  // (move) rather than use an initializer list, because Tool holds a
+  // rapidjson::Document, which is movable but not copyable.
+  std::vector<Tool> tools;
   tools.reserve(8);
 
   tools.emplace_back(

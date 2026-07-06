@@ -4,8 +4,9 @@
 // description, its JSON-Schema input descriptor, and the handler that implements
 // it. Handlers take the request arguments and a read-only NavDatabase, so they
 // are pure with respect to server state (no globals) and easy to reason about.
-// The set of available tools is exposed via AllTools(); the server iterates
-// that list for tools/list and looks up by name for tools/call.
+// The set of available tools is built by MakeTools(); the server owns that
+// vector as a member, iterating it for tools/list and looking up by name for
+// tools/call.
 
 #pragma once
 
@@ -42,7 +43,15 @@ struct Tool {
        ToolHandler tool_handler);
 };
 
-// Every tool the server exposes, in display order. Defined in tools.cc.
-const std::vector<Tool>& AllTools();
+// Build every tool the server exposes, in display order. Returns a vector
+// (moved, since Tool holds a non-copyable rapidjson::Document) for the server
+// to own as a member -- no function-level static mutable state.
+std::vector<Tool> MakeTools();
+
+// Build a tool-error JSON payload `{"error":"<message>"}` with RapidJSON's
+// Writer so the message is auto-escaped. Tool error messages may carry
+// user-controlled strings (an unknown departure airport, a bad route token, an
+// unknown tool name); this is the only sanctioned way to emit such a payload.
+std::string JsonError(const std::string& message);
 
 }  // namespace bf::mcp

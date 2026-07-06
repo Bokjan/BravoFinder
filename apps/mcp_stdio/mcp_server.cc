@@ -59,44 +59,74 @@ bool ParseRequest(const std::string& line, rapidjson::Document& doc) {
 }  // namespace
 
 int McpServer::Run() {
+  // JSON-RPC over stdio: one request per line, one response per line on stdout.
+  // A request with no "id" is a notification (per JSON-RPC 2.0) and gets no
+  // response. A request with an id (int, string, or null) is echoed back verbatim
+  // so the client can match the response.
   std::string line;
+  // Cap a single request line: a malicious or buggy client could stream without
+  // a newline and grow `line` until OOM. The MCP frame is bounded by realistic
+  // tool arguments; anything larger is rejected before parsing.
+  constexpr size_t kMaxLineLen = 16 * 1024 * 1024;  // 16 MiB
   while (std::getline(std::cin, line)) {
+    if (line.size() > kMaxLineLen) {
+      // Drop the oversized line; there is no request id to reply to yet.
+      continue;
+    }
     rapidjson::Document doc;
     if (!ParseRequest(line, doc)) {
       continue;
     }
     if (!doc.HasMember("method") || !doc["method"].IsString()) {
+      // Invalid request: only reply if it carried an id (a notification with no
+      // method is silently dropped, per JSON-RPC).
+      if (doc.HasMember("id")) {
+        SendError(doc["id"], -32600, "invalid request: missing or non-string method");
+      }
       continue;
     }
     const std::string method = doc["method"].GetString();
-    const int id = doc.HasMember("id") && doc["id"].IsInt() ? doc["id"].GetInt() : 0;
+    const bool has_id = doc.HasMember("id");
 
     if (method == "initialize") {
-      HandleInitialize(id);
+      if (!has_id) {
+        continue;  // notification: no response
+      }
+      HandleInitialize(doc["id"]);
     } else if (method == "tools/list") {
-      HandleToolsList(id);
+      if (!has_id) {
+        continue;
+      }
+      HandleToolsList(doc["id"]);
     } else if (method == "tools/call") {
+      if (!has_id) {
+        continue;
+      }
       // A tools/call request must carry a params object; without one it is a
       // protocol error rather than a tool error.
       if (!doc.HasMember("params") || !doc["params"].IsObject()) {
-        SendError(id, -32602, "tools/call requires a params object");
+        SendError(doc["id"], -32602, "tools/call requires a params object");
         continue;
       }
-      HandleToolsCall(id, doc["params"]);
+      HandleToolsCall(doc["id"], doc["params"]);
+    } else {
+      // Unknown method: reply with method-not-found only for a request (has id).
+      if (has_id) {
+        SendError(doc["id"], -32601, "method not found: " + method);
+      }
     }
-    // Notifications (no id) and unknown methods are silently ignored.
   }
   return 0;
 }
 
-void McpServer::SendResult(int id, rapidjson::Value& result) {
+void McpServer::SendResult(const rapidjson::Value& id, rapidjson::Value& result) {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
   writer.Key("jsonrpc");
   writer.String("2.0");
   writer.Key("id");
-  writer.Int(id);
+  id.Accept(writer);  // echo the client's id verbatim (int/string/null)
   writer.Key("result");
   result.Accept(writer);
   writer.EndObject();
@@ -104,14 +134,14 @@ void McpServer::SendResult(int id, rapidjson::Value& result) {
   std::cout.flush();
 }
 
-void McpServer::SendError(int id, int code, const std::string& message) {
+void McpServer::SendError(const rapidjson::Value& id, int code, const std::string& message) {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
   writer.Key("jsonrpc");
   writer.String("2.0");
   writer.Key("id");
-  writer.Int(id);
+  id.Accept(writer);  // echo the client's id verbatim (int/string/null)
   writer.Key("error");
   writer.StartObject();
   writer.Key("code");
@@ -124,14 +154,15 @@ void McpServer::SendError(int id, int code, const std::string& message) {
   std::cout.flush();
 }
 
-void McpServer::SendToolResult(int id, const std::string& json_text, bool is_error) {
+void McpServer::SendToolResult(const rapidjson::Value& id, const std::string& json_text,
+                               bool is_error) {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
   writer.Key("jsonrpc");
   writer.String("2.0");
   writer.Key("id");
-  writer.Int(id);
+  id.Accept(writer);  // echo the client's id verbatim (int/string/null)
   writer.Key("result");
   writer.StartObject();
   writer.Key("content");
@@ -140,6 +171,8 @@ void McpServer::SendToolResult(int id, const std::string& json_text, bool is_err
   writer.Key("type");
   writer.String("text");
   writer.Key("text");
+  // json_text is already a serialized JSON value; embed it as a string (the
+  // Writer escapes it), preserving its structure for the client to parse.
   writer.String(json_text.c_str(), static_cast<unsigned>(json_text.size()));
   writer.EndObject();
   writer.EndArray();
@@ -151,7 +184,7 @@ void McpServer::SendToolResult(int id, const std::string& json_text, bool is_err
   std::cout.flush();
 }
 
-void McpServer::HandleInitialize(int id) {
+void McpServer::HandleInitialize(const rapidjson::Value& id) {
   rapidjson::Document result;
   result.SetObject();
   auto& alloc = result.GetAllocator();
@@ -168,14 +201,14 @@ void McpServer::HandleInitialize(int id) {
   SendResult(id, result);
 }
 
-void McpServer::HandleToolsList(int id) {
+void McpServer::HandleToolsList(const rapidjson::Value& id) {
   rapidjson::Document result;
   result.SetObject();
   auto& alloc = result.GetAllocator();
   rapidjson::Value tools;
   tools.SetArray();
 
-  for (const Tool& tool : AllTools()) {
+  for (const Tool& tool : tools_) {
     rapidjson::Value entry;
     entry.SetObject();
     entry.AddMember("name", rapidjson::Value(tool.name.c_str(), alloc), alloc);
@@ -214,7 +247,7 @@ void McpServer::HandleToolsList(int id) {
 }
 
 // Serialize the registry's available cycles as a JSON array, newest first.
-void McpServer::HandleListCycles(int id) {
+void McpServer::HandleListCycles(const rapidjson::Value& id) {
   const BfdbInventory& inv = registry_.inventory();
   // A cycle is "loaded" once Get has opened it; the inventory does not track
   // that, so we only report the cycle here (loaded state is transient and not
@@ -234,7 +267,7 @@ void McpServer::HandleListCycles(int id) {
   SendToolResult(id, buffer.GetString(), inv.empty());
 }
 
-void McpServer::HandleToolsCall(int id, const rapidjson::Value& params) {
+void McpServer::HandleToolsCall(const rapidjson::Value& id, const rapidjson::Value& params) {
   if (!params.HasMember("name") || !params["name"].IsString()) {
     SendError(id, -32602, "missing tool name");
     return;
@@ -257,23 +290,32 @@ void McpServer::HandleToolsCall(int id, const rapidjson::Value& params) {
   // => latest). This is the server's concern, so the tool handlers never see
   // cycle and keep operating on a single database.
   std::optional<uint32_t> cycle;
-  if (args.HasMember("cycle") && args["cycle"].IsUint()) {
+  if (args.HasMember("cycle")) {
+    // Reject a present-but-invalid cycle rather than silently falling back to
+    // the latest: a client passing cycle:-1 would otherwise be served a
+    // different cycle's data with no signal.
+    if (!args["cycle"].IsUint()) {
+      SendToolResult(id, JsonError("cycle must be a non-negative integer (omit for latest)"), true);
+      return;
+    }
     cycle = args["cycle"].GetUint();
   }
   Result<const NavDatabase*> db = registry_.Get(cycle);
   if (!db) {
-    SendToolResult(id, R"({"error":")" + db.error().message + R"("})", true);
+    SendToolResult(id, JsonError(db.error().message), true);
     return;
   }
 
-  for (const Tool& tool : AllTools()) {
+  for (const Tool& tool : tools_) {
     if (tool.name == name) {
       auto [json, is_error] = tool.handler(args, *db.value());
       SendToolResult(id, json, is_error);
       return;
     }
   }
-  SendToolResult(id, R"({"error":"unknown tool: )" + name + R"("})", true);
+  // The tool name is client-controlled, so escape it (a name with a quote must
+  // not break the JSON frame).
+  SendToolResult(id, JsonError("unknown tool: " + name), true);
 }
 
 }  // namespace bf::mcp

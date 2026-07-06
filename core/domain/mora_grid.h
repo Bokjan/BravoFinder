@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -63,6 +64,12 @@ class MoraGrid {
 
  private:
   static int FloorToInt(double v) {
+    // Guard against non-finite or out-of-int-range input (a corrupted
+    // coordinate from a bad parse): static_cast<int> of such a value is UB, so
+    // bail to a sentinel that Index() then rejects as out of range.
+    if (!std::isfinite(v) || v < -1.0e9 || v > 1.0e9) {
+      return -9999;
+    }
     int i = static_cast<int>(v);
     if (v < 0 && static_cast<double>(i) != v) {
       --i;  // floor toward negative infinity

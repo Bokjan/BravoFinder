@@ -75,6 +75,19 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
 
   const std::string& pool_blob = pool.blob();
 
+  // The string pool's offset/length references and the pool_len header field are
+  // uint32. If the deduplicated pool exceeds 4 GiB those values would silently
+  // wrap, producing a cache file whose refs point at the wrong strings while
+  // Open still reads it -- a silent corruption. Real AIRAC data is far under
+  // this, so reject rather than truncate. (graph/cifp/detail section sizes are
+  // uint64, so only the shared pool is bounded this way.)
+  if (pool_blob.size() > 0xFFFFFFFFull) {
+    return Result<void>::Err(
+        Error(ErrorCode::kParseError,
+              "unified cache string pool exceeds 4 GiB; the uint32 pool offset space "
+              "cannot address it. This is unexpected for real AIRAC data."));
+  }
+
   // Header buffer: magic, version, section_count, cycle, provenance strings,
   // pool_len. Built first so its size is known before section offsets.
   std::string header;

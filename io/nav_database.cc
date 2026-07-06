@@ -44,6 +44,15 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   db.mora_ = std::move(data.value().mora);
   db.msa_ = std::move(data.value().msa);
   db.builder_ = std::make_unique<GraphBuilder>(data.value());
+  // The graph construction drops airways whose distinct-name count overflows the
+  // uint16 airway_id space (real data never triggers this). A build that did would
+  // silently lose airways, so reject it rather than return a graph that routes over
+  // partial airway data.
+  if (db.builder_->airway_overflow()) {
+    return Result<NavDatabase>::Err(
+        Error(ErrorCode::kParseError,
+              "too many distinct airway names (>65535) for the uint16 airway_id space"));
+  }
   // Build the detail archive from the same parse (navaid_details/hold_fixes are
   // still in `data`; mora/msa were moved out above but those two were not).
   db.detail_archive_ = NavDetailArchive::FromData(data.value());

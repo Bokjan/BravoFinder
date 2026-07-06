@@ -16,11 +16,12 @@ struct EdgeVerdict {
   static EdgeVerdict Penalize(double cost) { return {true, cost}; }
 };
 
-// Context for evaluating one directed edge: the edge itself and the coordinate
-// of the point being entered (its destination vertex), so position-dependent
-// constraints (e.g. MORA) can look up the relevant cell.
+// Context for evaluating one directed edge: the edge itself and the coordinates
+// of both endpoints, so position-dependent constraints (e.g. MORA, which must
+// sample terrain along the whole leg) can look up the relevant cells.
 struct EdgeContext {
   const GraphEdge& edge;
+  Coordinate from_coord;
   Coordinate to_coord;
 };
 
