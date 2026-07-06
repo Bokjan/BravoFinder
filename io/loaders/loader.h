@@ -5,8 +5,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/domain/procedure.h"
 #include "core/result.h"
-#include "io/loaders/xplane12/cifp/cifp_parser.h"
 #include "io/nav_data.h"
 
 namespace bf {

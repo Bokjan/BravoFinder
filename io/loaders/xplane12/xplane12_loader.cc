@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "core/domain/airway.h"
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/navaid_detail.h"
@@ -100,12 +101,6 @@ WaypointKind NavKindFromRowCode(int code) {
     default:
       return WaypointKind::kOther;
   }
-}
-
-AirwayDirection ParseDirection(const std::string& token) {
-  if (token == "F") return AirwayDirection::kForward;
-  if (token == "B") return AirwayDirection::kBackward;
-  return AirwayDirection::kBoth;  // 'N'
 }
 
 }  // namespace

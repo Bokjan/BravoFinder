@@ -42,6 +42,11 @@ class LevelPreferenceConstraint : public Constraint {
     if (request.level == LevelPreference::kNone) {
       return EdgeVerdict::Allow();
     }
+    // A both-level segment (DFD flightlevel 'B') is usable at either level, so it
+    // is never penalized regardless of the preference.
+    if (EdgeIsBoth(ctx.edge)) {
+      return EdgeVerdict::Allow();
+    }
     const bool wants_high = request.level == LevelPreference::kHigh;
     if (EdgeIsHigh(ctx.edge) == wants_high) {
       return EdgeVerdict::Allow();

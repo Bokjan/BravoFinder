@@ -94,9 +94,16 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLo
   return Result<NavDatabase>::Ok(std::move(db));
 }
 
-Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path, bool with_cifp) const {
+Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
   if (!builder_) {
     return Result<uint32_t>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
+  }
+  // The CIFP section is mandatory: a cache without procedures cannot resolve
+  // SID/STAR, so it is always written. Requires a loader (a database opened from
+  // a cache has none).
+  if (loader_ == nullptr) {
+    return Result<uint32_t>::Err(
+        Error(ErrorCode::kDataMissing, "no loader (database opened from a cache)"));
   }
 
   // Graph section: the built graph plus MORA/MSA (owned by NavDatabase).
@@ -104,31 +111,23 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path, bool wit
   snapshot.mora = mora_;
   snapshot.msa = msa_;
 
-  // CIFP section (optional): parse the full CIFP set on demand (heavy, ~100 MB),
-  // then hand the parsed per-airport data to the source-agnostic codec. Keeping
-  // the parse in the loader means the cache layer never depends on any source's
-  // on-disk layout. Requires a loader (a database opened from a cache has none).
-  std::vector<AirportProcedureData> cifp_procedures;
-  const bool emit_cifp = with_cifp && loader_ != nullptr;
-  if (with_cifp && loader_ == nullptr) {
-    return Result<uint32_t>::Err(
-        Error(ErrorCode::kDataMissing, "no loader (database opened from a cache)"));
+  // CIFP section: parse the full procedure set via the loader (~100 MB), then
+  // hand the parsed per-airport data to the source-agnostic codec. Keeping the
+  // parse in the loader means the cache layer never depends on any source's
+  // on-disk layout.
+  Result<std::vector<AirportProcedureData>> procedures = loader_->LoadProcedures(source_dir_);
+  if (!procedures) {
+    return Result<uint32_t>::Err(std::move(procedures).error());
   }
-  if (emit_cifp) {
-    Result<std::vector<AirportProcedureData>> procedures = loader_->LoadProcedures(source_dir_);
-    if (!procedures) {
-      return Result<uint32_t>::Err(std::move(procedures).error());
-    }
-    cifp_procedures = std::move(procedures).value();
-  }
+  std::vector<AirportProcedureData> cifp_procedures = std::move(procedures).value();
 
   UnifiedCache::BuildInput input;
   input.graph = &snapshot;
-  input.cifp = emit_cifp ? &cifp_procedures : nullptr;
+  input.cifp = &cifp_procedures;
   input.detail = detail_archive_.has_value() ? &detail_archive_.value() : nullptr;
   input.header.cycle = cycle_;
   input.header.program_semver = kBravoFinderVersion;
-  input.header.source_loader = loader_ ? loader_->name() : "";
+  input.header.source_loader = loader_->name();
   input.header.data_dir = source_dir_;
 
   Result<void> written = UnifiedCache::Build(out_path, input);

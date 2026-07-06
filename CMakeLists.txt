@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 project(BravoFinder
         VERSION 3.6.2
         DESCRIPTION "A realistic / compliant flight route engine"
-        LANGUAGES CXX)
+        LANGUAGES C CXX)
 
 # ---------------------------------------------------------------------------
 # Global settings
@@ -62,6 +62,31 @@ if(BRAVOFINDER_BUILD_TESTS)
   # Make Catch2's CTest integration module (Catch.cmake) available.
   list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 endif()
+
+# SQLite amalgamation (read-only, used by the DFD loaders). A single ~9 MB C
+# translation unit, compiled once into its own static lib so (a) it is not
+# recompiled when consumers change and (b) its third-party C warnings can be
+# silenced without polluting the project's -Werror. Pin a specific version via
+# URL_HASH; bumping SQLite means updating URL + hash together.
+FetchContent_Declare(
+  sqlite3
+  URL https://www.sqlite.org/2024/sqlite-amalgamation-3460000.zip
+  URL_HASH SHA256=712a7d09d2a22652fb06a49af516e051979a3984adb067da86760e60ed51a7f5)
+FetchContent_MakeAvailable(sqlite3)
+
+set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
+add_library(bf_sqlite3 STATIC ${_sqlite3_dir}/sqlite3.c)
+target_include_directories(bf_sqlite3 PUBLIC ${_sqlite3_dir})
+# Load extension is never used; threadsafe=1 (serialized default) plus per-
+# connection SQLITE_OPEN_NOMUTEX (thread_local connections, never shared across
+# threads) gives correct, lock-free reads.
+target_compile_definitions(bf_sqlite3 PRIVATE
+                           SQLITE_OMIT_LOAD_EXTENSION
+                           SQLITE_THREADSAFE=1)
+# Third-party C: silence every warning so it never trips -Werror.
+target_compile_options(bf_sqlite3 PRIVATE
+                       $<$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>>:-w>)
+add_library(bf::sqlite3 ALIAS bf_sqlite3)
 
 # ---------------------------------------------------------------------------
 # Subdirectories

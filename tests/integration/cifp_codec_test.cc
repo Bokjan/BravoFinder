@@ -17,20 +17,13 @@
 #include "io/cache/unified_cache.h"
 #include "io/loaders/xplane12/cifp/cifp_parser.h"
 #include "io/nav_database.h"
+#include "test_xplane12.h"
 
 namespace {
 
-std::string NavDataDir() {
-  if (const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA")) {
-    return env;
-  }
-  return "navdata";
-}
-
-bool HasNavData() {
-  std::ifstream f(NavDataDir() + "/earth_fix.dat");
-  return f.is_open();
-}
+using bf::test::EnsureXPlane12;
+using bf::test::HasNavData;
+using bf::test::NavDataDir;
 
 // Uses the platform temp dir so the test runs on Windows (where /tmp is absent).
 std::string TempPath(const std::string& tag) {
@@ -48,7 +41,7 @@ bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
 // Build a unified .bfdb (graph + CIFP + detail) from real data, returning the
 // path (empty on SKIP). The CIFP section is included.
 std::string BuildUnified(const std::string& tag) {
-  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(NavDataDir());
+  bf::Result<bf::NavDatabase> db = bf::NavDatabase::Open(EnsureXPlane12());
   if (!db) {
     return {};
   }
@@ -62,7 +55,7 @@ std::string BuildUnified(const std::string& tag) {
 }  // namespace
 
 TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integration][cifp]") {
-  if (!HasNavData()) {
+  if (!HasNavData(EnsureXPlane12())) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   const std::string path = BuildUnified("seg");
@@ -73,7 +66,7 @@ TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integ
   REQUIRE(u.value().cifp.has_value());
 
   // KJFK direct parse vs section fetch: procedures and legs must match.
-  bf::Result<bf::CifpData> direct = bf::CifpParser::Parse(NavDataDir() + "/CIFP/KJFK.dat");
+  bf::Result<bf::CifpData> direct = bf::CifpParser::Parse(EnsureXPlane12() + "/CIFP/KJFK.dat");
   REQUIRE(direct);
   auto fetched = u.value().cifp->Fetch("KJFK");
   REQUIRE(fetched.has_value());
@@ -108,7 +101,7 @@ TEST_CASE("cifp section: a route via the cache matches the file-based route",
   }
 
   // File-based (data dir with CIFP files) vs cache-based (unified .bfdb).
-  bf::Result<bf::NavDatabase> file_db = bf::NavDatabase::Open(NavDataDir());
+  bf::Result<bf::NavDatabase> file_db = bf::NavDatabase::Open(EnsureXPlane12());
   bf::Result<bf::NavDatabase> cache_db = bf::NavDatabase::OpenCached(path);
   REQUIRE(file_db);
   REQUIRE(cache_db);

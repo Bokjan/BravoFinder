@@ -16,6 +16,26 @@ bool TerminatesAtFix(PathTerminator t) {
   }
 }
 
+AltitudeConstraint ParseAltConstraint(std::string_view desc, int alt1, int alt2) {
+  AltitudeConstraint ac;
+  if (desc == "+") {
+    ac.kind = AltConstraintKind::kAtOrAbove;
+    ac.alt1_ft = alt1;
+  } else if (desc == "-") {
+    ac.kind = AltConstraintKind::kAtOrBelow;
+    ac.alt1_ft = alt1;
+  } else if (desc == "B") {
+    ac.kind = AltConstraintKind::kBetween;
+    ac.alt1_ft = alt1;  // upper
+    ac.alt2_ft = alt2;  // lower
+  } else if (alt1 != 0) {
+    // '@' or blank descriptor with an altitude present means "cross at".
+    ac.kind = AltConstraintKind::kAt;
+    ac.alt1_ft = alt1;
+  }
+  return ac;
+}
+
 PathTerminator ParsePathTerminator(std::string_view token) {
   if (token == "TF") return PathTerminator::kTF;
   if (token == "IF") return PathTerminator::kIF;

@@ -116,7 +116,6 @@ full tool reference, argument semantics, and client configuration.
 # detail, so deployment needs only that file, not the CIFP/ directory.
 bf build navdata                    # writes navdata/nav_<cycle>.bfdb
 bf build /path/to/xplane -o my.bfdb # explicit name: writes my.bfdb
-bf build navdata --without-cifp     # omit the CIFP procedure section
 bf build navdata --loader xplane12  # select source loader (default; only one today)
 
 # Find a route (reads navigation data from ./navdata by default)

@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "io/nav_database.h"
-#include "test_db.h"
+#include "test_bfdb.h"
 
 namespace {
 
@@ -17,8 +17,7 @@ using bf::test::NavDataDir;
 // const). Prefers a prebuilt cache for fast startup. Returns nullptr when data
 // is absent so callers SKIP.
 const bf::NavDatabase* SharedDb() {
-  static const std::string dir = NavDataDir();
-  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb(dir);
+  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb();
   return db ? &db.value() : nullptr;
 }
 

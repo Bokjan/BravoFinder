@@ -6,12 +6,22 @@
 #include <string>
 #include <string_view>
 
+#include "io/loaders/dfd1/dfd1_loader.h"
+#include "io/loaders/dfd2/dfd2_loader.h"
 #include "io/loaders/xplane12/xplane12_loader.h"
 
 namespace bf {
 namespace {
 
 using FactoryFn = std::unique_ptr<Loader> (*)();
+
+std::unique_ptr<Loader> MakeDfd1Loader() {
+  return std::make_unique<Dfd1Loader>();
+}
+
+std::unique_ptr<Loader> MakeDfd2Loader() {
+  return std::make_unique<Dfd2Loader>();
+}
 
 std::unique_ptr<Loader> MakeXPlane12Loader() {
   return std::make_unique<XPlane12Loader>();
@@ -25,6 +35,8 @@ struct Entry {
 // Sorted by name — enforced by the static_assert below. New loaders go here, in
 // alphabetical order.
 constexpr std::array kRegistry = {
+    Entry{"dfd1", MakeDfd1Loader},
+    Entry{"dfd2", MakeDfd2Loader},
     Entry{"xplane12", MakeXPlane12Loader},
 };
 

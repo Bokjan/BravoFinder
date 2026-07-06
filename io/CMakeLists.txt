@@ -1,6 +1,9 @@
 # The I/O layer: data loaders, graph builder, and the NavDatabase facade.
 add_library(bf_io
+            loaders/sqlite_util.cc
             loaders/loader_registry.cc
+            loaders/dfd1/dfd1_loader.cc
+            loaders/dfd2/dfd2_loader.cc
             loaders/xplane12/xplane12_loader.cc
             loaders/xplane12/cifp/cifp_parser.cc
             loaders/xplane12/cifp/procedure_connector.cc
@@ -19,5 +22,8 @@ add_library(bf_io
 target_include_directories(bf_io PUBLIC ${PROJECT_SOURCE_DIR})
 
 target_link_libraries(bf_io PUBLIC bf::core)
+# The DFD SQLite loaders (added in their own source files) link sqlite3 here.
+# PRIVATE because no bf_io header exposes sqlite3.
+target_link_libraries(bf_io PRIVATE bf::sqlite3)
 
 add_library(bf::io ALIAS bf_io)
