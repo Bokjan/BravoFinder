@@ -242,6 +242,9 @@ void LoadAirways(sqlite3* conn, NavData& data) {
       seg.direction = ParseDirection(ColumnText(stmt, 4));
       seg.level = ParseAirwayLevel(ColumnText(stmt, 5));
       seg.base_fl = ColumnInt(stmt, 6) / 100;  // feet -> flight level
+      // 99999 ("no ceiling") -> 999: a very high finite band, not the
+      // base_fl==0 && top_fl==0 sentinel AltitudeBandConstraint exempts. Harmless
+      // since no query cruises above FL999. (Same as dfd1.)
       seg.top_fl = ColumnInt(stmt, 7) / 100;
       data.airways.push_back(
           AirwayConnection{Ident(prev_ident, prev_icao), Ident(ident, icao), seg});
@@ -659,11 +662,9 @@ Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
   if (s) {
     if (Step(s.value().get()).value_or(false)) {
       const std::string cyc = ColumnText(s.value().get(), 0);
-      try {
-        data.cycle = static_cast<uint32_t>(std::stoul(cyc));
-      } catch (...) {
-        data.cycle = 0;
-      }
+      unsigned int cycle = 0;
+      std::from_chars(cyc.data(), cyc.data() + cyc.size(), cycle);
+      data.cycle = cycle;
     }
   }
 
@@ -680,10 +681,6 @@ Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
   LoadGridMora(conn.value(), data);
   return Result<NavData>::Ok(std::move(data));
 }
-
-}  // namespace bf
-
-namespace bf {
 
 Result<std::vector<AirportProcedureData>> Dfd2Loader::LoadProcedures(
     const std::string& source_dir) const {

@@ -214,8 +214,12 @@ void LoadAirways(sqlite3* conn, NavData& data) {
       seg.direction = ParseDirection(ColumnText(stmt, 4));  // from-row direction
       seg.level = ParseAirwayLevel(ColumnText(stmt, 5));     // 'H'/'L'/'B'
       // DFD altitudes are FEET; base_fl/top_fl are flight levels (feet/100).
+      // DFD encodes "no ceiling" as maximum_altitude=99999 -> top_fl=999. That is
+      // a very high finite band, NOT the base_fl==0 && top_fl==0 "no recorded
+      // band" sentinel AltitudeBandConstraint exempts; harmless since no query
+      // cruises above FL999.
       seg.base_fl = ColumnInt(stmt, 6) / 100;
-      seg.top_fl = ColumnInt(stmt, 7) / 100;  // 99999 -> 999 (effectively unlimited)
+      seg.top_fl = ColumnInt(stmt, 7) / 100;
       data.airways.push_back(
           AirwayConnection{Ident(prev_ident, prev_icao), Ident(ident, icao), seg});
     }
@@ -329,11 +333,7 @@ void LoadGridMora(sqlite3* conn, NavData& data) {
         continue;
       }
       int value = 0;
-      try {
-        value = std::stoi(v);
-      } catch (...) {
-        continue;
-      }
+      std::from_chars(v.data(), v.data() + v.size(), value);
       if (value > 0) {
         data.mora.SetCell(lat, lon0 + i, static_cast<int16_t>(value));
       }
@@ -363,11 +363,9 @@ Result<NavData> Dfd1Loader::LoadNavData(const std::string& source_dir) const {
   if (s) {
     if (Step(s.value().get()).value_or(false)) {
       const std::string cyc = ColumnText(s.value().get(), 0);
-      try {
-        data.cycle = static_cast<uint32_t>(std::stoul(cyc));
-      } catch (...) {
-        data.cycle = 0;
-      }
+      unsigned int cycle = 0;
+      std::from_chars(cyc.data(), cyc.data() + cyc.size(), cycle);
+      data.cycle = cycle;
     }
   }
 
@@ -405,7 +403,6 @@ struct ProcCols {
   int alt_desc = 11;  // altitude_description
   int alt1 = 12;       // altitude1
   int alt2 = 13;       // altitude2
-  int rnp = 14;        // rnp (unused; ProcedureLeg has no rnp field)
 };
 
 // Append legs/runways from one procedure table into `out` (per-airport). `type`
@@ -420,7 +417,7 @@ void LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
       "SELECT airport_identifier, procedure_identifier, route_type, "
       "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
       "path_termination, magnetic_course, route_distance_holding_distance_time, "
-      "distance_time, altitude_description, altitude1, altitude2, rnp FROM ") +
+      "distance_time, altitude_description, altitude1, altitude2 FROM ") +
       table + " ORDER BY airport_identifier, procedure_identifier, "
               "transition_identifier, seqno";
   Result<SqliteStmt> s = Prepare(conn, sql);
@@ -556,7 +553,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
         "SELECT airport_identifier, procedure_identifier, route_type, "
         "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
         "path_termination, magnetic_course, route_distance_holding_distance_time, "
-        "distance_time, altitude_description, altitude1, altitude2, rnp FROM ") +
+        "distance_time, altitude_description, altitude1, altitude2 FROM ") +
         table + " WHERE airport_identifier = ? ORDER BY procedure_identifier, "
                 "transition_identifier, seqno";
     Result<SqliteStmt> s = Prepare(conn, sql);
