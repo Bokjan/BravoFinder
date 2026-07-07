@@ -10,7 +10,7 @@ namespace bf {
 // Serialize a Route as a JSON object into any RapidJSON-style Writer (the
 // Writer streams directly to its buffer -- no intermediate DOM -- and escapes
 // strings correctly). This is a header-only template so it adds no dependency
-// to bf::core; callers link RapidJSON themselves and pass a Writer.
+// to bf3; callers link RapidJSON themselves and pass a Writer.
 //
 // The template only names Writer's duck-typed methods (StartObject, Key,
 // String, Double, StartArray, ...), so it works with rapidjson::Writer,

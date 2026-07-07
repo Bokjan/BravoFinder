@@ -11,6 +11,7 @@ permissive licenses compatible with MIT.
 | [Catch2](https://github.com/catchorg/Catch2) v3 | Unit testing framework | Boost Software License 1.0 | https://www.boost.org/LICENSE_1_0.txt |
 | [CLI11](https://github.com/CLIUtils/CLI11) | Command-line parsing | BSD-3-Clause | https://github.com/CLIUtils/CLI11/blob/main/LICENSE |
 | [RapidJSON](https://github.com/Tencent/rapidjson) | JSON output (`route --format json`) | MIT | https://github.com/Tencent/rapidjson/blob/master/license.txt |
+| [SQLite](https://www.sqlite.org/) 3.46.0 | DFD SQLite loaders (v1/v2) | Public Domain | https://www.sqlite.org/copyright.html |
 
 ## Obligations
 
@@ -23,6 +24,8 @@ permissive licenses compatible with MIT.
   retained. RapidJSON also bundles a copy of the MIT-licensed msinttypes; both notices
   ship with the headers fetched by FetchContent. (Only the header-only Writer is used,
   for JSON serialization; the parser is not used.)
+- **Public Domain** (SQLite): no obligations whatsoever. SQLite is dedicated to the
+  public domain and may be used in any project without restriction.
 
 ## Navigation Data (not a code dependency)
 

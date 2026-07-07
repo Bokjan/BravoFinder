@@ -3,7 +3,7 @@
 # so they can be unit-tested without spawning the process; main.cc is a thin
 # entry point that wires them together.
 add_library(bf_mcp_lib STATIC mcp_server.cc tools.cc registry.cc)
-target_link_libraries(bf_mcp_lib PUBLIC bf::io rapidjson::rapidjson)
+target_link_libraries(bf_mcp_lib PUBLIC bf::bravofinder3 rapidjson::rapidjson)
 target_include_directories(bf_mcp_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(bf_mcp_stdio main.cc)

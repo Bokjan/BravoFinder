@@ -75,25 +75,20 @@ FetchContent_Declare(
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(sqlite3)
 
+# SQLite amalgamation (read-only, used by the DFD loaders). Compiled directly as
+# a bf3 source (lib/CMakeLists.txt adds ${_sqlite3_dir}/sqlite3.c), so the shipped
+# libbravofinder3.a is self-contained -- sqlite3.o lives in the archive with no
+# external bf::sqlite3 dependency leaking into the export set. (A separate OBJECT
+# lib linked via $<TARGET_OBJECTS:> does NOT fold its objects into a static
+# archive: they are only pulled in at final executable link, leaving the archive
+# with undefined sqlite3 symbols.) Third-party-C warnings and SQLITE_* defines
+# are scoped to sqlite3.c via set_source_files_properties in lib/CMakeLists.txt.
 set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
-add_library(bf_sqlite3 STATIC ${_sqlite3_dir}/sqlite3.c)
-target_include_directories(bf_sqlite3 PUBLIC ${_sqlite3_dir})
-# Load extension is never used; threadsafe=1 (serialized default) plus per-
-# connection SQLITE_OPEN_NOMUTEX (thread_local connections, never shared across
-# threads) gives correct, lock-free reads.
-target_compile_definitions(bf_sqlite3 PRIVATE
-                           SQLITE_OMIT_LOAD_EXTENSION
-                           SQLITE_THREADSAFE=1)
-# Third-party C: silence every warning so it never trips -Werror.
-target_compile_options(bf_sqlite3 PRIVATE
-                       $<$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>>:-w>)
-add_library(bf::sqlite3 ALIAS bf_sqlite3)
 
 # ---------------------------------------------------------------------------
 # Subdirectories
 # ---------------------------------------------------------------------------
-add_subdirectory(core)
-add_subdirectory(io)
+add_subdirectory(lib)
 add_subdirectory(apps/cli)
 add_subdirectory(apps/mcp_stdio)
 
