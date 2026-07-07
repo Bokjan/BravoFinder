@@ -1,0 +1,148 @@
+name: Release
+
+# Triggered by version tags (vX.Y.Z). Pre-release tags (e.g. v0.0.0-test) still
+# run the build job (validates packaging end-to-end) but the release job skips
+# them via its `if: !contains(ref_name, '-')` gate, so test tags produce no
+# GitHub Release entry.
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: write  # gh release create needs to create the release
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }} / ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            preset: release
+            arch: x86_64
+            archive: tar.gz
+          - os: macos-15          # Apple Silicon runner -> arm64 only (see plan §3.4)
+            preset: release
+            arch: arm64
+            archive: tar.gz
+          - os: windows-latest
+            preset: windows-release
+            arch: x86_64
+            archive: zip
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract & assert version
+        id: ver
+        shell: bash
+        run: |
+          # Source of truth is the pushed tag (vX.Y.Z); fail if it disagrees with
+          # the version declared in CMakeLists.txt. Uses POSIX ERE (works on both
+          # BSD grep on macOS and GNU grep), NOT the plan's PCRE `\K` -- the top
+          # project() declaration spans multiple lines so a single-line grep on
+          # the VERSION token is what actually matches.
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          FILE_VER=$(grep -oE 'VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt \
+                     | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ "$TAG_VER" != "$FILE_VER" ]; then
+            echo "::error::Tag version '$TAG_VER' != CMakeLists.txt VERSION '$FILE_VER'"
+            exit 1
+          fi
+          echo "version=$TAG_VER" >> "$GITHUB_OUTPUT"
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        # Release-config tests verify the shipped binaries themselves (plan H1).
+        # Integration tests SKIP when navdata/ is absent on the runner -- no
+        # mocking, per the project's real-data testing rule.
+        run: ctest --preset ${{ matrix.preset }} -j4 --timeout 300
+
+      - name: Install SDK to staging
+        # staging/ gets libbravofinder3.a + public headers + cmake config + docs.
+        # The CLI/MCP executables are NOT installed (the binary archive collects
+        # them from the build tree instead).
+        run: cmake --install build/${{ matrix.preset }} --prefix staging
+
+      - name: Strip binaries
+        if: runner.os != 'Windows'
+        run: |
+          strip build/${{ matrix.preset }}/apps/cli/bf
+          strip build/${{ matrix.preset }}/apps/mcp_stdio/bf-mcp-stdio
+
+      - name: Stage binary archive contents
+        shell: bash
+        run: |
+          mkdir -p pkg/bin pkg/share/doc/BravoFinder
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp build/${{ matrix.preset }}/apps/cli/Release/bf.exe pkg/bin/
+            cp build/${{ matrix.preset }}/apps/mcp_stdio/Release/bf-mcp-stdio.exe pkg/bin/
+          else
+            cp build/${{ matrix.preset }}/apps/cli/bf pkg/bin/
+            cp build/${{ matrix.preset }}/apps/mcp_stdio/bf-mcp-stdio pkg/bin/
+          fi
+          cp staging/share/doc/BravoFinder/LICENSE pkg/share/doc/BravoFinder/
+          cp staging/share/doc/BravoFinder/THIRD_PARTY_LICENSES.md pkg/share/doc/BravoFinder/
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          STAMP="${VER}-${{ matrix.os }}-${{ matrix.arch }}"
+          tar -czf "bravofinder-${STAMP}.tar.gz" -C pkg .
+          tar -czf "bravofinder-sdk-${STAMP}.tar.gz" -C staging .
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $stamp = "$ver-${{ matrix.os }}-${{ matrix.arch }}"
+          Compress-Archive -Path pkg\* -DestinationPath "bravofinder-$stamp.zip"
+          Compress-Archive -Path staging\* -DestinationPath "bravofinder-sdk-$stamp.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          # v4 requires a unique name per matrix entry within the run.
+          name: bf-${{ steps.ver.outputs.version }}-${{ matrix.os }}
+          path: |
+            bravofinder-*
+            bravofinder-sdk-*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    # Skip pre-release / test tags (e.g. v0.0.0-test): they still exercise the
+    # build job above but create no GitHub Release (plan H3).
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "BravoFinder ${VER}" \
+            --generate-notes \
+            artifacts/*
