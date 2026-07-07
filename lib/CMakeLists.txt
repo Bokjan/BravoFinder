@@ -1,10 +1,3 @@
-# Fix the MSVC runtime to static CRT (MultiThreaded[Debug]) so the shipped SDK
-# is self-contained -- consumers need no VCRedist. Must precede target creation.
-# Consumers must match (set the same CMAKE_MSVC_RUNTIME_LIBRARY) or rebuild.
-if(MSVC)
-  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-endif()
-
 # BravoFinder unified library: the graph + A* search (formerly core/) and the
 # I/O layer (formerly io/) merged into a single static target bf3. Headers are
 # included as "core/..." / "io/..." so the include root is this directory (lib/).
