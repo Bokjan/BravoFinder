@@ -1,3 +1,10 @@
+# Fix the MSVC runtime to static CRT (MultiThreaded[Debug]) so the shipped SDK
+# is self-contained -- consumers need no VCRedist. Must precede target creation.
+# Consumers must match (set the same CMAKE_MSVC_RUNTIME_LIBRARY) or rebuild.
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 # BravoFinder unified library: the graph + A* search (formerly core/) and the
 # I/O layer (formerly io/) merged into a single static target bf3. Headers are
 # included as "core/..." / "io/..." so the include root is this directory (lib/).
@@ -70,7 +77,7 @@ configure_file(core/version.h.in
 
 # Include root is lib/ (build) so "#include core/..." and "#include io/..."
 # resolve; the binary dir exposes the generated core/version.h. Install-tree
-# include root is include/bf/ (added in the SDK export milestone).
+# include root is include/bf/ (see the install block below).
 target_include_directories(bf3 PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
@@ -94,5 +101,43 @@ set_source_files_properties(${_sqlite3_dir}/sqlite3.c PROPERTIES
 target_include_directories(bf3 PRIVATE ${_sqlite3_dir})
 
 # External-facing alias. Consumers (apps, tests, bench) link bf::bravofinder3.
-set_target_properties(bf3 PROPERTIES EXPORT_NAME bravofinder3)
+# EXPORT_NAME = the imported target name (bf::bravofinder3); OUTPUT_NAME = the
+# archive file name (libbravofinder3.a on GCC/Clang, bravofinder3.lib on MSVC).
+set_target_properties(bf3 PROPERTIES EXPORT_NAME bravofinder3 OUTPUT_NAME bravofinder3)
 add_library(bf::bravofinder3 ALIAS bf3)
+
+# ---------- Install / export (SDK distribution) --------------------------------
+# Public header allowlist: the FULL transitive include graph of nav_database.h
+# (the SDK entry point) plus the generated version.h. Consumers #including
+# nav_database.h reach every one of these, so all must ship. cifp_parser.h,
+# pread_file.h, nav_data.h are "internal" by intent but exposed transitively by
+# public headers; the clean fix (forward-declaring them away) is an API refactor
+# beyond this milestone. Verified: none pulls in <sqlite3.h> (sqlite_util.h is
+# NOT in the graph), so the SDK needs no sqlite3 headers.
+if(BRAVOFINDER_INSTALL)
+  install(TARGETS bf3 EXPORT BravoFinderTargets
+          ARCHIVE DESTINATION lib)
+
+  install(FILES core/result.h                          DESTINATION include/bf/core)
+  install(FILES core/domain/airport.h                  DESTINATION include/bf/core/domain)
+  install(FILES core/domain/airway.h                   DESTINATION include/bf/core/domain)
+  install(FILES core/domain/coordinate.h               DESTINATION include/bf/core/domain)
+  install(FILES core/domain/hold_fix.h                 DESTINATION include/bf/core/domain)
+  install(FILES core/domain/ident.h                    DESTINATION include/bf/core/domain)
+  install(FILES core/domain/mora_grid.h                DESTINATION include/bf/core/domain)
+  install(FILES core/domain/msa.h                     DESTINATION include/bf/core/domain)
+  install(FILES core/domain/navaid_detail.h            DESTINATION include/bf/core/domain)
+  install(FILES core/domain/procedure.h                DESTINATION include/bf/core/domain)
+  install(FILES core/domain/waypoint.h                 DESTINATION include/bf/core/domain)
+  install(FILES core/query/query_types.h               DESTINATION include/bf/core/query)
+  install(FILES core/routing/route.h                   DESTINATION include/bf/core/routing)
+  install(FILES core/routing/route_request.h           DESTINATION include/bf/core/routing)
+  install(FILES io/nav_database.h                     DESTINATION include/bf/io)
+  install(FILES io/nav_data.h                         DESTINATION include/bf/io)
+  install(FILES io/cache/cifp_codec.h                  DESTINATION include/bf/io/cache)
+  install(FILES io/cache/nav_detail_codec.h            DESTINATION include/bf/io/cache)
+  install(FILES io/cache/pread_file.h                 DESTINATION include/bf/io/cache)
+  install(FILES io/loaders/xplane12/cifp/cifp_parser.h DESTINATION include/bf/io/loaders/xplane12/cifp)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/core/version.h
+          DESTINATION include/bf/core)
+endif()

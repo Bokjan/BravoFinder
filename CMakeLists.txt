@@ -27,6 +27,16 @@ endif()
 # -DBRAVOFINDER_BUILD_BENCH=ON to reproduce docs/performance.zh-CN.md.
 option(BRAVOFINDER_BUILD_BENCH "Build the route-search microbenchmark" OFF)
 
+# Install the headers + library only when BravoFinder is the top-level project
+# (FetchContent / add_subdirectory consumers do not trigger install). Matches
+# the BRAVOFINDER_BUILD_TESTS idiom above (PROJECT_IS_TOP_LEVEL, not the older
+# CMAKE_SOURCE_DIR comparison).
+if(PROJECT_IS_TOP_LEVEL)
+  option(BRAVOFINDER_INSTALL "Install BravoFinder headers and libraries" ON)
+else()
+  set(BRAVOFINDER_INSTALL OFF)
+endif()
+
 # ---------------------------------------------------------------------------
 # Dependencies (fetched at build time; not vendored into the repository)
 # ---------------------------------------------------------------------------
@@ -99,4 +109,23 @@ endif()
 if(BRAVOFINDER_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+# ---------------------------------------------------------------------------
+# Install / export (SDK distribution)
+# ---------------------------------------------------------------------------
+if(BRAVOFINDER_INSTALL)
+  include(CMakePackageConfigHelpers)
+  configure_package_config_file(
+    cmake/bravofinder3Config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/bravofinder3Config.cmake
+    INSTALL_DESTINATION lib/cmake/bravofinder3)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bravofinder3Config.cmake
+          DESTINATION lib/cmake/bravofinder3)
+  install(EXPORT BravoFinderTargets
+          FILE BravoFinderTargets.cmake
+          NAMESPACE bf::
+          DESTINATION lib/cmake/bravofinder3)
+  install(FILES LICENSE THIRD_PARTY_LICENSES.md
+          DESTINATION share/doc/BravoFinder)
 endif()
