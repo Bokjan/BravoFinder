@@ -182,8 +182,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VER="${GITHUB_REF_NAME#v}"
+          # Title is the bare tag name (v3.6.0, v3.5.0, ...) to match every prior
+          # BravoFinder release; the body's own H1 carries the "BravoFinder vX.Y.Z"
+          # wording. No "BravoFinder" prefix in the title.
           gh release create "${GITHUB_REF_NAME}" \
-            --title "BravoFinder ${VER}" \
+            --title "${GITHUB_REF_NAME}" \
             --generate-notes \
             artifacts/*
