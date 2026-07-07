@@ -36,6 +36,38 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.0
 
+      # ccache on Linux/macOS: Apple clang -O2 takes ~25 min on the full build
+      # (Catch2 + sqlite3.c). A stable bucket keyed on (os, preset) -- NOT the
+      # tag or sha -- is shared across release tags, so v3.7.1-test warms it and
+      # the real v3.7.1 release hits it (same key, no ref/sha in it). ccache
+      # invalidates internally when compiler/source-hash changes, so the wide
+      # key is safe. Windows skips ccache (MSVC builds that fast).
+      - name: Install ccache (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ccache
+
+      - name: Install ccache (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
+          brew install ccache
+
+      - name: Cache ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/ccache
+          key: ccache-release-Linux-v1
+          restore-keys: ccache-release-Linux-v1
+
+      - name: Cache ccache (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-release-macOS-v1
+          restore-keys: ccache-release-macOS-v1
+
       - name: Extract & assert version
         id: ver
         shell: bash
@@ -59,7 +91,9 @@ jobs:
           echo "version=$TAG_VER" >> "$GITHUB_OUTPUT"   # full (w/ suffix) for archive names
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: >
+          cmake --preset ${{ matrix.preset }}
+          ${{ runner.os != 'Windows' && '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache' || '' }}
 
       - name: Build
         # Explicit -j: the presets set jobs:0 (serial) by project convention;
