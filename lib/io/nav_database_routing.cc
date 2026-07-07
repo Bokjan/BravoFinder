@@ -347,7 +347,14 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
           return out;  // seam mismatch (should not happen: seam == forced fix)
         }
         if (seg.vertices.size() > 1) {
-          path.insert(path.end(), seg.vertices.begin() + 1, seg.vertices.end());
+          // Use explicit loop instead of range-insert to avoid a GCC 14
+          // -Wstringop-overflow= false positive on __builtin_memcpy inside
+          // std::vector::insert(range). Reserve upfront so the loop
+          // allocates at most once, matching the original insert behaviour.
+          path.reserve(path.size() + seg.vertices.size() - 1);
+          for (size_t i = 1; i < seg.vertices.size(); ++i) {
+            path.push_back(seg.vertices[i]);
+          }
         }
       }
       dist += seg.distance_nm;
