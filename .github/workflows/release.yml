@@ -34,7 +34,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.0
 
       - name: Extract & assert version
         id: ver
@@ -115,7 +115,7 @@ jobs:
           Compress-Archive -Path staging\* -DestinationPath "bravofinder-sdk-$stamp.zip"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           # v4 requires a unique name per matrix entry within the run.
           name: bf-${{ steps.ver.outputs.version }}-${{ matrix.os }}
@@ -133,10 +133,10 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5.0.0
         with:
           path: artifacts
           merge-multiple: true

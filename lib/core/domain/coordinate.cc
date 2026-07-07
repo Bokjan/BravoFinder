@@ -1,5 +1,6 @@
 #include "core/domain/coordinate.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace bf {
