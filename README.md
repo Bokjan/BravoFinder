@@ -17,7 +17,7 @@ compliant route engine**: routes respect real-world constraints such as airway
 directionality, high/low airway levels, segment altitude bands, and terminal
 procedures.
 
-Navigation data is read through a **pluggable `Loader` interface** (`io/loaders/`)
+Navigation data is read through a **pluggable `Loader` interface** (`lib/io/loaders/`)
 that abstracts the source format. The default (and currently only) loader parses
 X-Plane 12 native `.dat` files; a future loader could read a Little Navmap SQLite
 database or another format without changing the route engine. The loader name is
@@ -55,7 +55,7 @@ Build only what you need with `--target`:
 | `bf_mcp_stdio` | MCP stdio server (`apps/mcp_stdio/`) |
 | `bf_mcp_lib`   | MCP server library (static) |
 | `bf_tests` | Test runner |
-| `bf_core` / `bf_io` | Libraries only |
+| `bf3` | The unified static library (`lib/`, alias `bf::bravofinder3`) |
 
 ```bash
 cmake --build --preset debug --target bf_mcp_stdio    # just the MCP server
@@ -67,6 +67,38 @@ A `tsan` preset (ThreadSanitizer) is available to verify concurrency safety:
 ```bash
 cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 ```
+
+### Using the library (SDK)
+
+The route engine ships as a self-contained static library. Two ways to consume
+it, both under the single target name `bf::bravofinder3`:
+
+**Pre-built SDK** — download a `bravofinder-sdk-*` archive from a
+[release](https://github.com/Bokjan/BravoFinder/releases), unpack it, and:
+
+```cmake
+find_package(bravofinder3 REQUIRED)
+target_link_libraries(my_app PRIVATE bf::bravofinder3)
+```
+
+The static archive (`libbravofinder3.a` / `bravofinder3.lib`) folds in the SQLite
+amalgamation, so no separate sqlite dependency is needed. On MSVC the SDK uses the
+default dynamic CRT (`/MD`); match that in the consuming project.
+
+**From source (FetchContent)**:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  BravoFinder
+  GIT_REPOSITORY https://github.com/Bokjan/BravoFinder.git
+  GIT_TAG v3.7.2)
+FetchContent_MakeAvailable(BravoFinder)
+target_link_libraries(my_app PRIVATE bf::bravofinder3)
+```
+
+The public entry point is `bf::NavDatabase` (`#include "io/nav_database.h"`); headers
+are included as `core/...` / `io/...` rooted at `bf/`.
 
 ## Usage
 

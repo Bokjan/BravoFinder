@@ -1,9 +1,9 @@
 # 跨平台二进制缓存：统一 。bfdb
 
 > 把 ~1.5s 的「解析 + 建图」变成 ~50ms 的「读文件」，且文件在 x86/ARM 之间可移植、单文件
-> 部署。面向想理解缓存格式取舍的读者。相关代码：`io/cache/`（`byte_io.h`、`unified_cache.*`
+> 部署。面向想理解缓存格式取舍的读者。相关代码：`lib/io/cache/`（`byte_io.h`、`unified_cache.*`
 > 容器 + `graph_codec.*`／`cifp_codec.*`／`nav_detail_codec.*` 三段 codec、`graph_snapshot.h`）、
-> `io/graph_builder.cc`（`FromSnapshot`/`ToSnapshot`）。
+> `lib/io/graph_builder.cc`（`FromSnapshot`/`ToSnapshot`）。
 
 ## 1. 问题：每次启动都要重新解析建图
 
@@ -72,7 +72,7 @@ per-vertex 字段就是 record 里多一个字段，没有新平行数组、没�
 - 实测它们运行时占 ~30MB > `.bfdb` 文件本身（~17MB），落盘是纯亏；
 - 重建成本 reserve(V) 后 ~50–100ms，一次性、冻结只读。
 
-`FromImage`/`ToImage`（`io/graph_builder.cc`）是图与缓存镜像 `BfdbImage` 之间的转换点。
+`FromImage`/`ToImage`（`lib/io/graph_builder.cc`）是图与缓存镜像 `BfdbImage` 之间的转换点。
 
 ## 6. 字符串：文件层用池引用，运行时保持拥有型
 
@@ -186,7 +186,7 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 
 缓存格式会演进，必须能干净拒绝不兼容的旧文件而非崩溃。三层版本：
 
-1. **程序 semver**（CMake `project VERSION` → `core/version.h` 的 `kBravoFinderVersion` →
+1. **程序 semver**（CMake `project VERSION` → `lib/core/version.h` 的 `kBravoFinderVersion` →
    `bf --version`）；
 2. **容器 `format_version`**（magic 「BFDB」，当前 = 4），机器校验，不符走
    `Result::Err(kFormatMismatch)`，提示重跑 `bf build`。**只此一个版本号**管全部布局——

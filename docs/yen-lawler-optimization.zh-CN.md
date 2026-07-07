@@ -1,13 +1,13 @@
 # Yen K-shortest 的 Lawler 优化
 
-> 面向想读懂 `core/graph/yen_kshortest.cc` 的开发者。这段代码用了一个不算常规的
+> 面向想读懂 `lib/core/graph/yen_kshortest.cc` 的开发者。这段代码用了一个不算常规的
 > 算法优化（Lawler），且作用在一个非标准的**多源多汇**变体上，正确性论证不显然，
 > 故单独成文。代码注释是英文，本文用中文解释来龙去脉。
 
 ## 1. 背景：K-shortest 为什么慢
 
 BravoFinder 用 Yen 算法求前 K 条候选航路（`FindKShortestPathsMulti`，生产路径唯一入口
-`io/nav_database.cc`）。Yen 的骨架是：
+`lib/io/nav_database.cc`）。Yen 的骨架是：
 
 - **A 集**：已接受的路径（最终结果）。
 - **B 集**：候选路径，按成本排序。
@@ -72,7 +72,7 @@ Yen 与标准 Yen **同构**，deviation node 概念平移即可，唯一区别�
 超源无实体、不进 `banned_nodes`，唯一特殊处理就是 `i<0` 时走「重跑多源 + 禁起始 fix」分支
 ——这与标准 Lawler 的「从最小 deviation index 起」完全一致。
 
-## 4. 实现要点（`core/graph/yen_kshortest.cc`）
+## 4. 实现要点（`lib/core/graph/yen_kshortest.cc`）
 
 - `Candidate` 加 `int deviation`；**成本可忽略**：多一个 int（4B）相对已有的 `vertices`
   向量微不足道，且不参与 `operator<`（排序键仍是 cost → vertices），红黑树开销不变。

@@ -31,7 +31,7 @@ A\* + Yen K-shortest.
 - Modern C++20; **Google C++ Style** (format base, clang-format `BasedOnStyle: Google`)
   + **C++ Core Guidelines** (semantic correctness).
 - File names `snake_case`, extensions **`.h` / `.cc`**; namespace `bf`.
-- Error handling uses the project's own `bf::Result<T, E>` (`core/result.h`); expected
+- Error handling uses the project's own `bf::Result<T, E>` (`lib/core/result.h`); expected
   failures (no route found, missing data) go through `Result`, exceptions are only for
   truly exceptional situations. **No bare `new`/`delete`, no `goto`, no catch-by-value,
   no `static`/global mutable state** (v2's static-sharing bugs were one motivation for
@@ -56,7 +56,7 @@ A\* + Yen K-shortest.
 
 ## Version discipline (three layers)
 
-- ① Program semver (CMake `project VERSION` → `core/version.h.in`'s
+- ① Program semver (CMake `project VERSION` → `lib/core/version.h.in`'s
   `kBravoFinderVersion` → `bf --version`).
 - ② Unified container `format_version` (one single version, magic "BFDB"; mismatch →
   `Result::Err(kFormatMismatch)`). Three sections (graph/cifp/detail) share one file and

@@ -2,8 +2,8 @@
 
 > BravoFinder 的领域类型为什么这么设计——不可变值类型、自研 `Result<T,E>`、无 `static`/无裸
 > `new`、以及一个只在 build 期用一次的 `SmallVec`。这些不是零散的风格偏好，而是 v2→v3 重写的
-> 核心动机的直接体现。面向想读源码、理解设计宪法的读者。相关代码：`core/domain/`、
-> `core/result.h`、`core/util/small_vec.h`。
+> 核心动机的直接体现。面向想读源码、理解设计宪法的读者。相关代码：`lib/core/domain/`、
+> `lib/core/result.h`、`lib/core/util/small_vec.h`。
 
 ## 1. 一条主线：v2 的 static 共享 bug
 

@@ -1,7 +1,7 @@
 # 线程安全契约 B：一个数据库，多线程并发查询
 
 > 从一开始就立的设计约束，不是事后补丁。面向想在 Web / 批量场景并发调用 BravoFinder 的
-> 读者。相关代码：`io/nav_database.{h,cc}`、`io/cache/cifp_codec.*`、`core/graph/`。
+> 读者。相关代码：`lib/io/nav_database.{h,cc}`、`lib/io/cache/cifp_codec.*`、`lib/core/graph/`。
 
 ## 1. 契约内容
 
@@ -79,7 +79,7 @@ resolve 也无共享可变状态。
 
 ## 7. 搜索期自包含
 
-A*/Yen 的所有状态都是**函数局部**的（`core/graph/astar.cc`、`yen_kshortest.cc`）：g/geo/prev/
+A*/Yen 的所有状态都是**函数局部**的（`lib/core/graph/astar.cc`、`yen_kshortest.cc`）：g/geo/prev/
 closed 数组、优先队列、Yen 的候选集与 deviation 索引，全部在栈上、每次调用独立。特别地：
 
 - Yen 的 `SearchOptions` 里的 `node_blocked`/`edge_blocked` 禁集**按值捕获**，使 `std::function`
