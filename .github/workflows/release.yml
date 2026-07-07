@@ -40,19 +40,23 @@ jobs:
         id: ver
         shell: bash
         run: |
-          # Source of truth is the pushed tag (vX.Y.Z); fail if it disagrees with
-          # the version declared in CMakeLists.txt. Uses POSIX ERE (works on both
-          # BSD grep on macOS and GNU grep), NOT the plan's PCRE `\K` -- the top
-          # project() declaration spans multiple lines so a single-line grep on
-          # the VERSION token is what actually matches.
-          TAG_VER="${GITHUB_REF_NAME#v}"
+          # Source of truth is the pushed tag (vX.Y.Z[-suffix]); the tag's base
+          # version (prerelease suffix stripped) must equal CMakeLists.txt's
+          # VERSION. So v3.7.1 / v3.7.1-rc1 / v3.7.1-test all pass against 3.7.1,
+          # while a stray v0.0.0-test (base 0.0.0) fails -- this is how a test
+          # tag can run the build (assert passes) yet skip the release job (the
+          # '-' gate), reconciling H2 and H3. POSIX ERE (BSD & GNU grep), not
+          # PCRE `\K`; the top project() spans lines so a single-line grep on the
+          # VERSION token is what matches.
+          TAG_VER="${GITHUB_REF_NAME#v}"          # 3.7.1, 3.7.1-rc1, 3.7.1-test ...
+          TAG_BASE="${TAG_VER%%-*}"               # strip prerelease suffix -> 3.7.1
           FILE_VER=$(grep -oE 'VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt \
                      | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-          if [ "$TAG_VER" != "$FILE_VER" ]; then
-            echo "::error::Tag version '$TAG_VER' != CMakeLists.txt VERSION '$FILE_VER'"
+          if [ "$TAG_BASE" != "$FILE_VER" ]; then
+            echo "::error::Tag base '$TAG_BASE' != CMakeLists.txt VERSION '$FILE_VER'"
             exit 1
           fi
-          echo "version=$TAG_VER" >> "$GITHUB_OUTPUT"
+          echo "version=$TAG_VER" >> "$GITHUB_OUTPUT"   # full (w/ suffix) for archive names
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
