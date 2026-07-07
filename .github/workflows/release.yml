@@ -62,7 +62,10 @@ jobs:
         run: cmake --preset ${{ matrix.preset }}
 
       - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
+        # Explicit -j: the presets set jobs:0 (serial) by project convention;
+        # bare -j (CMake 3.21+) uses all cores. Without it Apple clang compiles
+        # Catch2 + sqlite3.c serially on macOS, turning a ~2 min build into ~20.
+        run: cmake --build --preset ${{ matrix.preset }} -j
 
       - name: Test
         # Release-config tests verify the shipped binaries themselves (plan H1).
