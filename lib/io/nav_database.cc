@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -196,6 +197,16 @@ void NavDatabase::BuildAirwayIndex() {
   }
   const NavGraph& graph = builder_->graph();
   const int vcount = graph.VertexCount();
+  // Track which directed legs each designator has already registered, so an
+  // exact-duplicate segment in the source data is not stored twice. A kBoth
+  // airway yields distinct u->v and v->u legs (different from/to), which are
+  // kept: AirwayInfo represents reversals honestly. The key is the full leg
+  // identity (endpoints + level + FL band), not just (from, to).
+  auto leg_key = [](const AirwayLeg& l) {
+    return l.from + '\0' + l.to + (l.high ? "\1" : "\0") + std::to_string(l.base_fl) + '\0' +
+           std::to_string(l.top_fl);
+  };
+  std::unordered_map<std::string, std::unordered_set<std::string>> seen;
   for (int u = 0; u < vcount; ++u) {
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
       if (e->airway_id == 0) {
@@ -212,6 +223,9 @@ void NavDatabase::BuildAirwayIndex() {
       // under each designator so a lookup by any of them finds it. A single
       // airway splits to itself, so this is a no-op for the common case.
       for (const std::string& designator : SplitDesignators(name)) {
+        if (!seen[designator].insert(leg_key(leg)).second) {
+          continue;  // exact-duplicate directed leg already registered
+        }
         AirwayInfo& info = airway_index_[designator];
         if (info.name.empty()) {
           info.name = designator;

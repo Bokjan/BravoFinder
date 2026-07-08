@@ -3,6 +3,7 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <charconv>
 #include <iomanip>
 #include <iostream>
 
@@ -102,13 +103,14 @@ std::optional<FlRange> ParseAltSpec(const std::string& spec) {
     if (s.empty()) {
       return false;
     }
-    try {
-      size_t pos = 0;
-      out = std::stoi(s, &pos);
-      return pos == s.size() && out >= 0;
-    } catch (...) {
-      return false;
-    }
+    // std::from_chars is the exception-free counterpart of stoi: it fails via
+    // an error code (no try/catch), and ptr == end verifies the whole field
+    // was numeric. A leading '+' or whitespace is rejected, which is fine for
+    // a flight-level spec.
+    const char* begin = s.data();
+    const char* end = begin + s.size();
+    auto [ptr, ec] = std::from_chars(begin, end, out);
+    return ec == std::errc{} && ptr == end && out >= 0;
   };
   if (dash == std::string::npos) {
     int fl = 0;

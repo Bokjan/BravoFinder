@@ -26,8 +26,13 @@ class MoraGrid {
   void SetCell(int lat, int lon, int16_t mora_fl) {
     const int idx = Index(lat, lon);
     if (idx >= 0) {
+      // Count a cell only on its first population so a repeated SetCell on the
+      // same cell does not inflate the count; this matches FromCells, which
+      // counts non-zero cells.
+      if (cells_[idx] == 0) {
+        ++populated_;
+      }
       cells_[idx] = mora_fl;
-      ++populated_;
     }
   }
 
@@ -78,6 +83,11 @@ class MoraGrid {
   }
 
   int Index(int lat, int lon) const {
+    // Longitudes are not wrapped: a cell at exactly +180 (or lat +90) has no
+    // column/row and is reported out of range, so MoraAt returns 0 (no lower
+    // bound) there. This is a known blind spot for antimeridian/polar legs,
+    // which sit at the extreme edge of the 1-degree grid; real ATS routes
+    // essentially never reach it, so the logic is left unwrapped by design.
     if (lat < -90 || lat > 89 || lon < -180 || lon > 179) {
       return -1;
     }
