@@ -47,30 +47,34 @@ release 构建，cycle 2601。
   取平均 ms/search；
 - 用 `std::chrono::steady_clock` 只包住 `FindRoutes` 调用。
 
-**优化分解**：三个版本同机、同数据、同工作负载对照（三版算法源码已固化入库，见
+**优化分解**：四个版本同机、同数据、同工作负载对照（各版算法源码已固化入库，见
 `bench/variants/`，用 `bench/decompose.sh` 一键复现，无需 checkout git 历史）：
 
 - **baseline** — 源自 commit `2918c86`（Yen，无 heuristic memoization、无 Lawler）；
 - **+memoize** — 源自 commit `ee3afb4`（多目标 heuristic 跨 spur memoization）；
-- **+Lawler**（当前）— 源自 commit `f7a42c9`，算法等价于当前 HEAD（再叠加 Lawler 优化）。
+- **+Lawler** — 源自 commit `f7a42c9`（再叠加 Lawler：只从 deviation index 起 spur）；
+- **+workspace**（当前）— 每次 spur 复用一份 generation-stamp 搜索工作区（`SearchWorkspace`），
+  免掉每次搜索重新分配 + O(V) 初始化 5 个 size-V 数组。
 
-| k | baseline | +memoize | +Lawler（当前） | 累计加速 |
-|---:|---:|---:|---:|---:|
-| 1 | 8.10 | 8.08 | 8.07 | 1.0× |
-| 3 | 25.67 | 15.56 | 14.34 | **1.79×** |
-| 5 | 43.08 | 22.78 | 18.77 | **2.29×** |
-| 10 | 87.58 | 42.16 | 28.53 | **3.07×** |
+| k | baseline | +memoize | +Lawler | +workspace（当前） | 累计加速 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 9.87 | 9.93 | 9.90 | 9.94 | 1.0× |
+| 3 | 30.76 | 17.69 | 16.23 | 11.48 | **2.68×** |
+| 5 | 51.40 | 24.82 | 20.54 | 11.96 | **4.30×** |
+| 10 | 103.92 | 44.42 | 30.21 | 13.20 | **7.87×** |
 
-（单位 ms/search。）
+（单位 ms/search；本机 50 轮 × 10 对 = 500 次/档取平均。绝对值随机器浮动，看同表内相对倍率。）
 
 读这张表：
 
-- **k=1 三版几乎相同**（~8.1ms）。单次搜索里 heuristic 每顶点最多算一次、也没有 spur，
-  两个优化都不改单次搜索路径——这正是它们**零退化**的证据。
-- **memoize** 主要吃掉 k≥3 的重复 heuristic 计算：goals 集合在整轮 Yen 里恒定，`h(v)` 是常量
-  却被数百个 spur 重复 O(goals) 扫描。k=10 从 87.6→42.2ms。
-- **Lawler** 再砍掉冗余的 spur 搜索本身（只从 deviation index 起 spur）：k=10 从 42.2→28.5ms。
-- **收益随 k 增长**：k 越大、spur 越多、重复越多，两个优化的空间越大。k=10 累计 **3.07×**。
+- **k=1 四版几乎相同**（~9.9ms）。单次搜索里 heuristic 每顶点最多算一次、没有 spur、也只分配
+  一次工作区——三个优化都不改单次搜索路径，这正是它们**零退化**的证据。
+- **memoize** 吃掉 k≥3 的重复 heuristic 计算：goals 集合在整轮 Yen 里恒定，`h(v)` 是常量却被
+  数百个 spur 重复 O(goals) 扫描。k=10 从 103.9→44.4ms。
+- **Lawler** 再砍掉冗余的 spur 搜索本身（只从 deviation index 起 spur）：k=10 从 44.4→30.2ms。
+- **workspace** 砍掉每次 spur 重新分配/初始化 5 个 size-V 数组的固定成本（memoize+Lawler 把计算压
+  下去后，这块固定成本占比反而凸显到 perf 采样的 ~23%）：k=10 从 30.2→13.2ms，几乎减半。
+- **收益随 k 增长**：k 越大、spur 越多，三个优化的空间都越大。k=10 累计 **7.87×**。
 
 > 两个优化的原理与正确性论证分别见
 > [yen-lawler-optimization.zh-CN.md](yen-lawler-optimization.zh-CN.md)（Lawler + memoize）。
@@ -91,19 +95,25 @@ Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O
 | `std::set` 红黑树（Yen 候选集 + spur 禁集） | ~0.1% | 噪声级 |
 
 （gprof 把内联进主循环的边松弛/g 更新/堆操作都归到 `RunMultiSearch`，且不采样 malloc/系统调用，
-故 A* 主循环占比比按调用栈采样的工具更高；量级结论一致：**A* 遍历本身是绝对热点**。）
+故 A* 主循环占比比按调用栈采样的工具更高。**这条工具偏差后来翻了一次案，见下。**）
 
-**结论**：两个真热点（重复 heuristic、重复 spur）已被拿掉，剩下几乎全是 A* 遍历的固有成本。
-据此**否决了几个直觉性优化**（数据说话）：
+**结论（及一次翻案）**：两个真热点（重复 heuristic、重复 spur）拿掉后，据此否决了几个直觉性
+优化。其中一条**后来被新数据推翻**，记录在此以示「工具决定看得见什么」：
 
-- **栈局部 buffer / thread_local 复用搜索数组**——分配/初始化（`SeedTable` 类）合计仅 ~1%，且
-  省不掉躲不掉的 O(V) 初始化；thread_local 还违反「无全局可变状态」，线程池下每线程 ~5.4MB 永久
-  常驻。不做。
-- **Yen 禁集 `std::set` → 排序 vector**——仅 ~0.1%，噪声级收益。不做。
-- **`CostOfPath` 线性找边改二分**——profile 里 ~0.2%，且会改 `.bfdb` 布局需 bump
-  format_version。不做。
+- **✅ 已实现（翻案）：复用搜索数组。** gprof 曾把「每次 spur 分配 + O(V) 初始化 5 个 size-V 数
+  组」的成本几乎全部内联进 `RunMultiSearch` 的 ~93.7%，独立可见的只剩 `SeedTable` 的 ~0.9%，据此
+  判为「省不掉躲不掉、收益 ~1%」而否决。后来换 `perf record`（调用栈采样，能把 `std::fill_n` 从主
+  循环里拆出来）复测 altitude-filtered k=10，发现这块**占 23.04% 自耗时**——gprof 的内联归并掩盖了
+  它。真相是：memoize+Lawler 把「计算」压下去后，这块「固定分配」的**相对占比**才凸显出来。于是引入
+  `SearchWorkspace`（栈局部、generation-stamp、O(1) 逻辑清空，不违反「无全局可变状态」也不走
+  thread_local），k=10 从 30.2→13.2ms。见上表 +workspace 档。
+- **❌ 仍不做：Yen 禁集 `std::set` → 排序 vector**——仅 ~0.1%，噪声级收益。
+- **❌ 仍不做：`CostOfPath` 线性找边改二分**——~0.2%，且会改 `.bfdb` 布局需 bump format_version。
 
-再压性能需换算法层（如 Eppstein，或 A* 遍历的预取/SIMD），属大改，不在 v3.0.0 范围。
+> 教训：gprof 的「内联归并 + 不采样 malloc」会把分配成本藏进热函数，`perf` 的调用栈采样才拆得开。
+> 单一 profiler 的结论要留意工具偏差——这也是本项目「先 profile 再动手」里 profiler 也要换着看的原因。
+
+再压性能需换算法层（如 Eppstein，或 A* 遍历的预取/SIMD），属大改。
 
 ## 5. 内存占用
 
@@ -161,6 +171,6 @@ git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编�
 ## 8. 小结
 
 - **启动**：缓存把冷启动 2.27s 降到 0.20s，**~11×**（换 AIRAC 才需重建，3.2s 一次性）。
-- **查询**：memoize + Lawler 叠加，k=10 从 87.6ms 降到 28.5ms，**3.07×**；k=1 零退化；收益随 k 增长。
-- **止步有据**：gprof 显示 A* 主循环 ~93.7% self time（遍历固有成本），据此否决了三个直觉性微优化。
+- **查询**：memoize + Lawler + workspace 叠加，k=10 从 103.9ms 降到 13.2ms，**7.87×**；k=1 零退化；收益随 k 增长。
+- **止步有据（含一次翻案）**：gprof 曾因内联归并把「复用搜索数组」判为 ~1% 而否决，`perf` 调用栈采样揭示其达 23%，遂实现（workspace 档）；其余两个微优化仍不做。
 - **内存/文件**：on-demand ~128MB / eager ~234MB 峰值 RSS；统一 `.bfdb` 57.3MB（CIFP 段 ~38MB）。

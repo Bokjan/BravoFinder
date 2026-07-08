@@ -10,11 +10,11 @@
 #
 # BRAVOFINDER_BENCH_VARIANT swaps the two search source files (and their headers)
 # for a historical snapshot vendored under bench/variants/<v>/, so the benchmark
-# can time baseline / +memoize / +Lawler without any git checkout. Empty (the
-# default) builds the current tree unchanged; it is only ever set in a throwaway
-# build tree by bench/decompose.sh, never in a normal build.
+# can time baseline / +memoize / +Lawler / +workspace without any git checkout.
+# Empty (the default) builds the current tree unchanged; it is only ever set in a
+# throwaway build tree by bench/decompose.sh, never in a normal build.
 set(BRAVOFINDER_BENCH_VARIANT "" CACHE STRING
-    "Build bf3 against a vendored search variant: baseline | memoize | lawler")
+    "Build bf3 against a vendored search variant: baseline | memoize | lawler | workspace")
 
 if(BRAVOFINDER_BENCH_VARIANT STREQUAL "")
   set(_bf_astar core/graph/astar.cc)
@@ -23,7 +23,7 @@ else()
   set(_bf_variant_dir ${PROJECT_SOURCE_DIR}/bench/variants/${BRAVOFINDER_BENCH_VARIANT})
   if(NOT EXISTS ${_bf_variant_dir}/core/graph/astar.cc)
     message(FATAL_ERROR "Unknown BRAVOFINDER_BENCH_VARIANT '${BRAVOFINDER_BENCH_VARIANT}' "
-                        "(expected baseline | memoize | lawler)")
+                        "(expected baseline | memoize | lawler | workspace)")
   endif()
   set(_bf_astar ${_bf_variant_dir}/core/graph/astar.cc)
   set(_bf_yen   ${_bf_variant_dir}/core/graph/yen_kshortest.cc)
@@ -58,9 +58,11 @@ add_library(bf3 STATIC
 
 # When a variant is selected, its headers must win over lib/core/graph/*.h. A
 # BEFORE include dir mirroring the "core/graph/" path shadows the two headers
-# only.
+# only. PRIVATE (not PUBLIC): the shadow is for compiling bf3's own variant
+# sources; it must not leak into bf3's INTERFACE_INCLUDE_DIRECTORIES, or the
+# export/install machinery rejects the source-tree-prefixed path.
 if(NOT BRAVOFINDER_BENCH_VARIANT STREQUAL "")
-  target_include_directories(bf3 BEFORE PUBLIC ${_bf_variant_dir})
+  target_include_directories(bf3 BEFORE PRIVATE ${_bf_variant_dir})
 endif()
 
 # Generate version.h from the project version (single source of truth). It lands

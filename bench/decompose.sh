@@ -35,7 +35,8 @@ cd "$REPO"
 STATES=(
   "baseline:Yen without heuristic memoization or Lawler"
   "memoize:multi-goal heuristic memoized across spur searches"
-  "lawler:Lawler's optimization on top (equivalent to current HEAD)"
+  "lawler:Lawler's optimization on top"
+  "workspace:generation-stamped search workspace reused across spurs (current HEAD)"
 )
 
 for state in "${STATES[@]}"; do
