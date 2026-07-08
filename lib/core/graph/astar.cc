@@ -38,6 +38,36 @@ bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coor
 
 }  // namespace
 
+void SearchWorkspace::Reset(int n) {
+  // Grow to fit the graph; never shrink. The value arrays are not re-initialized
+  // -- the generation stamp makes stale slots read as their initial value, so a
+  // resize only needs to size the buffers and default the new stamp slots to a
+  // value that cannot match the current generation (0, since generation_ is
+  // bumped to >= 1 before any search reads a slot).
+  if (static_cast<int>(stamp_.size()) < n) {
+    g_.resize(n);
+    geo_.resize(n);
+    prev_.resize(n);
+    stamp_.resize(n, 0);
+    closed_stamp_.resize(n, 0);
+  }
+}
+
+std::vector<double> BuildSeedTable(const std::vector<SeededEndpoint>& endpoints, int n) {
+  // Per-vertex seed cost: -1 means "not an endpoint". A vertex may appear more
+  // than once (distinct connection fixes); the smallest seed wins if so.
+  std::vector<double> seed(n, -1.0);
+  for (const SeededEndpoint& e : endpoints) {
+    if (e.vertex < 0 || e.vertex >= n) {
+      continue;
+    }
+    if (seed[e.vertex] < 0.0 || e.cost < seed[e.vertex]) {
+      seed[e.vertex] = e.cost;
+    }
+  }
+  return seed;
+}
+
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
                               const SearchOptions& options) {
   ShortestPath result;
@@ -53,29 +83,28 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
   // Heuristic: straight-line great-circle distance to the goal.
   auto heuristic = [&](int v) { return graph.CoordOf(v).DistanceTo(goal_coord); };
 
-  std::vector<double> g(n, kInfinity);  // best known (effective) cost
-  std::vector<double> geo(n, 0.0);      // geographic distance along best path
-  std::vector<int> prev(n, -1);
-  std::vector<bool> closed(n, false);
+  SearchWorkspace ws;
+  ws.Reset(n);
+  ws.NextGeneration();
 
   std::priority_queue<QueueNode, std::vector<QueueNode>, std::greater<>> open;
-  g[start] = 0.0;
+  ws.Relax(start, 0.0, 0.0, -1);
   open.push(QueueNode{heuristic(start), start});
 
   while (!open.empty()) {
     const int u = open.top().vertex;
     open.pop();
-    if (closed[u]) {
+    if (ws.Closed(u)) {
       continue;  // stale queue entry
     }
     if (u == goal) {
       break;
     }
-    closed[u] = true;
+    ws.MarkClosed(u);
 
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
       const int v = e->to;
-      if (closed[v]) {
+      if (ws.Closed(v)) {
         continue;
       }
       if (options.node_blocked && options.node_blocked(v)) {
@@ -88,27 +117,25 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
       if (!EdgeAllowed(options, *e, graph.CoordOf(u), graph.CoordOf(v), extra_cost)) {
         continue;
       }
-      const double tentative = g[u] + e->distance_nm + extra_cost;
-      if (tentative < g[v]) {
-        g[v] = tentative;
-        geo[v] = geo[u] + e->distance_nm;
-        prev[v] = u;
+      const double tentative = ws.G(u) + e->distance_nm + extra_cost;
+      if (tentative < ws.G(v)) {
+        ws.Relax(v, tentative, ws.Geo(u) + e->distance_nm, u);
         open.push(QueueNode{tentative + heuristic(v), v});
       }
     }
   }
 
-  if (g[goal] == kInfinity) {
+  if (ws.G(goal) == kInfinity) {
     return result;  // unreachable
   }
 
   // Reconstruct the path from goal back to start.
-  for (int at = goal; at != -1; at = prev[at]) {
+  for (int at = goal; at != -1; at = ws.Prev(at)) {
     result.vertices.push_back(at);
   }
   std::reverse(result.vertices.begin(), result.vertices.end());
-  result.distance_nm = geo[goal];
-  result.cost = g[goal];
+  result.distance_nm = ws.Geo(goal);
+  result.cost = ws.G(goal);
   result.found = true;
   return result;
 }
@@ -142,36 +169,24 @@ double MultiGoalHeuristic::operator()(int vertex) const {
   return best;
 }
 
-namespace {
-
-// Core multi-source/multi-goal A*, parameterized on the heuristic so callers can
-// supply a shared memoized one (Yen) or a throwaway inline one (single search).
-template <class Heuristic>
-ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpoint>& sources,
-                            const std::vector<SeededEndpoint>& goals, const SearchOptions& options,
-                            Heuristic&& heuristic) {
+// Core multi-source/multi-goal A*, reusing a caller-owned workspace so Yen's many
+// spur searches share one set of per-vertex arrays instead of reallocating and
+// O(V)-initializing them each time. `goal_seed[v]` is that goal's seed cost, or
+// < 0 when v is not a goal (see BuildSeedTable). The workspace is reset to a
+// fresh generation on entry, so callers may pass a dirty one.
+ShortestPath FindShortestPathMulti(const NavGraph& graph,
+                                   const std::vector<SeededEndpoint>& sources,
+                                   const std::vector<double>& goal_seed,
+                                   const SearchOptions& options,
+                                   const MultiGoalHeuristic& heuristic, SearchWorkspace& ws) {
   ShortestPath result;
   const int n = graph.VertexCount();
-  if (sources.empty() || goals.empty()) {
+  if (sources.empty()) {
     return result;
   }
 
-  // Per-vertex goal seed cost: -1 means "not a goal". A vertex may appear once
-  // as a goal (connection fixes are distinct); the smallest seed wins if not.
-  std::vector<double> goal_seed(n, -1.0);
-  for (const SeededEndpoint& gp : goals) {
-    if (gp.vertex < 0 || gp.vertex >= n) {
-      continue;
-    }
-    if (goal_seed[gp.vertex] < 0.0 || gp.cost < goal_seed[gp.vertex]) {
-      goal_seed[gp.vertex] = gp.cost;
-    }
-  }
-
-  std::vector<double> g(n, kInfinity);  // best known effective cost from a source
-  std::vector<double> geo(n, 0.0);      // geographic distance along best path
-  std::vector<int> prev(n, -1);
-  std::vector<bool> closed(n, false);
+  ws.Reset(n);
+  ws.NextGeneration();
 
   std::priority_queue<QueueNode, std::vector<QueueNode>, std::greater<>> open;
   for (const SeededEndpoint& s : sources) {
@@ -183,9 +198,8 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
     }
     // A source's seed cost is the procedure distance already flown to reach it;
     // it counts as both effective cost and geographic distance.
-    if (s.cost < g[s.vertex]) {
-      g[s.vertex] = s.cost;
-      geo[s.vertex] = s.cost;
+    if (s.cost < ws.G(s.vertex)) {
+      ws.Relax(s.vertex, s.cost, s.cost, -1);
       open.push(QueueNode{s.cost + heuristic(s.vertex), s.vertex});
     }
   }
@@ -197,7 +211,7 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
     const QueueNode top = open.top();
     open.pop();
     const int u = top.vertex;
-    if (closed[u]) {
+    if (ws.Closed(u)) {
       continue;
     }
     // With a consistent heuristic, once the cheapest open f-value cannot beat
@@ -205,11 +219,11 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
     if (top.f >= best_total) {
       break;
     }
-    closed[u] = true;
+    ws.MarkClosed(u);
 
     // Finishing at u (if it is a goal) costs g[u] plus its seed.
     if (goal_seed[u] >= 0.0) {
-      const double total = g[u] + goal_seed[u];
+      const double total = ws.G(u) + goal_seed[u];
       if (total < best_total) {
         best_total = total;
         best_goal = u;
@@ -218,7 +232,7 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
 
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
       const int v = e->to;
-      if (closed[v]) {
+      if (ws.Closed(v)) {
         continue;
       }
       if (options.node_blocked && options.node_blocked(v)) {
@@ -231,11 +245,9 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
       if (!EdgeAllowed(options, *e, graph.CoordOf(u), graph.CoordOf(v), extra_cost)) {
         continue;
       }
-      const double tentative = g[u] + e->distance_nm + extra_cost;
-      if (tentative < g[v]) {
-        g[v] = tentative;
-        geo[v] = geo[u] + e->distance_nm;
-        prev[v] = u;
+      const double tentative = ws.G(u) + e->distance_nm + extra_cost;
+      if (tentative < ws.G(v)) {
+        ws.Relax(v, tentative, ws.Geo(u) + e->distance_nm, u);
         open.push(QueueNode{tentative + heuristic(v), v});
       }
     }
@@ -245,25 +257,15 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
     return result;  // no source reached any goal
   }
 
-  for (int at = best_goal; at != -1; at = prev[at]) {
+  for (int at = best_goal; at != -1; at = ws.Prev(at)) {
     result.vertices.push_back(at);
   }
   std::reverse(result.vertices.begin(), result.vertices.end());
   // Include the chosen goal's seed cost in the reported totals.
-  result.distance_nm = geo[best_goal] + goal_seed[best_goal];
+  result.distance_nm = ws.Geo(best_goal) + goal_seed[best_goal];
   result.cost = best_total;
   result.found = true;
   return result;
-}
-
-}  // namespace
-
-ShortestPath FindShortestPathMulti(const NavGraph& graph,
-                                   const std::vector<SeededEndpoint>& sources,
-                                   const std::vector<SeededEndpoint>& goals,
-                                   const SearchOptions& options) {
-  const MultiGoalHeuristic heuristic(graph, goals);
-  return RunMultiSearch(graph, sources, goals, options, heuristic);
 }
 
 ShortestPath FindShortestPathMulti(const NavGraph& graph,
@@ -271,7 +273,19 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& goals,
                                    const SearchOptions& options,
                                    const MultiGoalHeuristic& heuristic) {
-  return RunMultiSearch(graph, sources, goals, options, heuristic);
+  const std::vector<double> goal_seed = BuildSeedTable(goals, graph.VertexCount());
+  SearchWorkspace ws;
+  return FindShortestPathMulti(graph, sources, goal_seed, options, heuristic, ws);
+}
+
+ShortestPath FindShortestPathMulti(const NavGraph& graph,
+                                   const std::vector<SeededEndpoint>& sources,
+                                   const std::vector<SeededEndpoint>& goals,
+                                   const SearchOptions& options) {
+  const MultiGoalHeuristic heuristic(graph, goals);
+  const std::vector<double> goal_seed = BuildSeedTable(goals, graph.VertexCount());
+  SearchWorkspace ws;
+  return FindShortestPathMulti(graph, sources, goal_seed, options, heuristic, ws);
 }
 
 }  // namespace bf

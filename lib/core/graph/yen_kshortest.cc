@@ -85,19 +85,10 @@ struct Candidate {
 };
 
 // Per-vertex seed lookup built from a list of seeded endpoints: maps a vertex to
-// its smallest seed cost, or -1 when the vertex is not an endpoint. Connection
-// fixes are distinct in practice; the min keeps it well-defined if not.
+// its smallest seed cost, or -1 when the vertex is not an endpoint. Shared with
+// the A* search via BuildSeedTable so both agree on endpoint membership and cost.
 std::vector<double> SeedTable(const std::vector<SeededEndpoint>& endpoints, int n) {
-  std::vector<double> seed(n, -1.0);
-  for (const SeededEndpoint& e : endpoints) {
-    if (e.vertex < 0 || e.vertex >= n) {
-      continue;
-    }
-    if (seed[e.vertex] < 0.0 || e.cost < seed[e.vertex]) {
-      seed[e.vertex] = e.cost;
-    }
-  }
-  return seed;
+  return BuildSeedTable(endpoints, n);
 }
 
 // Effective cost and geographic distance of a full source..goal path, including
@@ -238,7 +229,14 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   // spur search, instead of each search re-sweeping all goals on every pop.
   const MultiGoalHeuristic heuristic(graph, goals);
 
-  ShortestPath first = FindShortestPathMulti(graph, sources, goals, base_options, heuristic);
+  // One workspace reused by every spur search: its per-vertex arrays are
+  // allocated once and cleared in O(1) between searches via a generation stamp,
+  // rather than reallocated and O(V)-initialized on each of the hundreds of
+  // spurs. Stack-local to this call, so concurrent queries never share it.
+  SearchWorkspace ws;
+
+  ShortestPath first =
+      FindShortestPathMulti(graph, sources, goal_seed, base_options, heuristic, ws);
   if (!first.found) {
     return result;
   }
@@ -304,7 +302,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
           continue;
         }
         const ShortestPath spur =
-            FindShortestPathMulti(graph, spur_sources, goals, base_options, heuristic);
+            FindShortestPathMulti(graph, spur_sources, goal_seed, base_options, heuristic, ws);
         add_candidate({}, spur, /*deviation=*/-1);
         continue;
       }
@@ -342,7 +340,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
       // irrelevant here; CostOfPathMulti re-applies the true source seed from the
       // stitched path's first vertex.
       const ShortestPath spur = FindShortestPathMulti(graph, {SeededEndpoint{spur_node, 0.0}},
-                                                      goals, spur_opts, heuristic);
+                                                      goal_seed, spur_opts, heuristic, ws);
       add_candidate(root, spur, /*deviation=*/i);
     }
 

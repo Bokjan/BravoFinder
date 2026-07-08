@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include "core/constraints/constraint.h"
@@ -52,6 +54,69 @@ struct SeededEndpoint {
   double cost = 0.0;  // SID distance (source) or STAR distance (goal), in NM
 };
 
+// Reusable per-vertex scratch for A*. Yen runs the search hundreds of times over
+// the same graph (one per spur), and each run only ever touches a tiny fraction
+// of the ~10^5 vertices; allocating and O(V)-initializing fresh g/geo/prev/closed
+// arrays every time dominated the search cost. Instead the caller keeps one
+// workspace and hands it to each search: the arrays are allocated once, and a
+// per-search generation stamp makes clearing O(1). A slot whose stamp is not the
+// current generation reads as its initial value (g = +inf, prev = -1, not
+// closed), so bumping `generation` logically resets everything without touching
+// memory. Owned by a single search or a single Yen invocation on the stack -- no
+// static/thread_local state -- so distinct concurrent queries never share one,
+// keeping the read-only concurrency contract intact.
+class SearchWorkspace {
+ public:
+  // Prepare for a graph of `n` vertices, allocating on first use and growing if a
+  // larger graph is seen. Does not touch the value arrays -- the stamp handles
+  // logical clearing.
+  void Reset(int n);
+
+  // Begin a fresh search: every slot now reads as its initial value. O(1).
+  void NextGeneration() { ++generation_; }
+
+  // Effective cost from a source. Reads +inf until written this generation.
+  double G(int v) const { return Live(v) ? g_[v] : kInfinity_; }
+  // Geographic distance along the best path. Valid only for vertices relaxed
+  // this generation (the path-reconstruction walk only ever visits those).
+  double Geo(int v) const { return geo_[v]; }
+  // Predecessor on the best path, or -1 until written this generation.
+  int Prev(int v) const { return Live(v) ? prev_[v] : -1; }
+  // Closed is its own generation stamp, so it clears in O(1) with the rest and
+  // needs no per-slot byte array (a std::vector<bool> would add bit-masking to
+  // the hot pop loop; a stamp compare is a single word comparison).
+  bool Closed(int v) const { return closed_stamp_[v] == generation_; }
+
+  // Relax vertex `v`: record cost/distance/predecessor and stamp it live.
+  void Relax(int v, double g, double geo, int prev) {
+    Touch(v);
+    g_[v] = g;
+    geo_[v] = geo;
+    prev_[v] = prev;
+  }
+  void MarkClosed(int v) { closed_stamp_[v] = generation_; }
+
+ private:
+  static constexpr double kInfinity_ = std::numeric_limits<double>::infinity();
+  bool Live(int v) const { return stamp_[v] == generation_; }
+  // Bring a value slot into the current generation, clearing stale state once.
+  void Touch(int v) {
+    if (stamp_[v] != generation_) {
+      stamp_[v] = generation_;
+      g_[v] = kInfinity_;
+      geo_[v] = 0.0;
+      prev_[v] = -1;
+    }
+  }
+
+  std::vector<double> g_;
+  std::vector<double> geo_;
+  std::vector<int> prev_;
+  std::vector<uint32_t> stamp_;         // value-slot generation tag
+  std::vector<uint32_t> closed_stamp_;  // == generation_ => closed this search
+  uint32_t generation_ = 0;             // bumped per search; 0 = no search run yet
+};
+
 // A memoized admissible heuristic for the multi-source/multi-goal search: for a
 // vertex it returns the least (great-circle distance to a goal fix + that goal's
 // seed cost). The goal set is fixed across a whole Yen run, so h(v) is constant
@@ -96,5 +161,22 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& goals,
                                    const SearchOptions& options,
                                    const MultiGoalHeuristic& heuristic);
+
+// Build a per-vertex seed table: seed[v] is the smallest seed cost among the
+// endpoints landing on v, or -1 when v is not an endpoint. Shared by the search
+// and by Yen's path re-costing so both agree on which vertices are endpoints.
+std::vector<double> BuildSeedTable(const std::vector<SeededEndpoint>& endpoints, int n);
+
+// Fully reused form for Yen: the caller supplies both the prebuilt goal seed
+// table (constant across all spur searches over the same goals) and a workspace
+// whose arrays are reused across searches (cleared in O(1) via its generation
+// stamp). This is the hot path -- the plain overloads above delegate here after
+// building a throwaway seed table and workspace. `goal_seed` must match `graph`
+// (size == VertexCount, built by BuildSeedTable from the goal set).
+ShortestPath FindShortestPathMulti(const NavGraph& graph,
+                                   const std::vector<SeededEndpoint>& sources,
+                                   const std::vector<double>& goal_seed,
+                                   const SearchOptions& options,
+                                   const MultiGoalHeuristic& heuristic, SearchWorkspace& ws);
 
 }  // namespace bf
