@@ -45,9 +45,16 @@ on-demand procedure cache, then times only the `FindRoutes` calls with a
 
 ```bash
 cmake --preset release -DBRAVOFINDER_BUILD_BENCH=ON && cmake --build --preset release --target bf_route_bench
-./build/release/bench/bf_route_bench /tmp/nav.bfdb        # 30 rounds by default
-./build/release/bench/bf_route_bench /tmp/nav.bfdb 100    # optional: more rounds to cut noise
+./build/release/bench/bf_route_bench /tmp/nav.bfdb            # 30 rounds by default
+./build/release/bench/bf_route_bench /tmp/nav.bfdb 100        # optional: more rounds to cut noise
+./build/release/bench/bf_route_bench /tmp/nav.bfdb 100 300-400  # optional: attach a cruise band (exercises the band + MORA constraints)
 ```
+
+The optional third argument is a cruise altitude filter (`"300-400"` for a
+band, `"350"` for a single level). It turns on the altitude-band and MORA
+constraints on every search; comparing a run with it against a run without
+isolates the net cost of altitude-filtered routing. Omit it for the
+unconstrained shortest-path numbers in `docs/performance.zh-CN.md`.
 
 ### 3a. Optimization decomposition (baseline / +memoize / +Lawler)
 

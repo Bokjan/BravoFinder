@@ -15,6 +15,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,10 +38,29 @@ int main(int argc, char** argv) {
   const std::string db = argc > 1 ? argv[1] : "navdata/nav.bfdb";
   const int rounds = argc > 2 ? std::atoi(argv[2]) : 30;
 
+  // Optional altitude filter, e.g. "300-400" or "350". When given, every search
+  // carries a cruise band, exercising the band + MORA constraints (the latter
+  // samples every leg). Comparing a run with this against a run without it
+  // isolates the net cost of altitude-filtered routing. Absent => unconstrained
+  // shortest path, matching the numbers in docs/performance.zh-CN.md.
+  std::optional<bf::FlRange> altitude;
+  if (argc > 3) {
+    int lo = 0;
+    int hi = 0;
+    if (std::sscanf(argv[3], "%d-%d", &lo, &hi) == 2) {
+      altitude = bf::FlRange{lo, hi};
+    } else if (std::sscanf(argv[3], "%d", &lo) == 1) {
+      altitude = bf::FlRange{lo, lo};
+    } else {
+      std::fprintf(stderr, "bad alt spec %s (want \"300-400\" or \"350\")\n", argv[3]);
+      return 1;
+    }
+  }
+
   bf::Result<bf::NavDatabase> nav = bf::NavDatabase::OpenCached(db);
   if (!nav) {
     std::fprintf(stderr, "cannot open %s: %s\n", db.c_str(), nav.error().message.c_str());
-    std::fprintf(stderr, "usage: %s [nav.bfdb] [rounds]\n", argv[0]);
+    std::fprintf(stderr, "usage: %s [nav.bfdb] [rounds] [alt e.g. 300-400]\n", argv[0]);
     return 1;
   }
 
@@ -50,11 +70,13 @@ int main(int argc, char** argv) {
     bf::RouteRequest r;
     r.departure = p.first;
     r.arrival = p.second;
+    r.altitude = altitude;
     r.k = 10;
     (void)nav.value().FindRoutes(r);
   }
 
-  std::printf("db=%s  workload=%zu pairs x %d rounds\n", db.c_str(), kPairs.size(), rounds);
+  std::printf("db=%s  workload=%zu pairs x %d rounds  alt=%s\n", db.c_str(), kPairs.size(), rounds,
+              argc > 3 ? argv[3] : "none");
   for (int k : {1, 3, 5, 10}) {
     const auto t0 = std::chrono::steady_clock::now();
     int n = 0;
@@ -63,6 +85,7 @@ int main(int argc, char** argv) {
         bf::RouteRequest r;
         r.departure = p.first;
         r.arrival = p.second;
+        r.altitude = altitude;
         r.k = k;
         const auto res = nav.value().FindRoutes(r);
         (void)res;
