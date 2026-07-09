@@ -141,7 +141,12 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
       on_network[v] = 1;
     }
   }
+  // A synthetic DCT leg is a direct segment with no airway structure, usable at
+  // any altitude: model it as kBoth so LevelPreferenceConstraint never penalizes
+  // the airport-to-network connectors regardless of the requested level. (The
+  // altitude-band constraint already exempts it via base_fl==0 && top_fl==0.)
   AirwaySegment dct;  // default-constructed: name empty, FL 0..0
+  dct.level = AirwayLevel::kBoth;
   for (int i = 0; i < airport_count; ++i) {
     const Airport& a = data.airports[i];
     const int v = waypoint_count + i;
