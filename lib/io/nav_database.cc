@@ -216,7 +216,7 @@ void NavDatabase::BuildAirwayIndex() {
       const AirwayLeg leg{builder_->IdentOf(u).ident,
                           builder_->IdentOf(e->to).ident,
                           e->distance_nm,
-                          EdgeIsHigh(*e),
+                          e->level == AirwayLevel::kHigh,
                           e->base_fl,
                           e->top_fl};
       // A stored name may be a concurrency ("A593-Y592"): register the segment

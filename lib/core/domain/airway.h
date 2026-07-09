@@ -16,11 +16,20 @@ enum class AirwayDirection {
 // Whether a segment belongs to the low (Victor) or high (Jet) airway structure,
 // or both. X-Plane `earth_awy.dat` uses integer 1/2; DFD `flightlevel` uses
 // 'L'/'H'/'B' (实测 'B'≈1/3, must be honored -- see DFD loader plan).
-enum class AirwayLevel {
+//
+// The underlying type is uint8_t so the value fits in a single byte on a
+// GraphEdge. The integer values are part of the cache format: the edge 'level'
+// field is serialized as this raw value, so reordering the enumerators would
+// silently corrupt existing caches. The static_assert below pins them.
+enum class AirwayLevel : uint8_t {
   kLow,   // '1' / 'L'
   kHigh,  // '2' / 'H'
   kBoth,  // 'B' - usable at both low and high (DFD only; X-Plane has no both)
 };
+static_assert(static_cast<uint8_t>(AirwayLevel::kLow) == 0 &&
+                  static_cast<uint8_t>(AirwayLevel::kHigh) == 1 &&
+                  static_cast<uint8_t>(AirwayLevel::kBoth) == 2,
+              "AirwayLevel values are part of the cache format; do not reorder");
 
 // A single airway segment connecting two adjacent waypoints. One named airway
 // (e.g. "J80") is made of many such segments laid end to end. Altitudes are in

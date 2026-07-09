@@ -15,7 +15,7 @@ bf::GraphEdge MakeEdge(int base_fl, int top_fl, bool is_high) {
   e.airway_id = 1;
   e.base_fl = static_cast<int16_t>(base_fl);
   e.top_fl = static_cast<int16_t>(top_fl);
-  e.flags = is_high ? bf::kEdgeHigh : 0;
+  e.level = is_high ? bf::AirwayLevel::kHigh : bf::AirwayLevel::kLow;
   return e;
 }
 
@@ -82,6 +82,21 @@ TEST_CASE("level preference: penalizes non-preferred level", "[constraint]") {
   bf::EdgeVerdict v = c.Evaluate(low, r);
   CHECK(v.allowed);             // not forbidden
   CHECK(v.extra_cost == 50.0);  // 100 NM * 0.5
+}
+
+TEST_CASE("level preference: both-level edge never penalized", "[constraint]") {
+  bf::LevelPreferenceConstraint c(0.5);
+  bf::GraphEdge e = MakeEdge(180, 450, true);
+  e.level = bf::AirwayLevel::kBoth;  // DFD flightlevel 'B': usable at either level
+  bf::EdgeContext ctx{e, bf::Coordinate{}, bf::Coordinate{}};
+
+  bf::RouteRequest high;
+  high.level = bf::LevelPreference::kHigh;
+  CHECK(c.Evaluate(ctx, high).extra_cost == 0.0);
+
+  bf::RouteRequest low;
+  low.level = bf::LevelPreference::kLow;
+  CHECK(c.Evaluate(ctx, low).extra_cost == 0.0);
 }
 
 TEST_CASE("MORA: blocks below grid minimum, allows at or above", "[constraint]") {

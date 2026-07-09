@@ -44,11 +44,11 @@ class LevelPreferenceConstraint : public Constraint {
     }
     // A both-level segment (DFD flightlevel 'B') is usable at either level, so it
     // is never penalized regardless of the preference.
-    if (EdgeIsBoth(ctx.edge)) {
+    if (ctx.edge.level == AirwayLevel::kBoth) {
       return EdgeVerdict::Allow();
     }
     const bool wants_high = request.level == LevelPreference::kHigh;
-    if (EdgeIsHigh(ctx.edge) == wants_high) {
+    if ((ctx.edge.level == AirwayLevel::kHigh) == wants_high) {
       return EdgeVerdict::Allow();
     }
     return EdgeVerdict::Penalize(ctx.edge.distance_nm * penalty_fraction_);

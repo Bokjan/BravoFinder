@@ -62,7 +62,11 @@ class UnifiedCache {
   // v4: unified container (graph + cifp + detail in one file), one global string
   //     pool, CIFP segments with no per-segment pool, `build` dropped from
   //     provenance. Supersedes the separate graph v3 / cifp v1 / detail v1 caches.
-  static constexpr uint32_t kFormatVersion = 4;
+  // v5: edge 'flags' bitfield (kEdgeHigh/kEdgeBoth) replaced by a single 'level'
+  //     byte holding AirwayLevel. The on-disk values coincide (0/1/2), but the
+  //     byte's contract changed from bit flags to an enum value, so the version
+  //     is bumped to retire the bitfield interpretation.
+  static constexpr uint32_t kFormatVersion = 5;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

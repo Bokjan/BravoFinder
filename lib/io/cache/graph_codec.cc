@@ -24,7 +24,7 @@ static_assert(static_cast<int>(WaypointKind::kOther) < 256,
 //   airport records [v - first_airport_vertex] : I32 elevation_ft
 //   offsets [v + 1] : I32
 //   edges [e] : I32 to, F32 distance_nm, U16 airway_id, I16 base_fl, I16 top_fl,
-//               U8 flags
+//               U8 level (AirwayLevel)
 //   airways [airway_count] : U32 name_off, U32 name_len
 //   mora : kLatCount * kLonCount I16 cells
 //   msa [msa_count] : U32 center ident off/len, U32 center region off/len,
@@ -94,7 +94,7 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
     w.U16(ed.airway_id);
     w.I16(ed.base_fl);
     w.I16(ed.top_fl);
-    w.U8(ed.flags);
+    w.U8(static_cast<uint8_t>(ed.level));
   }
   for (const std::string& name : snapshot.airway_names) {
     const auto nr = pool.Add(name);
@@ -205,7 +205,7 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
     ed.airway_id = r.U16();
     ed.base_fl = r.I16();
     ed.top_fl = r.I16();
-    ed.flags = r.U8();
+    ed.level = static_cast<AirwayLevel>(r.U8());
     snapshot.edges[i] = ed;
   }
   // airways

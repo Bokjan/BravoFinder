@@ -106,16 +106,9 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
       return;  // airway overflow: drop this edge rather than emit a wrong DCT
     }
     const double dist = graph_.coords_[from].DistanceTo(graph_.coords_[to]);
-    uint8_t flags = 0;
-    if (s.level == AirwayLevel::kHigh) {
-      flags |= kEdgeHigh;
-    }
-    if (s.level == AirwayLevel::kBoth) {
-      flags |= kEdgeBoth;  // DFD flightlevel 'B'
-    }
     adj[from].push_back(GraphEdge{to, static_cast<float>(dist), static_cast<uint16_t>(airway_id),
                                   static_cast<int16_t>(s.base_fl), static_cast<int16_t>(s.top_fl),
-                                  flags});
+                                  s.level});
   };
 
   for (const AirwayConnection& conn : data.airways) {
