@@ -122,10 +122,13 @@ Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O
 
 | 模式 | 进程峰值 RSS | 缓存部分增量 |
 |---|---:|---:|
-| on-demand（默认） | ~128 MB | 程序段仅头 + 目录，+~1.5 MB |
-| eager（`--cifp-load eager`） | ~234 MB | 全量程序反序列化，+~100 MB |
+| on-demand（默认） | ~101 MB | 程序段仅头 + 目录，+~1.5 MB |
+| eager（`--cifp-load eager`） | ~168 MB | 全量程序反序列化，+~67 MB |
 
-- 峰值 RSS 含图（~30MB lookup map + CSR 数组）、进程基线、以及程序段部分。
+- 峰值 RSS 含图（lookup 排序数组 ~4MB + CSR 数组）、进程基线、以及程序段部分。
+- 内存紧凑化（2026-07）：per-vertex ident 与 ProcedureLeg.fix 改 12B `FixedIdent`、lookup 哈希表改
+  排序数组 + 二分、WaypointKind 收窄 U8——on-demand 约省 ~27MB、eager 再省 ~41MB（fix 字段是 eager 的
+  大头）。详见 `.notes/plans/2026-07-09_memory_compaction.md`。
 - on-demand 适合一次性 CLI 查询（启动省、只加载查到的机场）；eager 适合长驻服务/批量并发
   （全量常驻、之后无锁读），见 [thread-safety.zh-CN.md](thread-safety.zh-CN.md)。
 
@@ -173,4 +176,4 @@ git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编�
 - **启动**：缓存把冷启动 2.27s 降到 0.20s，**~11×**（换 AIRAC 才需重建，3.2s 一次性）。
 - **查询**：memoize + Lawler + workspace 叠加，k=10 从 103.9ms 降到 13.2ms，**7.87×**；k=1 零退化；收益随 k 增长。
 - **止步有据（含一次翻案）**：gprof 曾因内联归并把「复用搜索数组」判为 ~1% 而否决，`perf` 调用栈采样揭示其达 23%，遂实现（workspace 档）；其余两个微优化仍不做。
-- **内存/文件**：on-demand ~128MB / eager ~234MB 峰值 RSS；统一 `.bfdb` 57.3MB（CIFP 段 ~38MB）。
+- **内存/文件**：on-demand ~101MB / eager ~168MB 峰值 RSS（2026-07 紧凑化后）；统一 `.bfdb` 57.3MB（CIFP 段 ~38MB）。
