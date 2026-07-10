@@ -30,8 +30,8 @@ Result<const NavDatabase*> NavDatabaseRegistry::Get(std::optional<uint32_t> cycl
   }
 
   // Open outside the lock so concurrent Gets for different cycles parse in
-  // parallel. On-demand CIFP: the sibling <stem>_cifp.bfdb is found by
-  // OpenCached; procedures then load per-airport on first query.
+  // parallel. CIFP procedures live in the same unified .bfdb and load
+  // on-demand (per-airport on first query) after OpenCached.
   Result<NavDatabase> opened = NavDatabase::OpenCached(entry->path);
   if (!opened) {
     return Result<const NavDatabase*>::Err(std::move(opened).error());

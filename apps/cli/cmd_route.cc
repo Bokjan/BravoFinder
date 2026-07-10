@@ -42,8 +42,8 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
   route->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();
   route->add_option("--db", a->db_path,
-                    "Prebuilt .bfdb cache to load (skips parsing; its sibling "
-                    "<stem>_cifp.bfdb supplies procedures if present)");
+                    "Prebuilt unified .bfdb cache to load (skips parsing; graph, "
+                    "CIFP procedures, and detail all live in this one file)");
   route
       ->add_option("--cifp-load", a->cifp_load,
                    "CIFP cache load mode: on-demand (default) or eager")
@@ -82,8 +82,8 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
   route->callback([a, &exit_code]() {
     // With --db, load the prebuilt cache (milliseconds); otherwise parse and
     // build from the data directory. On the cached path, procedures come from
-    // the sibling <stem>_cifp.bfdb if present; on the raw path, --data locates
-    // CIFP files for on-demand procedure parsing.
+    // the same unified .bfdb; on the raw path, --data locates CIFP files for
+    // on-demand procedure parsing.
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
       std::cerr << "error: " << db.error().message << "\n";
