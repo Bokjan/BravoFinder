@@ -10,11 +10,13 @@
 > - `README.md` — user-facing: what the project is, how to build, CLI usage, data compliance.
 > - `CLAUDE.md` (this file) — AI-agent-facing: hard conventions, invariants, minefields.
 > - `.notes/` — local working docs (gitignored, not committed): `README.md` is the directory
->   index, `DESIGN.md` is the full design document, `plans/`/`records/`/`research/` are
->   historical plans and records. Start from `.notes/README.md` when you need background.
-> - `docs/` — public-facing docs (CONTRIBUTING, algorithm articles, etc.; committed).
+>   index, `design/design-archive-M0-M4.md` is the archived M0–M4 design snapshot (historical;
+>   current architecture lives in `docs/`), `plans/`/`records/`/`research/` are historical plans
+>   and records. Start from `.notes/README.md` when you need background.
+> - `docs/` — public-facing docs (CONTRIBUTING, algorithm articles, architecture: binary-cache /
+>   domain-design / thread-safety / performance; the authority for "how it works now"; committed).
 
-One-line background (details in README / DESIGN): a realistic/compliant flight route
+One-line background (details in README / docs/): a realistic/compliant flight route
 engine that parses X-Plane 12 native navigation data (including ARINC 424 procedures),
 builds a directed graph, and finds candidate routes respecting aviation constraints via
 A\* + Yen K-shortest.

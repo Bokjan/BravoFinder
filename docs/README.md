@@ -29,7 +29,7 @@
 - **[线程安全契约 B](thread-safety.zh-CN.md)** — 一个只读实例多线程并发查询：双检锁、指针
   跨 rehash 稳定、eager 冻结无锁读、tsan 验证。
 - **[领域建模与内存设计](domain-design.zh-CN.md)** — 值类型、自研 `Result<T,E>`、无 static/
-  无裸 new 的设计宪法、为一处热点定制的 `SmallVec`；v2→v3 重写动机的直接体现。
+  无裸 new 的设计宪法、数据驱动的紧凑内存表示（`SmallVec`→`FixedIdent`）；v2→v3 重写动机的直接体现。
 - **[性能测试](performance.zh-CN.md)** — 测试机配置、方法、启动 ~11×、优化分解表、内存与
   缓存大小、可复现步骤。
 

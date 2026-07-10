@@ -63,26 +63,34 @@ per-vertex 字段就是 record 里多一个字段，没有新平行数组、没�
   `format_version` 整体版本号，不需要字段级前后兼容；
 - **不引入 protobuf 依赖**（违反项目极简依赖原则）。
 
-## 5. 哪些不落盘：三个 lookup map
+## 5. 哪些不落盘：三个 lookup 索引
 
-图里有三个 `unordered_map`（`ident_index_`/`ident_first_`/`airport_index_`）做名字→顶点查找。
-它们**不序列化**，加载后从 `idents_` 重建（`GraphBuilder::RebuildIndices`）：
+图里有三个名字→顶点查找索引（`ident_index_`/`ident_all_`/`airport_index_`）。它们**不序列化**，
+加载后从 `idents_` 重建（`GraphBuilder::RebuildIndices`）：
 
-- `unordered_map`（哈希桶 + 堆节点指针）结构上不可移植序列化；
-- 实测它们运行时占 ~30MB > `.bfdb` 文件本身（~17MB），落盘是纯亏；
-- 重建成本 reserve(V) 后 ~50–100ms，一次性、冻结只读。
+- 索引结构（早先是 `unordered_map`，2026-07 起是**排序数组 + 二分**）不落盘更省——落盘要么不可移植
+  （哈希表的桶/指针），要么就是把能 O(n log n) 重建的东西白占文件；
+- 重建成本：填充后 `std::sort`，一次性、之后冻结只读。
 
-`FromImage`/`ToImage`（`lib/io/graph_builder.cc`）是图与缓存镜像 `BfdbImage` 之间的转换点。
+> **为什么从 `unordered_map` 换成排序数组**：一个隔离微基准（真实 27 万 idents）量出查找只慢
+> ~49ns/op、而内存从 ~26MB 降到 ~4MB，且查找不在 A\* 热路径（只在端点解析）——拿确定的内存收益换
+> 不可感知的延迟。key 用定长 `FixedIdent`(12B) / `FixedIdentNoRegion`(8B，无 region 的 ICAO/bare
+> ident)，`pair<key,int>` 因此保持 12–16B。`RebuildIndices` 末尾有 `is_sorted` 断言，防「未排序 →
+> 二分静默错」。
 
-## 6. 字符串：文件层用池引用，运行时保持拥有型
+`FromSnapshot`/`ToSnapshot`（`lib/io/graph_builder.cc`）是图与缓存快照 `GraphSnapshot` 之间的转换点。
+
+## 6. 字符串：文件层用池引用，运行时按体量分层
 
 曾考虑把 idents/airway 名全改成 `string_view` + 集中字符串池省内存。**实测否决**：cycle 2601
 数据里 ident 最长 5 字符、region 1–2、airway 名 99%+ ≤10 字符，**全部落在 libc++ SSO（22B）
 阈值内 → 本就零堆分配**。view 化的主收益（消堆分配）不存在，代价却是贯穿全 API 的 lifetime
 契约，还逆了「领域类型是不可变值类型」的设计宪法。
 
-结论：**运行时保持拥有型 `Ident`（全 SSO，无碎片）；只在序列化文件层**用 `{u32 offset, u32 len}`
-引用字符串池令文件紧凑，加载后重建回拥有型。鱼与熊掌部分兼得、零 lifetime 风险、零 API 改动。
+结论：**只在序列化文件层**用 `{u32 offset, u32 len}` 引用字符串池令文件紧凑，加载后重建回**拥有型**
+值——零 lifetime 风险。运行时的拥有型本身按体量分层：查询边缘的少量字符串用全 SSO 的 `Ident`；而
+V 级（27 万顶点 ident）与 CIFP 级（76 万 leg 的 fix）用定长 12B 的 `FixedIdent`（length-prefixed
+inline，零堆分配）——仍是拥有型、零 lifetime 风险，只是把「弹性」换成「紧凑」，各省约 14MB / 40MB。
 `StringPool` 带**去重**（`unordered_map` 记已 intern 的串）：ident/region/airway/ICAO
 高度重复，同串只存一份。去重对 reader **透明**——引用格式 `{offset,len}` 与段布局都没变。
 
@@ -152,8 +160,8 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 | 场景 | 磁盘 | 冷启动加载 | 峰值 RSS |
 |---|---:|---:|---:|
 | 原始 `.dat` 解析建图（`--data`） | — | ~2.27s | ~165 MB |
-| 统一 `.bfdb`，on-demand（`--db`，默认） | 57.3 MB | ~0.20s | ~128 MB |
-| 统一 `.bfdb`，eager（`--cifp-load eager`） | 57.3 MB | ~0.29s | ~234 MB |
+| 统一 `.bfdb`，on-demand（`--db`，默认） | 57.3 MB | ~0.20s | ~101 MB |
+| 统一 `.bfdb`，eager（`--cifp-load eager`） | 57.3 MB | ~0.29s | ~168 MB |
 
 读要点：
 
@@ -162,8 +170,8 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 - **加载速度**：缓存路径 ~0.20s vs 原始解析 ~2.27s，**~11×**。on-demand 与 eager 加载耗时相近
   （都只在 `Open` 读 header+段表+pool+CIFP 目录 ~3MB），差别在 eager 额外 `FetchAll` 反序列化
   全部程序。
-- **运行内存**：on-demand ~128 MB（图 + MORA/MSA + detail + ~1.5MB 全局池 + ~1.5MB CIFP 目录，
-  程序段按需拉）；eager ~234 MB（+~100MB 全部程序常驻，换无锁读）；原始解析 ~165MB（解析中间
+- **运行内存**：on-demand ~101 MB（图 + MORA/MSA + detail + ~1.5MB 全局池 + ~1.5MB CIFP 目录，
+  程序段按需拉）；eager ~168 MB（+~67MB 全部程序常驻，换无锁读）；原始解析 ~165MB（解析中间
   态更吃内存）。选型：一次性 CLI 查询用 on-demand（内存最省、启动最快）；Web/批量并发用 eager
   （常驻程序、无锁读，见第 8 节）。
 

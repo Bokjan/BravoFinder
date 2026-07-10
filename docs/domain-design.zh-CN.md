@@ -1,9 +1,9 @@
-# 领域建模与内存设计：值类型、Result、SmallVec
+# 领域建模与内存设计：值类型、Result、紧凑表示
 
 > BravoFinder 的领域类型为什么这么设计——不可变值类型、自研 `Result<T,E>`、无 `static`/无裸
-> `new`、以及一个只在 build 期用一次的 `SmallVec`。这些不是零散的风格偏好，而是 v2→v3 重写的
-> 核心动机的直接体现。面向想读源码、理解设计宪法的读者。相关代码：`lib/core/domain/`、
-> `lib/core/result.h`、`lib/core/util/small_vec.h`。
+> `new`、以及数据驱动的紧凑内存表示（一度是 `SmallVec`，后为定长 `FixedIdent`）。这些不是零散的
+> 风格偏好，而是 v2→v3 重写的核心动机的直接体现。面向想读源码、理解设计宪法的读者。相关代码：
+> `lib/core/domain/`、`lib/core/result.h`、`lib/core/util/small_vec.h`。
 
 ## 1. 一条主线：v2 的 static 共享 bug
 
@@ -82,10 +82,10 @@ class Result {
 
 异常留给什么？真正异常的情形——比如内部不变量被破坏。日常的「这条查询没结果」一律走 `Result`。
 
-## 4. SmallVec：为一处热点定制的内联小向量
+## 4. SmallVec：一次数据驱动的局部优化，以及它的退役
 
-`SmallVec<T, N>` 是个「前 N 个元素放栈上、超了才上堆」的小向量。它**只为一个场景而生**:
-`GraphBuilder` 里的 `ident -> 该 ident 的所有顶点` 索引。
+`SmallVec<T, N>` 是个「前 N 个元素放栈上、超了才上堆」的小向量。它当初**只为一个场景而生**:
+`GraphBuilder` 里的 `ident -> 该 ident 的所有顶点` 索引（`ident_all_`）。
 
 为什么值得专门造一个？数据说话——实测 AIRAC 2601 的分布：
 
@@ -94,30 +94,32 @@ class Result {
 于是 `N=4`：内联存储覆盖了几乎所有 ident，只有 1.12% 的长尾会溢出到堆一次(build 期，成本可
 忽略)。用 `std::vector` 的话，这近 99% 的常见情形每个都要一次堆分配——纯浪费。
 
-```cpp
-// 该常量注释里写死了警告:
-// N=4 来自实测分布,是 per-site 的,不是全局默认。
-// 别的 map-of-vector 成员不要照搬,先测自己的分布。
-inline constexpr int kIdentRegionInline = 4;
-```
-
 两个值得学的克制：
 
 - **只实现用到的操作**（`push_back`、下标、`size`、range 迭代、move），不做成通用容器。最小面 =
   最少 bug。
 - **限定 trivial 元素类型**(`static_assert(std::is_trivial_v<T>)`)。堆缓冲是裸 `malloc`，元素
-  直接赋值进去、不 placement-new、不跑析构——非 trivial 类型会 UB.static_assert 把这个约束
+  直接赋值进去、不 placement-new、不跑析构——非 trivial 类型会 UB。static_assert 把这个约束
   焊死；想放开就得加真正的构造/析构管线，而这个极简类型刻意不要。
 
-`SmallVec` 是「局部优化要有数据支撑、且不外溢成通用抽象」的样本：它诞生自一次 profile，注释里
-甚至警告别人别乱复用 `N`。
+**后续（2026-07 内存紧凑化 #3）：`ident_all_` 连同另外两个 lookup `unordered_map` 一起，被换成了
+「排序数组 + 二分」。** 起因同样是数据：一个隔离微基准（真实 27 万 idents）量出哈希表 vs 排序数组的
+查找只差 ~49ns/op、而内存从 ~26MB 降到 ~4MB，且查找不在 A\* 热路径——于是拿确定的内存收益换不可感知
+的延迟。`SmallVec` 就此失去唯一的生产使用者（类与单测保留作通用工具）。
+
+这恰恰是本节主线的完整弧：**局部优化要有数据支撑、且不外溢成通用抽象**——`SmallVec` 诞生自一次
+profile、注释里警告别人别乱复用 `N`；而当另一份数据表明排序数组整体更优时，同一套克制又把它退役。
+「有数据才优化」既是它出生的理由，也是它让位的理由。
 
 ## 5. 内存分层：磁盘紧凑，运行时拥有
 
 一个贯穿的模式：**磁盘布局和内存布局解耦**。字符串在 `.bfdb` 文件里是 `{offset, len}` 引用一个
-字符串池（紧凑、去重），加载后**重建回拥有型 `Ident`**（全 SSO、无碎片、无 lifetime 风险）。文件层
-为体积优化，运行时层为安全和访问速度优化，两者不互相迁就——细节见
-[binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
+字符串池（紧凑、去重），加载后**重建回拥有型值**（无碎片、无 lifetime 风险）。运行时的「拥有型」
+本身也按体量分层：查询边缘的少量字符串用全 SSO 的 `Ident`，而 V 级（27 万顶点）与 CIFP 级（76 万
+leg）的海量 ident 用定长 12B 的 `FixedIdent`（length-prefixed inline，零堆分配）——同样是拥有型、
+同样无 lifetime 风险，只是把「弹性」换成「紧凑」。文件层为体积优化，运行时层为安全和访问速度优化，
+两者不互相迁就——细节见 [binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
 
-这正是本文主线的收尾：值类型让运行时安全简单，自研 `Result` 让失败显式，`SmallVec` 让热点省
-分配，而它们都服务于同一个目标——一个自包含、无隐藏共享态、可并发只读的引擎。
+这正是本文主线的收尾：值类型让运行时安全简单，自研 `Result` 让失败显式，紧凑定长表示（`FixedIdent`）
+让海量数据省内存而不牺牲拥有语义，而它们都服务于同一个目标——一个自包含、无隐藏共享态、可并发只读
+的引擎。
