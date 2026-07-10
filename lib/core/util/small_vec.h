@@ -10,19 +10,21 @@
 
 namespace bf {
 
-// Inline capacity for the `ident -> regions` map in GraphBuilder. Derived from a
-// measured AIRAC 2601 distribution: 98.88% of idents are reused across <= 4
-// regions, so N=4 keeps the inline storage covering everything but a 1.12%
-// long tail that spills to the heap once, at build time (cost negligible). Do
-// NOT reuse this constant for other map-of-vector members without measuring
-// their own distribution -- N is per-site, not a global default.
+// Formerly the inline capacity for GraphBuilder's `ident -> regions` map, sized
+// from the AIRAC 2601 distribution (98.88% of idents span <= 4 regions). That
+// map was replaced by a sorted vector + binary search (see
+// .notes/plans/2026-07-09_memory_compaction.md #3), so this constant currently
+// has no production user; kept as documented guidance for any future
+// SmallVec-backed map-of-vector. Do NOT reuse the value without measuring the
+// new site's own distribution -- N is per-site, not a global default.
 inline constexpr int kIdentRegionInline = 4;
 
 // A tiny vector that stores up to N elements inline and only allocates on the
-// heap when it grows past N. Used to back map-of-small-vector indices without
-// paying a heap allocation for the common (small) case. Intentionally minimal:
-// it only supports the operations GraphBuilder needs (push_back, indexed/size
-// access, range iteration, move). Zero external dependencies, per the project's
+// heap when it grows past N. A general-purpose utility (currently exercised only
+// by its own unit test after the GraphBuilder ident-map migration); use it to
+// back map-of-small-vector indices without paying a heap allocation for the
+// common (small) case. Intentionally minimal: push_back, indexed/size access,
+// range iteration, move. Zero external dependencies, per the project's
 // dependency discipline (no Abseil/Boost/LLVM).
 //
 // Restricted to trivial element types: the heap buffer is raw malloc storage

@@ -46,6 +46,12 @@ struct alignas(1) FixedIdent {
            std::memcmp(region, o.region, region_len) == 0;
   }
 
+  // Order by (ident, region) for sorted-vector indices + binary search.
+  bool operator<(const FixedIdent& o) const {
+    const int c = IdentView().compare(o.IdentView());
+    return c != 0 ? c < 0 : RegionView() < o.RegionView();
+  }
+
   // Pack an Ident into the fixed form. Overflow (a field longer than its cap)
   // asserts in debug and is impossible on real data; in release the copy is
   // clamped to the cap so a corrupt oversized field cannot overrun the buffer.

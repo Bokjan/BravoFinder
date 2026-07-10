@@ -2,13 +2,13 @@
 
 #include <cstdint>
 #include <string>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "core/domain/fixed_ident.h"
+#include "core/domain/fixed_ident_no_region.h"
 #include "core/domain/waypoint.h"
 #include "core/graph/nav_graph.h"
-#include "core/util/small_vec.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/nav_data.h"
 
@@ -105,7 +105,7 @@ class GraphBuilder {
   // For FromSnapshot: constructs an empty builder to be populated from a snapshot.
   GraphBuilder() = default;
 
-  // Rebuild the three lookup maps from idents_ / first_airport_vertex_. Used
+  // Rebuild the three lookup indices from idents_ / first_airport_vertex_. Used
   // after the vertex metadata is in place (both build paths converge here).
   void RebuildIndices();
 
@@ -117,11 +117,17 @@ class GraphBuilder {
   std::vector<int>
       airport_elevations_ft_;  // per-airport elevation, size = V - first_airport_vertex_
   std::vector<std::string> airway_names_;
-  bool airway_overflow_ = false;                // set when distinct airway names exceed uint16
-  std::unordered_map<Ident, int> ident_index_;  // (ident,region) -> vertex
-  std::unordered_map<std::string, SmallVec<int, kIdentRegionInline>>
-      ident_all_;                                       // ident -> all vertices
-  std::unordered_map<std::string, int> airport_index_;  // ICAO -> vertex
+  bool airway_overflow_ = false;  // set when distinct airway names exceed uint16
+
+  // Lookup indices: sorted vectors + binary search rather than hash maps. A hash
+  // map of the ~270k (ident, region) keys is the second-largest on-demand
+  // resident block (~26 MB); these sorted vectors cost ~4 MB with a ~50 ns/op
+  // lookup penalty that is immaterial off the A* hot path (endpoint resolution
+  // only). See .notes/plans/2026-07-09_memory_compaction.md #3.
+  std::vector<std::pair<FixedIdent, int>> ident_index_;  // sorted by (ident,region) -> vertex
+  std::vector<std::pair<FixedIdentNoRegion, int>>
+      ident_all_;  // sorted by ident; equal range = all vertices sharing the ident
+  std::vector<std::pair<FixedIdentNoRegion, int>> airport_index_;  // sorted by ICAO -> vertex
 };
 
 }  // namespace bf

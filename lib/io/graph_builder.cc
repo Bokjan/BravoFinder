@@ -1,6 +1,7 @@
 #include "io/graph_builder.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <unordered_map>
@@ -61,19 +62,19 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     graph_.coords_.push_back(w.coord);
     idents_.push_back(FixedIdent::FromIdent(w.ident));
     kinds_.push_back(w.kind);
-    ident_index_.emplace(w.ident, i);
-    ident_all_[w.ident.ident].push_back(i);
     grid.Insert(i, w.coord);
   }
   for (int i = 0; i < airport_count; ++i) {
     const Airport& a = data.airports[i];
-    const int v = waypoint_count + i;
     graph_.coords_.push_back(a.coord);
     idents_.push_back(FixedIdent::FromParts(a.icao, a.region));
     kinds_.push_back(WaypointKind::kFix);  // airports have no navaid kind
     airport_elevations_ft_.push_back(a.elevation_ft);
-    airport_index_.emplace(a.icao, v);
   }
+  first_airport_vertex_ = waypoint_count;
+  // Build the sorted lookup indices now: airway resolution below queries them by
+  // (ident, region). Both build paths (here and FromSnapshot) go through this.
+  RebuildIndices();
 
   // --- Airway-name table; "DCT" reserved at index 0 for synthetic edges. ---
   airway_names_.push_back("DCT");
@@ -112,13 +113,11 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   };
 
   for (const AirwayConnection& conn : data.airways) {
-    auto from_it = ident_index_.find(conn.from);
-    auto to_it = ident_index_.find(conn.to);
-    if (from_it == ident_index_.end() || to_it == ident_index_.end()) {
+    const int from = VertexByIdent(conn.from);
+    const int to = VertexByIdent(conn.to);
+    if (from < 0 || to < 0) {
       continue;  // endpoint not in dataset; skip the segment
     }
-    const int from = from_it->second;
-    const int to = to_it->second;
     const int id = airway_id_for(conn.segment.name);
     // Honor directionality: kForward = from->to only, kBackward = to->from only,
     // kBoth = both directions.
@@ -182,12 +181,23 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   // Persist the on-network flags (computed before DCT edges were added) so
   // procedure wiring can tell true enroute vertices from terminal-only fixes.
   on_network_ = std::move(on_network);
-  first_airport_vertex_ = waypoint_count;
 }
 
 int GraphBuilder::VertexByIdent(const Ident& ident) const {
-  auto it = ident_index_.find(ident);
-  return it == ident_index_.end() ? -1 : it->second;
+  // A query string longer than the fixed caps cannot match any stored key
+  // (real idents are <= 5 / regions <= 2). Short-circuit so FromIdent's
+  // build-side overflow assert never fires on a legitimate over-long query.
+  if (ident.ident.size() > FixedIdent::kIdentCap || ident.region.size() > FixedIdent::kRegionCap) {
+    return -1;
+  }
+  const FixedIdent key = FixedIdent::FromIdent(ident);
+  auto it = std::lower_bound(
+      ident_index_.begin(), ident_index_.end(), key,
+      [](const std::pair<FixedIdent, int>& e, const FixedIdent& k) { return e.first < k; });
+  if (it != ident_index_.end() && it->first == key) {
+    return it->second;
+  }
+  return -1;
 }
 
 bool GraphBuilder::OnNetwork(int vertex) const {
@@ -213,16 +223,32 @@ std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int cou
 }
 
 std::vector<int> GraphBuilder::VerticesByIdent(const std::string& ident) const {
-  auto it = ident_all_.find(ident);
-  if (it == ident_all_.end()) {
-    return {};
+  if (ident.size() > FixedIdentNoRegion::kCap) {
+    return {};  // longer than any stored ident -> no match (see VertexByIdent)
   }
-  return {it->second.begin(), it->second.end()};
+  const FixedIdentNoRegion key = FixedIdentNoRegion::From(ident);
+  auto lo = std::lower_bound(ident_all_.begin(), ident_all_.end(), key,
+                             [](const std::pair<FixedIdentNoRegion, int>& e,
+                                const FixedIdentNoRegion& k) { return e.first < k; });
+  std::vector<int> out;
+  for (auto it = lo; it != ident_all_.end() && it->first == key; ++it) {
+    out.push_back(it->second);
+  }
+  return out;
 }
 
 int GraphBuilder::VertexByAirport(const std::string& icao) const {
-  auto it = airport_index_.find(icao);
-  return it == airport_index_.end() ? -1 : it->second;
+  if (icao.size() > FixedIdentNoRegion::kCap) {
+    return -1;  // longer than any stored ICAO -> no match (see VertexByIdent)
+  }
+  const FixedIdentNoRegion key = FixedIdentNoRegion::From(icao);
+  auto it = std::lower_bound(airport_index_.begin(), airport_index_.end(), key,
+                             [](const std::pair<FixedIdentNoRegion, int>& e,
+                                const FixedIdentNoRegion& k) { return e.first < k; });
+  if (it != airport_index_.end() && it->first == key) {
+    return it->second;
+  }
+  return -1;
 }
 
 bool GraphBuilder::IsAirport(int vertex) const {
@@ -238,18 +264,47 @@ void GraphBuilder::RebuildIndices() {
   ident_index_.clear();
   ident_all_.clear();
   airport_index_.clear();
-  ident_index_.reserve(v_count);
-  ident_all_.reserve(v_count);
-  // Waypoints occupy [0, first_airport_vertex_); airports the tail. Both are
-  // reachable by (ident, region); only waypoints seed the ident-all and
-  // airports the ICAO lookup, matching the constructor's original wiring.
+  ident_index_.reserve(first_airport_vertex_);
+  ident_all_.reserve(first_airport_vertex_);
+  airport_index_.reserve(v_count - first_airport_vertex_);
+  // Waypoints occupy [0, first_airport_vertex_); airports the tail. Only
+  // waypoints seed the (ident,region) and ident-all lookups; only airports seed
+  // the ICAO lookup, matching the original wiring. Each index is filled in
+  // vertex order, then sorted once for binary-search lookup.
   for (int i = 0; i < first_airport_vertex_; ++i) {
-    ident_index_.emplace(idents_[i].ToIdent(), i);
-    ident_all_[std::string(idents_[i].IdentView())].push_back(i);
+    ident_index_.emplace_back(idents_[i], i);
+    ident_all_.emplace_back(FixedIdentNoRegion::From(idents_[i].IdentView()), i);
   }
   for (int v = first_airport_vertex_; v < v_count; ++v) {
-    airport_index_.emplace(std::string(idents_[v].IdentView()), v);
+    airport_index_.emplace_back(FixedIdentNoRegion::From(idents_[v].IdentView()), v);
   }
+  auto by_key = [](const auto& a, const auto& b) {
+    if (a.first < b.first) {
+      return true;
+    }
+    if (b.first < a.first) {
+      return false;
+    }
+    return a.second < b.second;  // stable secondary order: ascending vertex
+  };
+  std::sort(ident_index_.begin(), ident_index_.end(), by_key);
+  std::sort(ident_all_.begin(), ident_all_.end(), by_key);
+  std::sort(airport_index_.begin(), airport_index_.end(), by_key);
+
+  // The lookups (VertexByIdent / VerticesByIdent / VertexByAirport) rely on
+  // binary search, which is silently wrong on an unsorted range. Assert the
+  // key-only ordering the lookups actually use (the vertex tie-break in by_key
+  // is irrelevant to binary search). This is the single write site both build
+  // paths converge on, so one assert here guards every future change; it is a
+  // debug-only check (compiled out in release) over an already-sorted range.
+  auto key_sorted = [](const auto& vec) {
+    return std::is_sorted(vec.begin(), vec.end(),
+                          [](const auto& a, const auto& b) { return a.first < b.first; });
+  };
+  assert(key_sorted(ident_index_) && "ident_index_ not sorted by key");
+  assert(key_sorted(ident_all_) && "ident_all_ not sorted by key");
+  assert(key_sorted(airport_index_) && "airport_index_ not sorted by key");
+  (void)key_sorted;  // silence unused-variable warning in release (NDEBUG)
 }
 
 GraphBuilder GraphBuilder::FromSnapshot(GraphSnapshot&& snapshot) {
