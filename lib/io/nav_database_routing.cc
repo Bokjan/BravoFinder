@@ -1,7 +1,7 @@
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <queue>
-#include <set>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -390,11 +390,29 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
     bool operator>(const HeapItem& o) const { return cost > o.cost; }
   };
   std::priority_queue<HeapItem, std::vector<HeapItem>, std::greater<>> heap;
-  std::set<std::vector<int>> queued;
+  // Dedup queued picks by a 64-bit FNV-1a hash of the pick vector rather than
+  // storing the vectors themselves (a std::set<vector<int>> copied every pick).
+  // The heap owns the only real copies. A hash collision would drop one combo
+  // from the merge; with 64-bit hashes over the few thousand picks this cold
+  // path (forced-points / via routing) ever enqueues, that is astronomically
+  // unlikely, and even then stitch() fully validates every emitted path, so the
+  // worst case is a missed alternative, never a wrong route.
+  auto hash_pick = [](const std::vector<int>& pick) -> uint64_t {
+    uint64_t h = 1469598103934665603ULL;  // FNV-1a offset basis
+    for (int idx : pick) {
+      const auto u = static_cast<uint32_t>(idx);
+      for (int b = 0; b < 4; ++b) {
+        h ^= static_cast<uint64_t>((u >> (b * 8)) & 0xFF);
+        h *= 1099511628211ULL;  // FNV prime
+      }
+    }
+    return h;
+  };
+  std::unordered_set<uint64_t> queued;
 
   std::vector<int> start(hops, 0);
   heap.push({combo_cost(start), start});
-  queued.insert(start);
+  queued.insert(hash_pick(start));
 
   while (!heap.empty() && static_cast<int>(results.size()) < k) {
     const std::vector<int> pick = heap.top().pick;
@@ -410,7 +428,7 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
       if (pick[h] + 1 < static_cast<int>(segments[h].size())) {
         std::vector<int> next = pick;
         next[h] += 1;
-        if (queued.insert(next).second) {
+        if (queued.insert(hash_pick(next)).second) {
           heap.push({combo_cost(next), next});
         }
       }
