@@ -59,7 +59,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   for (int i = 0; i < waypoint_count; ++i) {
     const Waypoint& w = data.waypoints[i];
     graph_.coords_.push_back(w.coord);
-    idents_.push_back(w.ident);
+    idents_.push_back(FixedIdent::FromIdent(w.ident));
     kinds_.push_back(w.kind);
     ident_index_.emplace(w.ident, i);
     ident_all_[w.ident.ident].push_back(i);
@@ -69,7 +69,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     const Airport& a = data.airports[i];
     const int v = waypoint_count + i;
     graph_.coords_.push_back(a.coord);
-    idents_.push_back(Ident(a.icao, a.region));
+    idents_.push_back(FixedIdent::FromParts(a.icao, a.region));
     kinds_.push_back(WaypointKind::kFix);  // airports have no navaid kind
     airport_elevations_ft_.push_back(a.elevation_ft);
     airport_index_.emplace(a.icao, v);
@@ -244,11 +244,11 @@ void GraphBuilder::RebuildIndices() {
   // reachable by (ident, region); only waypoints seed the ident-all and
   // airports the ICAO lookup, matching the constructor's original wiring.
   for (int i = 0; i < first_airport_vertex_; ++i) {
-    ident_index_.emplace(idents_[i], i);
-    ident_all_[idents_[i].ident].push_back(i);
+    ident_index_.emplace(idents_[i].ToIdent(), i);
+    ident_all_[std::string(idents_[i].IdentView())].push_back(i);
   }
   for (int v = first_airport_vertex_; v < v_count; ++v) {
-    airport_index_.emplace(idents_[v].ident, v);
+    airport_index_.emplace(std::string(idents_[v].IdentView()), v);
   }
 }
 

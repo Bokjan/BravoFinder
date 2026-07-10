@@ -28,7 +28,7 @@ bf::GraphSnapshot MakeGraph() {
   bf::GraphSnapshot g;
   g.first_airport_vertex = 1;  // vertex 0 waypoint, vertex 1 airport
   g.coords = {{40.0, -73.0}, {41.0, -74.0}};
-  g.idents = {bf::Ident("WAYPT", "K6"), bf::Ident("KTST", "K6")};
+  g.idents = {bf::FixedIdent::FromParts("WAYPT", "K6"), bf::FixedIdent::FromParts("KTST", "K6")};
   g.kinds = {bf::WaypointKind::kFix, bf::WaypointKind::kOther};
   g.on_network = {1, 0};
   g.offsets = {0, 1, 1};  // vertex 0 has one out-edge, vertex 1 has none
@@ -105,8 +105,8 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   // Graph section
   REQUIRE(u.graph.coords.size() == 2);
   CHECK(u.graph.first_airport_vertex == 1);
-  CHECK(u.graph.idents[0].ident == "WAYPT");
-  CHECK(u.graph.idents[1].ident == "KTST");
+  CHECK(u.graph.idents[0].IdentView() == "WAYPT");
+  CHECK(u.graph.idents[1].IdentView() == "KTST");
   REQUIRE(u.graph.edges.size() == 1);
   CHECK(u.graph.edges[0].to == 1);
   REQUIRE(u.graph.airway_names.size() == 1);

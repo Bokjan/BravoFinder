@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "core/domain/fixed_ident.h"
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
@@ -33,7 +34,7 @@ struct GraphSnapshot {
   std::vector<int> offsets;         // CSR row offsets, size V + 1
   std::vector<GraphEdge> edges;     // CSR edge array, size E
   std::vector<uint8_t> on_network;  // per-vertex airway membership (0/1), size V
-  std::vector<Ident> idents;        // per-vertex (ident, region), size V
+  std::vector<FixedIdent> idents;   // per-vertex (ident, region), size V
   std::vector<WaypointKind> kinds;  // per-vertex kind (fix/VOR/NDB/DME), size V
   std::vector<std::string> airway_names;
   MoraGrid mora;

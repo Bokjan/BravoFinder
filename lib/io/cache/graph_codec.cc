@@ -64,9 +64,9 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
     const Coordinate& c = snapshot.coords[i];
     w.F64(c.latitude);
     w.F64(c.longitude);
-    const Ident& id = snapshot.idents[i];
-    const auto ir = pool.Add(id.ident);
-    const auto rr = pool.Add(id.region);
+    const FixedIdent& id = snapshot.idents[i];
+    const auto ir = pool.Add(std::string(id.IdentView()));
+    const auto rr = pool.Add(std::string(id.RegionView()));
     w.U32(ir.first);
     w.U32(ir.second);
     w.U32(rr.first);
@@ -257,8 +257,9 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
   snapshot.idents.resize(v);
   for (uint32_t i = 0; i < v; ++i) {
     const IdentRef& ir = ident_refs[i];
-    snapshot.idents[i].ident = ResolveRef(pool, pool_len, ir.io, ir.il, refs_ok);
-    snapshot.idents[i].region = ResolveRef(pool, pool_len, ir.ro, ir.rl, refs_ok);
+    const std::string id = ResolveRef(pool, pool_len, ir.io, ir.il, refs_ok);
+    const std::string reg = ResolveRef(pool, pool_len, ir.ro, ir.rl, refs_ok);
+    snapshot.idents[i] = FixedIdent::FromParts(id, reg);
   }
   snapshot.airway_names.resize(airway_count);
   for (uint32_t i = 0; i < airway_count; ++i) {
