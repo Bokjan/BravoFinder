@@ -45,7 +45,7 @@ bf::GraphSnapshot MakeGraph() {
 bf::CifpData MakeCifp() {
   bf::CifpData d{};
   bf::ProcedureLeg leg{};
-  leg.fix = bf::Ident("WAYPT", "K6");  // same string as a graph ident
+  leg.fix = bf::FixedIdent::FromParts("WAYPT", "K6");  // same string as a graph ident
   leg.path_term = bf::PathTerminator::kTF;
   bf::Procedure p{
       .type = bf::ProcedureType::kSid,
@@ -122,7 +122,7 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   REQUIRE(fetched->procedures.size() == 1);
   CHECK(fetched->procedures[0].name == "TESTSID");
   REQUIRE(fetched->procedures[0].legs.size() == 1);
-  CHECK(fetched->procedures[0].legs[0].fix.ident == "WAYPT");
+  CHECK(fetched->procedures[0].legs[0].fix.IdentView() == "WAYPT");
   REQUIRE(fetched->runways.size() == 1);
   CHECK(fetched->runways[0].ident == "04L");
 

@@ -31,7 +31,7 @@ double LegDistance(const ProcedureLeg& leg, const Coordinate* prev_coord,
 // (ident, region) is both correct and unambiguous, and silently guessing a
 // region would risk wiring a procedure to the wrong fix.
 int ResolveFix(const ProcedureLeg& leg, const GraphBuilder& builder) {
-  if (leg.fix.ident.empty()) {
+  if (leg.fix.IdentView().empty()) {
     return -1;
   }
   return builder.VertexByIdent(leg.fix);

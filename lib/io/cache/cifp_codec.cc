@@ -45,8 +45,10 @@ std::string SerializeSegment(const CifpData& data, StringPool& pool) {
     ref(p.runway);
     w.U32(static_cast<uint32_t>(p.legs.size()));
     for (const ProcedureLeg& leg : p.legs) {
-      ref(leg.fix.ident);
-      ref(leg.fix.region);
+      // fix is a FixedIdent; serialize its two parts as pool refs, byte-identical
+      // to the former Ident layout (idents <=5 chars => SSO, no heap).
+      ref(std::string(leg.fix.IdentView()));
+      ref(std::string(leg.fix.RegionView()));
       w.U8(static_cast<uint8_t>(leg.path_term));
       w.F64(leg.course_deg);
       w.F64(leg.distance_nm);
@@ -76,6 +78,13 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
     const uint32_t off = br.U32();
     const uint32_t len = br.U32();
     s = ResolveRef(pool, pool_len, off, len, refs_ok);
+  };
+  // Same read, returning the resolved string by value -- used for the fix, which
+  // is a FixedIdent (cannot bind to std::string&) built via FromParts.
+  auto read_ref = [&]() -> std::string {
+    const uint32_t off = br.U32();
+    const uint32_t len = br.U32();
+    return ResolveRef(pool, pool_len, off, len, refs_ok);
   };
 
   // Minimum on-disk bytes per record, used to reject an absurd count before
@@ -108,8 +117,10 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
     p.legs.resize(leg_count);
     for (uint32_t j = 0; j < leg_count; ++j) {
       ProcedureLeg& leg = p.legs[j];
-      ref(leg.fix.ident);
-      ref(leg.fix.region);
+      // Two pool refs (ident, region) -> FixedIdent, order matching Encode.
+      const std::string fix_ident = read_ref();
+      const std::string fix_region = read_ref();
+      leg.fix = FixedIdent::FromParts(fix_ident, fix_region);
       leg.path_term = static_cast<PathTerminator>(br.U8());
       leg.course_deg = br.F64();
       leg.distance_nm = br.F64();

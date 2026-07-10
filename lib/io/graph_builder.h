@@ -52,6 +52,10 @@ class GraphBuilder {
   // since idents are not globally unique.
   int VertexByIdent(const Ident& ident) const;
 
+  // Same, for a key already in compact form (e.g. a ProcedureLeg::fix). The
+  // lookup index is FixedIdent-keyed, so this avoids the Ident round-trip.
+  int VertexByIdent(const FixedIdent& key) const;
+
   // Resolve an airport by ICAO code to its vertex index, or -1.
   int VertexByAirport(const std::string& icao) const;
 

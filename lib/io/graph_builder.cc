@@ -183,14 +183,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   on_network_ = std::move(on_network);
 }
 
-int GraphBuilder::VertexByIdent(const Ident& ident) const {
-  // A query string longer than the fixed caps cannot match any stored key
-  // (real idents are <= 5 / regions <= 2). Short-circuit so FromIdent's
-  // build-side overflow assert never fires on a legitimate over-long query.
-  if (ident.ident.size() > FixedIdent::kIdentCap || ident.region.size() > FixedIdent::kRegionCap) {
-    return -1;
-  }
-  const FixedIdent key = FixedIdent::FromIdent(ident);
+int GraphBuilder::VertexByIdent(const FixedIdent& key) const {
   auto it = std::lower_bound(
       ident_index_.begin(), ident_index_.end(), key,
       [](const std::pair<FixedIdent, int>& e, const FixedIdent& k) { return e.first < k; });
@@ -198,6 +191,16 @@ int GraphBuilder::VertexByIdent(const Ident& ident) const {
     return it->second;
   }
   return -1;
+}
+
+int GraphBuilder::VertexByIdent(const Ident& ident) const {
+  // A query string longer than the fixed caps cannot match any stored key
+  // (real idents are <= 5 / regions <= 2). Short-circuit so FromIdent's
+  // build-side overflow assert never fires on a legitimate over-long query.
+  if (ident.ident.size() > FixedIdent::kIdentCap || ident.region.size() > FixedIdent::kRegionCap) {
+    return -1;
+  }
+  return VertexByIdent(FixedIdent::FromIdent(ident));
 }
 
 bool GraphBuilder::OnNetwork(int vertex) const {

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/domain/coordinate.h"
+#include "core/domain/fixed_ident.h"
 #include "core/domain/ident.h"
 
 namespace bf {
@@ -83,14 +84,17 @@ AltitudeConstraint ParseAltConstraint(std::string_view desc, int alt1, int alt2)
 // the course/distance/altitude data parsed from the CIFP row. Legs that do not
 // terminate at a fix leave `fix` empty and rely on course/distance.
 struct ProcedureLeg {
-  Ident fix;  // empty ident for heading/altitude/manual-termination legs
+  // Compact 12-byte fixed ident (vs 64B Ident): the leg array is by far the
+  // largest CIFP structure (~765k legs), so this cuts eager-mode resident memory
+  // by ~40 MB. Empty ident for heading/altitude/manual-termination legs.
+  FixedIdent fix;
   PathTerminator path_term = PathTerminator::kUnknown;
   double course_deg = 0.0;   // magnetic course (CIFP column, 0 if absent)
   double distance_nm = 0.0;  // route/leg distance (CIFP column, 0 if absent)
   AltitudeConstraint alt;
 
   // Whether this leg ends at a resolvable navigation fix.
-  bool fix_is_definite() const { return TerminatesAtFix(path_term) && !fix.ident.empty(); }
+  bool fix_is_definite() const { return TerminatesAtFix(path_term) && !fix.IdentView().empty(); }
 };
 
 // Which kind of terminal procedure this is.

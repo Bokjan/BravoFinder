@@ -456,7 +456,7 @@ std::string ProcSql(std::string_view table, bool single_airport) {
 // 'T'); magnetic courses ('M'/blank) are used as-is.
 void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& proc) {
   ProcedureLeg leg;
-  leg.fix = Ident(ColumnText(stmt, c.wp_ident), ColumnText(stmt, c.wp_icao));
+  leg.fix = FixedIdent::FromParts(ColumnText(stmt, c.wp_ident), ColumnText(stmt, c.wp_icao));
   leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
   const double course = ColumnDouble(stmt, c.course);
   const std::string flag = ColumnText(stmt, c.course_flag);

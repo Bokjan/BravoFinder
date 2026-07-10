@@ -61,12 +61,12 @@ TEST_CASE("CIFP parser: definite-fix legs resolve their fix and region", "[cifp]
   const bf::Procedure& p = data.procedures.front();
 
   // The CF leg flies to SKORR (region K6); it terminates at a fix.
-  CHECK(p.legs[1].fix.ident == "SKORR");
-  CHECK(p.legs[1].fix.region == "K6");
+  CHECK(p.legs[1].fix.IdentView() == "SKORR");
+  CHECK(p.legs[1].fix.RegionView() == "K6");
   CHECK(p.legs[1].fix_is_definite());
 
   // The VI/VM legs have no fix and do not terminate at one.
-  CHECK(p.legs[0].fix.ident.empty());
+  CHECK(p.legs[0].fix.IdentView().empty());
   CHECK_FALSE(p.legs[0].fix_is_definite());
   CHECK_FALSE(p.legs[4].fix_is_definite());
 }

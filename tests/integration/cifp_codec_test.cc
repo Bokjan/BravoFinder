@@ -83,8 +83,7 @@ TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integ
     for (size_t j = 0; j < a.procedures[i].legs.size(); ++j) {
       const bf::ProcedureLeg& la = a.procedures[i].legs[j];
       const bf::ProcedureLeg& lb = b.procedures[i].legs[j];
-      CHECK(la.fix.ident == lb.fix.ident);
-      CHECK(la.fix.region == lb.fix.region);
+      CHECK(la.fix == lb.fix);
       CHECK(la.path_term == lb.path_term);
       CHECK(lb.course_deg == Catch::Approx(la.course_deg));
       CHECK(lb.distance_nm == Catch::Approx(la.distance_nm));
