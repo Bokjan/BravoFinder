@@ -32,7 +32,7 @@ release 构建，cycle 2601。
 | 缓存加载 `--db nav.bfdb`（on-demand） | **~0.20 s** | 反序列化，跳过解析 |
 
 **约 11× 端到端提速**（2.27s → 0.20s）。`bf build` 本身（一次性，换 AIRAC 周期才跑）
-在此机上 ~3.2s，产出一个统一 `.bfdb`（graph + CIFP + detail）57.3 MB。
+在此机上 ~3.2s，产出一个统一 `.bfdb`（graph + CIFP + detail）60.9 MB。
 
 > debug 预设（含 ASan/UBSan）下冷启动 ~7.6s、缓存 ~1.4s，量级一致。
 
@@ -123,24 +123,26 @@ Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O
 | 模式 | 进程峰值 RSS | 缓存部分增量 |
 |---|---:|---:|
 | on-demand（默认） | ~101 MB | 程序段仅头 + 目录，+~1.5 MB |
-| eager（`--cifp-load eager`） | ~168 MB | 全量程序反序列化，+~67 MB |
+| eager（`--cifp-load eager`） | ~169 MB | 全量程序反序列化，+~67 MB |
 
 - 峰值 RSS 含图（lookup 排序数组 ~4MB + CSR 数组）、进程基线、以及程序段部分。
 - 内存紧凑化（2026-07）：per-vertex ident 与 ProcedureLeg.fix 改 12B `FixedIdent`、lookup 哈希表改
   排序数组 + 二分、WaypointKind 收窄 U8——on-demand 约省 ~27MB、eager 再省 ~41MB（fix 字段是 eager 的
   大头）。详见 `.notes/plans/2026-07-09_memory_compaction.md`。
+- CIFP 三字段（2026-07-14，`format_version` 6）：每条 leg 增补 RNP / 转向 / 速度限制（紧凑
+  u16/u16/char），整文件 +~3.6MB、eager RSS +~1MB；on-demand 不物化全 leg 故基本不变。
 - on-demand 适合一次性 CLI 查询（启动省、只加载查到的机场）；eager 适合长驻服务/批量并发
   （全量常驻、之后无锁读），见 [thread-safety.zh-CN.md](thread-safety.zh-CN.md)。
 
 ## 6. 缓存文件大小
 
 一个统一 `nav_<cycle>.bfdb` 装三段（graph + CIFP + detail），共用一个全局字符串池。实测
-cycle 2601 整文件 **57.3 MB**，其中 CIFP 段约 ~38 MB：
+cycle 2601 整文件 **60.9 MB**，其中 CIFP 段约 ~42 MB：
 
 | 段 | 约占 | 内容 |
 |---|---:|---|
 | graph + detail + 全局池 | ~18.9 MB | CSR coords/offsets/edges + on-network + idents + airway 名 + MORA + MSA + 导航台细节 + 等待航线 + 全局池（~1.5MB） |
-| cifp | ~38 MB | 14838 机场分段程序（结构化后远小于 ~105MB 原始 CIFP 文本） |
+| cifp | ~42 MB | 14838 机场分段程序（结构化后远小于 ~105MB 原始 CIFP 文本） |
 
 全局池三段共用、去重后 ~1.5MB（三段各自局部池之和 ~8.7MB → −83%），是整文件比旧三文件分离
 省 ~8MB 的主因。格式与取舍见 [binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
@@ -176,4 +178,4 @@ git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编�
 - **启动**：缓存把冷启动 2.27s 降到 0.20s，**~11×**（换 AIRAC 才需重建，3.2s 一次性）。
 - **查询**：memoize + Lawler + workspace 叠加，k=10 从 103.9ms 降到 13.2ms，**7.87×**；k=1 零退化；收益随 k 增长。
 - **止步有据（含一次翻案）**：gprof 曾因内联归并把「复用搜索数组」判为 ~1% 而否决，`perf` 调用栈采样揭示其达 23%，遂实现（workspace 档）；其余两个微优化仍不做。
-- **内存/文件**：on-demand ~101MB / eager ~168MB 峰值 RSS（2026-07 紧凑化后）；统一 `.bfdb` 57.3MB（CIFP 段 ~38MB）。
+- **内存/文件**：on-demand ~101MB / eager ~169MB 峰值 RSS（2026-07 紧凑化后）；统一 `.bfdb` 60.9MB（CIFP 段 ~42MB）。

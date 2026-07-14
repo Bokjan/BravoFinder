@@ -133,9 +133,10 @@ bf-mcp-stdio --db-dir /path/to/caches
 
 Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the
 `lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways` /
-`lookup_navaid_detail` / `lookup_holds` batch lookups (mirroring `bf query`), and
-`list_cycles`. See [apps/mcp_stdio/README.md](apps/mcp_stdio/README.md) for the
-full tool reference, argument semantics, and client configuration.
+`lookup_navaid_detail` / `lookup_holds` batch lookups plus `lookup_procedure_legs`
+(a named procedure's per-leg detail; mirroring `bf query`), and `list_cycles`. See
+[apps/mcp_stdio/README.md](apps/mcp_stdio/README.md) for the full tool reference,
+argument semantics, and client configuration.
 
 `bf build` (cache creation) remains a CLI concern and is not exposed as a tool.
 

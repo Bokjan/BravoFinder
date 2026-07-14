@@ -10,7 +10,7 @@ and wire it into an MCP client; the second half is a tool reference.
 - Transport: **stdio** (a local process; the client spawns it and talks over
   stdin/stdout).
 - Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK.
-- Capabilities: the six per-database tools below (mirroring the CLI `route` /
+- Capabilities: the nine per-database tools below (mirroring the CLI `route` /
   `query` subcommands), plus a `list_cycles` tool.
 - Data: the server is pointed at a **directory** of prebuilt `.bfdb` caches and
   serves one or more AIRAC cycles from it. It never parses raw data or writes
@@ -126,6 +126,7 @@ row below.
 | `lookup_waypoints` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of region matches (empty if none) |
 | `lookup_airports` | `ids` (string[]) | — | Array parallel to `ids`; airport object or `null` |
 | `lookup_procedures` | `ids` (string[]) | — | Array parallel to `ids`; procedures object or `null` |
+| `lookup_procedure_legs` | `airport`, `procedure` | — | The named procedure's transitions, each with its ordered legs (fix, path terminator, course, distance, altitude, RNP, turn, speed) |
 | `lookup_airways` | `ids` (string[]) | — | Array parallel to `ids`; airway object or `null` |
 | `lookup_navaid_detail` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of region matches (empty if none) |
 | `lookup_holds` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of holds at that fix (empty if none) |

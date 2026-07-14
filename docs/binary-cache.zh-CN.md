@@ -12,7 +12,7 @@ debug ~7.6s。对一个「快速出结果」的 CLI，这个启动开销不可�
 
 方案：`bf build` 把建好的图 + 程序 + 导航台细节序列化成**一个**紧凑二进制 `.bfdb`，
 `bf route --db` 直接反序列化跳过全部解析。实测 **release 2.27s → 0.20s（~11×）**，
-debug 7.6s → 1.4s，两条路径产出逐字节相同。单文件 57.3MB（含 graph + CIFP + detail，
+debug 7.6s → 1.4s，两条路径产出逐字节相同。单文件 60.9MB（含 graph + CIFP + detail，
 全局 pool 去重后比三文件分离省 ~8MB）。磁盘/加载/运行内存的完整对比见第 8 节末的表。
 
 ## 2. 核心取舍：显式定宽小端，而不是 mmap
@@ -50,9 +50,10 @@ per-vertex 字段就是 record 里多一个字段，没有新平行数组、没�
 不摊到 25 万顶点上——语义与布局对齐，机场字段各归其位。
 
 刻意不上 TLV/字段级段目录：`.bfdb` 是本地 `bf build` 产物、非跨版本分发，加字段时 bump
-容器 `format_version` + 重建缓存即可，跨版本兼容的价值不足以抵消其复杂度。（容器层确有一个
-**固定 3 项的段表**定位 graph/cifp/detail 三段，见第 8 节——那是分段容器的必需骨架，不是
-可扩展的字段级 TLV。）
+容器 `format_version` + 重建缓存即可，跨版本兼容的价值不足以抵消其复杂度。（最近一次即
+`format_version` 5→6：CIFP 每条 leg 增补 RNP / 转向 / 速度限制三字段，旧缓存被拒、`bf build`
+重建。容器层确有一个**固定 3 项的段表**定位 graph/cifp/detail 三段，见第 8 节——那是分段容器
+的必需骨架，不是可扩展的字段级 TLV。）
 
 ## 4. 与 protobuf 的异同
 
@@ -160,18 +161,18 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 | 场景 | 磁盘 | 冷启动加载 | 峰值 RSS |
 |---|---:|---:|---:|
 | 原始 `.dat` 解析建图（`--data`） | — | ~2.27s | ~165 MB |
-| 统一 `.bfdb`，on-demand（`--db`，默认） | 57.3 MB | ~0.20s | ~101 MB |
-| 统一 `.bfdb`，eager（`--cifp-load eager`） | 57.3 MB | ~0.29s | ~168 MB |
+| 统一 `.bfdb`，on-demand（`--db`，默认） | 60.9 MB | ~0.20s | ~101 MB |
+| 统一 `.bfdb`，eager（`--cifp-load eager`） | 60.9 MB | ~0.29s | ~169 MB |
 
 读要点：
 
-- **磁盘**：统一 57.3 MB vs 旧三文件分离（图 ~18 + CIFP ~45 + detail ~2.5 ≈ 65.5 MB），
+- **磁盘**：统一 60.9 MB vs 旧三文件分离（图 ~18 + CIFP ~45 + detail ~2.5 ≈ 65.5 MB），
   全局池去重省 ~8MB（三段局部池之和 8.7MB → 全局 1.5MB，见第 6 节）。
 - **加载速度**：缓存路径 ~0.20s vs 原始解析 ~2.27s，**~11×**。on-demand 与 eager 加载耗时相近
   （都只在 `Open` 读 header+段表+pool+CIFP 目录 ~3MB），差别在 eager 额外 `FetchAll` 反序列化
   全部程序。
 - **运行内存**：on-demand ~101 MB（图 + MORA/MSA + detail + ~1.5MB 全局池 + ~1.5MB CIFP 目录，
-  程序段按需拉）；eager ~168 MB（+~67MB 全部程序常驻，换无锁读）；原始解析 ~165MB（解析中间
+  程序段按需拉）；eager ~169 MB（+~67MB 全部程序常驻，换无锁读）；原始解析 ~165MB（解析中间
   态更吃内存）。选型：一次性 CLI 查询用 on-demand（内存最省、启动最快）；Web/批量并发用 eager
   （常驻程序、无锁读，见第 8 节）。
 
@@ -224,4 +225,4 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 - **不落盘 lookup map**（重建更省）、**文件层字符串池**（运行时仍拥有型全 SSO）；
 - **一个统一 `.bfdb`**：graph + CIFP + detail 三段共用全局池、单文件部署，CIFP 段按需定位读；
 - **容器管文件 / codec 管字节**两层分工，单一容器 `format_version` + 计数上界校验；
-- 净效果：启动 ~11×（release 2.27s→0.20s），单文件 57.3MB（全局池去重省 ~8MB），跨平台一致。
+- 净效果：启动 ~11×（release 2.27s→0.20s），单文件 60.9MB（全局池去重省 ~8MB），跨平台一致。
