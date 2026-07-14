@@ -87,6 +87,33 @@ TEST_CASE("CIFP parser: course, distance, and altitude columns", "[cifp]") {
   CHECK(p.legs[0].alt.kind == bf::AltConstraintKind::kNone);
 }
 
+TEST_CASE("CIFP parser: RNP, turn direction, and speed limit columns", "[cifp]") {
+  // Real cycle-2601 KJFK approach rows: an RF leg to JEVNI (right turn, RNP 0.30)
+  // and a TF leg to PEEBO (speed limit 185 kt, RNP 0.30, no turn direction).
+  const std::vector<std::string> lines = {
+      "APPCH:027,R,R13L, ,JEVNI,K6,P,C,E   ,R,302,RF, , , , , ,002100,    ,    ,    ,0033,+,00313,"
+      "     ,     , ,   ,-300,   ,CFBMG,K6,P,C, ,A,P,S;",
+      "APPCH:023,R,R13RZ, ,PEEBO,K6,P,C,E   , ,302,TF, , , , , ,      ,    ,    ,0440,0034, ,     ,"
+      "     ,     ,-,185,-300,   , , , , , ,B,J,S;",
+  };
+  const bf::CifpData data = bf::CifpParser::ParseLines(lines);
+  REQUIRE(data.procedures.size() == 2);
+
+  // JEVNI: right-turn RF leg, RNP 0.30 NM (302 -> 30 centinm), no speed limit.
+  const bf::ProcedureLeg& jevni = data.procedures[0].legs.front();
+  CHECK(jevni.fix.IdentView() == "JEVNI");
+  CHECK(jevni.turn_dir == 'R');
+  CHECK(jevni.rnp_centinm == 30);
+  CHECK(jevni.speed_limit_kt == 0);
+
+  // PEEBO: no turn direction, RNP 0.30 NM, 185 kt speed limit.
+  const bf::ProcedureLeg& peebo = data.procedures[1].legs.front();
+  CHECK(peebo.fix.IdentView() == "PEEBO");
+  CHECK(peebo.turn_dir == '\0');
+  CHECK(peebo.rnp_centinm == 30);
+  CHECK(peebo.speed_limit_kt == 185);
+}
+
 TEST_CASE("CIFP parser: a change in transition starts a new procedure", "[cifp]") {
   std::vector<std::string> lines = {
       "SID:010,5,DEEZZ5, ,DEEZZ,K6,E,A,E  H, ,   ,IF, , , , , ,      ,    ,    ,    ,    , ,     , "

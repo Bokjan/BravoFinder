@@ -87,6 +87,9 @@ TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integ
       CHECK(la.path_term == lb.path_term);
       CHECK(lb.course_deg == Catch::Approx(la.course_deg));
       CHECK(lb.distance_nm == Catch::Approx(la.distance_nm));
+      CHECK(la.rnp_centinm == lb.rnp_centinm);
+      CHECK(la.turn_dir == lb.turn_dir);
+      CHECK(la.speed_limit_kt == lb.speed_limit_kt);
     }
   }
   std::remove(path.c_str());

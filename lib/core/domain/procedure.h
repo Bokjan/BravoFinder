@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -92,6 +93,13 @@ struct ProcedureLeg {
   double course_deg = 0.0;   // magnetic course (CIFP column, 0 if absent)
   double distance_nm = 0.0;  // route/leg distance (CIFP column, 0 if absent)
   AltitudeConstraint alt;
+
+  // Compact encodings kept small because the leg array is ~765k entries (see the
+  // FixedIdent note above): a double/string per field would cost megabytes.
+  uint16_t rnp_centinm = 0;     // required navigation performance, hundredths of a
+                                // nautical mile (0.30 NM -> 30); 0 means absent.
+  uint16_t speed_limit_kt = 0;  // published speed limit in knots; 0 means none.
+  char turn_dir = '\0';         // 'L'/'R' turn direction, or '\0' when unspecified.
 
   // Whether this leg ends at a resolvable navigation fix.
   bool fix_is_definite() const { return TerminatesAtFix(path_term) && !fix.IdentView().empty(); }

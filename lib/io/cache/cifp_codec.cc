@@ -55,6 +55,9 @@ std::string SerializeSegment(const CifpData& data, StringPool& pool) {
       w.U8(static_cast<uint8_t>(leg.alt.kind));
       w.I32(leg.alt.alt1_ft);
       w.I32(leg.alt.alt2_ft);
+      w.U16(leg.rnp_centinm);
+      w.U8(static_cast<uint8_t>(leg.turn_dir));
+      w.U16(leg.speed_limit_kt);
     }
   }
   w.U32(static_cast<uint32_t>(data.runways.size()));
@@ -90,9 +93,10 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
   // Minimum on-disk bytes per record, used to reject an absurd count before
   // resizing (ByteReader still guards the actual reads, but this stops a forged
   // count from forcing a huge allocation): a procedure is >= 33 B (type 1 +
-  // route_type 4 + 3 string refs 24 + leg count 4), a leg >= 42 B (2 refs 16 +
-  // path_term 1 + course 8 + distance 8 + alt kind 1 + alt1 4 + alt2 4), a
-  // runway >= 28 B (ident ref 8 + lat 8 + lon 8 + elevation 4).
+  // route_type 4 + 3 string refs 24 + leg count 4), a leg >= 47 B (2 refs 16 +
+  // path_term 1 + course 8 + distance 8 + alt kind 1 + alt1 4 + alt2 4 + rnp 2 +
+  // turn_dir 1 + speed_limit 2), a runway >= 28 B (ident ref 8 + lat 8 + lon 8 +
+  // elevation 4).
   auto count_fits = [&](uint32_t count, size_t per_record) {
     return static_cast<size_t>(count) <= br.remaining() / per_record;
   };
@@ -111,7 +115,7 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
     ref(p.transition_ident);
     ref(p.runway);
     const uint32_t leg_count = br.U32();
-    if (!br.ok() || !count_fits(leg_count, 42)) {
+    if (!br.ok() || !count_fits(leg_count, 47)) {
       return std::nullopt;
     }
     p.legs.resize(leg_count);
@@ -127,6 +131,9 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
       leg.alt.kind = static_cast<AltConstraintKind>(br.U8());
       leg.alt.alt1_ft = br.I32();
       leg.alt.alt2_ft = br.I32();
+      leg.rnp_centinm = br.U16();
+      leg.turn_dir = static_cast<char>(br.U8());
+      leg.speed_limit_kt = br.U16();
     }
   }
   const uint32_t rwy_count = br.U32();

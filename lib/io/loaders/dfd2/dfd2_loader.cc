@@ -413,21 +413,24 @@ double ToMagnetic(double true_course, double magvar) {
 // v2 procedure column layout (differs from v1: course+course_flag, swapped
 // distance value/flag columns).
 struct ProcCols {
-  int airport = 0;      // airport_identifier
-  int proc = 1;         // procedure_identifier
-  int route_type = 2;   // route_type
-  int transition = 3;   // transition_identifier
-  int seqno = 4;        // seqno
-  int wp_ident = 5;     // waypoint_identifier
-  int wp_icao = 6;      // waypoint_icao_code
-  int path_term = 7;    // path_termination
-  int course = 8;       // course (REAL)
-  int course_flag = 9;  // course_flag ('M'/'T')
-  int dist_value = 10;  // distance_time (REAL value -- swapped vs v1!)
-  int dist_flag = 11;   // route_distance_holding_distance_time (flag -- swapped!)
-  int alt_desc = 12;    // altitude_description
-  int alt1 = 13;        // altitude1
-  int alt2 = 14;        // altitude2
+  int airport = 0;       // airport_identifier
+  int proc = 1;          // procedure_identifier
+  int route_type = 2;    // route_type
+  int transition = 3;    // transition_identifier
+  int seqno = 4;         // seqno
+  int wp_ident = 5;      // waypoint_identifier
+  int wp_icao = 6;       // waypoint_icao_code
+  int path_term = 7;     // path_termination
+  int course = 8;        // course (REAL)
+  int course_flag = 9;   // course_flag ('M'/'T')
+  int dist_value = 10;   // distance_time (REAL value -- swapped vs v1!)
+  int dist_flag = 11;    // route_distance_holding_distance_time (flag -- swapped!)
+  int alt_desc = 12;     // altitude_description
+  int alt1 = 13;         // altitude1
+  int alt2 = 14;         // altitude2
+  int rnp = 15;          // rnp (REAL, nautical miles)
+  int turn_dir = 16;     // turn_direction ('L'/'R')
+  int speed_limit = 17;  // speed_limit (knots)
 };
 
 // SQL for one procedure table, in ProcCols column order.
@@ -437,7 +440,7 @@ std::string ProcSql(std::string_view table, bool single_airport) {
                         "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
                         "path_termination, course, course_flag, distance_time, "
                         "route_distance_holding_distance_time, altitude_description, altitude1, "
-                        "altitude2 FROM ") +
+                        "altitude2, rnp, turn_direction, speed_limit FROM ") +
                     std::string(table);
   if (single_airport) {
     sql += " WHERE airport_identifier = ?";
@@ -468,6 +471,11 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   }
   leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                ColumnInt(stmt, c.alt2));
+  const double rnp = ColumnDouble(stmt, c.rnp);
+  leg.rnp_centinm = rnp > 0.0 ? static_cast<uint16_t>(std::lround(rnp * 100.0)) : 0;
+  const std::string turn = ColumnText(stmt, c.turn_dir);
+  leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
+  leg.speed_limit_kt = static_cast<uint16_t>(ColumnInt(stmt, c.speed_limit));
   proc.legs.push_back(std::move(leg));
 }
 

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <string>
@@ -45,12 +46,15 @@ constexpr int kProcName = 2;
 constexpr int kTransition = 3;
 constexpr int kFixIdent = 4;
 constexpr int kFixRegion = 5;
+constexpr int kTurnDir = 9;  // turn direction: 'L'/'R' (or blank)
+constexpr int kRnp = 10;     // required navigation performance, ARINC-encoded
 constexpr int kPathTerm = 11;
-constexpr int kCourse = 20;    // magnetic course, tenths of a degree
-constexpr int kDistance = 21;  // leg distance, tenths of a nautical mile
-constexpr int kAltDesc = 22;   // altitude descriptor: + - @ B (or blank)
-constexpr int kAlt1 = 23;      // altitude one, feet
-constexpr int kAlt2 = 24;      // altitude two, feet (lower bound for 'B')
+constexpr int kCourse = 20;      // magnetic course, tenths of a degree
+constexpr int kDistance = 21;    // leg distance, tenths of a nautical mile
+constexpr int kAltDesc = 22;     // altitude descriptor: + - @ B (or blank)
+constexpr int kAlt1 = 23;        // altitude one, feet
+constexpr int kAlt2 = 24;        // altitude two, feet (lower bound for 'B')
+constexpr int kSpeedLimit = 27;  // speed limit, knots (0/blank if none)
 constexpr int kMinLegFields = 25;
 
 // Read a field as an integer, treating blank/non-numeric as 0.
@@ -70,6 +74,53 @@ std::string FieldStr(const std::vector<std::string>& f, int idx) {
     return {};
   }
   return Trim(f[idx]);
+}
+
+// Decode the CIFP RNP field into hundredths of a nautical mile. The field is the
+// 3-character ARINC 424 form: the first two digits are the mantissa and the
+// third is a negative power of ten, so "302" = 30 x 10^-2 = 0.30 NM (-> 30) and
+// "010" = 01 x 10^-0 = 1.0 NM (-> 100). Blank/non-numeric fields yield 0.
+uint16_t RnpCentinm(const std::string& field) {
+  if (field.size() != 3) {
+    return 0;  // absent or not the expected 3-character encoding
+  }
+  for (const char c : field) {
+    if (c < '0' || c > '9') {
+      return 0;
+    }
+  }
+  const int mantissa = (field[0] - '0') * 10 + (field[1] - '0');
+  const int exp = field[2] - '0';
+  // centinm = mantissa x 10^-exp x 100 = mantissa x 10^(2-exp).
+  const int power = 2 - exp;
+  long long centinm = mantissa;
+  if (power >= 0) {
+    for (int i = 0; i < power; ++i) {
+      centinm *= 10;
+    }
+  } else {
+    // Fractional hundredths (exp > 2): round to the nearest centinm.
+    long long div = 1;
+    for (int i = 0; i < -power; ++i) {
+      div *= 10;
+    }
+    centinm = (centinm + div / 2) / div;
+  }
+  if (centinm < 0 || centinm > 65535) {
+    return 0;
+  }
+  return static_cast<uint16_t>(centinm);
+}
+
+// Normalize a turn-direction field to 'L'/'R', or '\0' when unspecified.
+char TurnDir(const std::string& field) {
+  if (field == "L") {
+    return 'L';
+  }
+  if (field == "R") {
+    return 'R';
+  }
+  return '\0';
 }
 
 ProcedureType TypeFromTag(std::string_view tag) {
@@ -212,6 +263,9 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
     leg.course_deg = FieldInt(f, kCourse) / 10.0;
     leg.distance_nm = FieldInt(f, kDistance) / 10.0;
     leg.alt = ParseAltConstraint(FieldStr(f, kAltDesc), FieldInt(f, kAlt1), FieldInt(f, kAlt2));
+    leg.rnp_centinm = RnpCentinm(FieldStr(f, kRnp));
+    leg.speed_limit_kt = static_cast<uint16_t>(FieldInt(f, kSpeedLimit));
+    leg.turn_dir = TurnDir(FieldStr(f, kTurnDir));
     current.legs.push_back(std::move(leg));
   }
   flush(current);

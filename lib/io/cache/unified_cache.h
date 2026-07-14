@@ -66,7 +66,10 @@ class UnifiedCache {
   //     byte holding AirwayLevel. The on-disk values coincide (0/1/2), but the
   //     byte's contract changed from bit flags to an enum value, so the version
   //     is bumped to retire the bitfield interpretation.
-  static constexpr uint32_t kFormatVersion = 5;
+  // v6: CIFP ProcedureLeg gained rnp_centinm (U16), turn_dir (U8), and
+  //     speed_limit_kt (U16), appended to each leg record; the CIFP section grew
+  //     5 bytes per leg, so older files must be rebuilt.
+  static constexpr uint32_t kFormatVersion = 6;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

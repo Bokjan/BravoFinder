@@ -435,21 +435,35 @@ namespace {
 // the SELECT defined in LoadProcTable. v2 reorders/renames some columns, so
 // Dfd2Loader defines its own layout; here is v1's.
 struct ProcCols {
-  int airport = 0;     // airport_identifier
-  int proc = 1;        // procedure_identifier
-  int route_type = 2;  // route_type (numeric for SID/STAR, alpha for IAP)
-  int transition = 3;  // transition_identifier
-  int seqno = 4;       // seqno
-  int wp_ident = 5;    // waypoint_identifier
-  int wp_icao = 6;     // waypoint_icao_code
-  int path_term = 7;   // path_termination
-  int course = 8;      // magnetic_course
-  int dist_value = 9;  // route_distance_holding_distance_time (REAL)
-  int dist_flag = 10;  // distance_time (TEXT 'D'/'T'/blank)
-  int alt_desc = 11;   // altitude_description
-  int alt1 = 12;       // altitude1
-  int alt2 = 13;       // altitude2
+  int airport = 0;       // airport_identifier
+  int proc = 1;          // procedure_identifier
+  int route_type = 2;    // route_type (numeric for SID/STAR, alpha for IAP)
+  int transition = 3;    // transition_identifier
+  int seqno = 4;         // seqno
+  int wp_ident = 5;      // waypoint_identifier
+  int wp_icao = 6;       // waypoint_icao_code
+  int path_term = 7;     // path_termination
+  int course = 8;        // magnetic_course
+  int dist_value = 9;    // route_distance_holding_distance_time (REAL)
+  int dist_flag = 10;    // distance_time (TEXT 'D'/'T'/blank)
+  int alt_desc = 11;     // altitude_description
+  int alt1 = 12;         // altitude1
+  int alt2 = 13;         // altitude2
+  int rnp = 14;          // rnp (DOUBLE, nautical miles)
+  int turn_dir = 15;     // turn_direction ('L'/'R')
+  int speed_limit = 16;  // speed_limit (knots)
 };
+
+// Fill the leg-level RNP/turn/speed fields shared by both v1 procedure paths
+// (full-table scan and on-demand). rnp is a DOUBLE in nautical miles stored as
+// hundredths; turn_direction is 'L'/'R' text; speed_limit is an integer in knots.
+void FillProcExtras(sqlite3_stmt* stmt, const ProcCols& c, ProcedureLeg& leg) {
+  const double rnp = ColumnDouble(stmt, c.rnp);
+  leg.rnp_centinm = rnp > 0.0 ? static_cast<uint16_t>(std::lround(rnp * 100.0)) : 0;
+  const std::string turn = ColumnText(stmt, c.turn_dir);
+  leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
+  leg.speed_limit_kt = static_cast<uint16_t>(ColumnInt(stmt, c.speed_limit));
+}
 
 // Append legs/runways from one procedure table into `out` (per-airport). `type`
 // is fixed by the caller (sids->kSid, etc.). One full-table scan per table: the
@@ -468,7 +482,8 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
           "SELECT airport_identifier, procedure_identifier, route_type, "
           "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
           "path_termination, magnetic_course, route_distance_holding_distance_time, "
-          "distance_time, altitude_description, altitude1, altitude2 FROM ") +
+          "distance_time, altitude_description, altitude1, altitude2, rnp, turn_direction, "
+          "speed_limit FROM ") +
       table +
       " ORDER BY airport_identifier, procedure_identifier, "
       "transition_identifier, route_type, seqno";
@@ -542,6 +557,7 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     }
     leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                  ColumnInt(stmt, c.alt2));
+    FillProcExtras(stmt, c, leg);
     current.legs.push_back(std::move(leg));
   });
   // Flush the last airport's accumulated procedures.
@@ -614,7 +630,8 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
             "SELECT airport_identifier, procedure_identifier, route_type, "
             "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
             "path_termination, magnetic_course, route_distance_holding_distance_time, "
-            "distance_time, altitude_description, altitude1, altitude2 FROM ") +
+            "distance_time, altitude_description, altitude1, altitude2, rnp, turn_direction, "
+            "speed_limit FROM ") +
         table +
         " WHERE airport_identifier = ? ORDER BY procedure_identifier, "
         "transition_identifier, route_type, seqno";
@@ -668,6 +685,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
       }
       leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                    ColumnInt(stmt, c.alt2));
+      FillProcExtras(stmt, c, leg);
       current.legs.push_back(std::move(leg));
     });
     if (!rows) {
