@@ -152,6 +152,14 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
         RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : star, arr_seed, {}});
   }
 
+  // Phase split, computed here from the leg positions (not re-derived at print
+  // time). The dep/arr seeds are the procedure-leg distances when an airport
+  // endpoint exists; total already includes both, so enroute is the remainder.
+  route.dep_distance_nm = dep_label.empty() ? 0.0 : dep_seed;
+  route.arr_distance_nm = arr_label.empty() ? 0.0 : arr_seed;
+  route.enroute_distance_nm =
+      route.total_distance_nm - route.dep_distance_nm - route.arr_distance_nm;
+
   // Route string in filed-flight-plan style: DEP SID FIX <airways> FIX STAR ARR.
   // BuildRouteString folds consecutive legs on a shared airway (listing it only
   // at the join/leave fixes) and, as a side effect, rewrites each leg's `via` to

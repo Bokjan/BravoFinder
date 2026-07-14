@@ -53,6 +53,27 @@ TEST_CASE("real data: KJFK to KLAX route is plausible", "[integration]") {
   CHECK(r.total_distance_nm < 2144.0 * 1.15);
 }
 
+TEST_CASE("real data: route phase distances split and sum to the total", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+
+  // dep + enroute + arr must equal the total (the split is exact, computed in
+  // MakeRoute from leg positions rather than re-derived at print time).
+  CHECK(r.dep_distance_nm + r.enroute_distance_nm + r.arr_distance_nm ==
+        Catch::Approx(r.total_distance_nm));
+  // Both endpoints are airports connecting through procedures, so the terminal
+  // legs carry non-zero seed distance and the enroute portion dominates.
+  CHECK(r.dep_distance_nm > 0.0);
+  CHECK(r.arr_distance_nm > 0.0);
+  CHECK(r.enroute_distance_nm > 0.0);
+}
+
 TEST_CASE("real data: case-insensitive endpoints", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

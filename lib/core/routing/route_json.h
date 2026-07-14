@@ -38,6 +38,12 @@ void WriteRouteJson(Writer& writer, const Route& route) {
   key_str("route", route.route_string);
   writer.Key("total_distance_nm");
   writer.Double(route.total_distance_nm);
+  writer.Key("dep_distance_nm");
+  writer.Double(route.dep_distance_nm);
+  writer.Key("enroute_distance_nm");
+  writer.Double(route.enroute_distance_nm);
+  writer.Key("arr_distance_nm");
+  writer.Double(route.arr_distance_nm);
   key_str("sid", route.sid);
   key_str("dep_runway", route.dep_runway);
   key_str_array("sid_options", route.sid_options);

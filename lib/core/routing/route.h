@@ -58,6 +58,15 @@ struct Route {
   double total_distance_nm = 0.0;
   std::string route_string;  // filed-flight-plan form "DEP SID FIX AWY FIX STAR ARR"
 
+  // The total distance split by flight phase, filled at construction so display
+  // never re-derives it. `dep`/`arr` are the departure/arrival procedure-leg
+  // (airport <-> connection fix) distances, 0 when the endpoint is a plain
+  // waypoint; `enroute` is everything between (total - dep - arr). Their sum
+  // equals total_distance_nm.
+  double dep_distance_nm = 0.0;
+  double enroute_distance_nm = 0.0;
+  double arr_distance_nm = 0.0;
+
   // Terminal procedures used to connect the airports to the enroute network.
   // Empty when an endpoint is a plain waypoint or fell back to a DCT link.
   std::string sid;         // departure SID name, e.g. "DEEZZ5"

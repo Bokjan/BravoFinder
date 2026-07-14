@@ -11,6 +11,7 @@ add_executable(bf_tests
                unit/route_string_test.cc
                unit/route_parser_test.cc
                unit/route_json_test.cc
+               unit/route_metrics_test.cc
                unit/small_vec_test.cc
                unit/bfdb_naming_test.cc
                unit/nav_detail_codec_test.cc

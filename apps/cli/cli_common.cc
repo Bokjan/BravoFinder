@@ -8,6 +8,7 @@
 #include <iostream>
 
 #include "core/routing/route_json.h"
+#include "core/routing/route_metrics.h"
 
 namespace bf::cli {
 
@@ -23,7 +24,10 @@ Result<NavDatabase> OpenForRead(const std::string& db_path, const std::string& d
 void PrintText(const Route& route) {
   std::cout << route.route_string << "\n\n";
   std::cout << std::fixed << std::setprecision(1);
-  std::cout << "Total distance: " << route.total_distance_nm << " NM\n";
+  std::cout << "Total distance: " << route.total_distance_nm << " NM";
+  // Break the total down by phase (dep procedure / enroute / arr procedure).
+  std::cout << "  (dep " << route.dep_distance_nm << " + enroute " << route.enroute_distance_nm
+            << " + arr " << route.arr_distance_nm << ")\n";
 
   // Surface the terminal procedures, if any, and the interchangeable choices
   // that share the same connection fix. A radar-vectored departure/arrival has
@@ -69,19 +73,32 @@ void PrintText(const Route& route) {
     std::cout << "\n";
   }
 
-  std::cout << "\nFrom\tTo\tVia\tDist(NM)\n";
-  for (const RouteLeg& leg : route.legs) {
+  std::cout << "\nFrom\tTo\tVia\tDist(NM)\tCumul(NM)\tLat\tLon\n";
+  const std::vector<double> cumulative = CumulativeDistances(route.legs);
+  for (size_t i = 0; i < route.legs.size(); ++i) {
+    const RouteLeg& leg = route.legs[i];
     // On a concurrency leg, note the other airways sharing it after the chosen
     // one, e.g. "Y592 (concurrent: A593, Y592)".
     std::string via = leg.via;
     if (!leg.concurrent_airways.empty()) {
       via += " (concurrent: ";
-      for (size_t i = 0; i < leg.concurrent_airways.size(); ++i) {
-        via += leg.concurrent_airways[i];
-        via += (i + 1 < leg.concurrent_airways.size() ? ", " : ")");
+      for (size_t j = 0; j < leg.concurrent_airways.size(); ++j) {
+        via += leg.concurrent_airways[j];
+        via += (j + 1 < leg.concurrent_airways.size() ? ", " : ")");
       }
     }
-    std::cout << leg.from << '\t' << leg.to << '\t' << via << '\t' << leg.distance_nm << '\n';
+    std::cout << leg.from << '\t' << leg.to << '\t' << via << '\t' << leg.distance_nm << '\t'
+              << cumulative[i] << '\t';
+    // Coordinates of the leg's "to" point. points is parallel to legs with one
+    // extra entry (N points, N-1 legs), so the destination of leg i is
+    // points[i+1]; guard the size in case a route was built without points.
+    if (i + 1 < route.points.size()) {
+      std::cout << std::setprecision(6) << route.points[i + 1].coord.latitude << '\t'
+                << route.points[i + 1].coord.longitude << std::setprecision(1);
+    } else {
+      std::cout << '\t';
+    }
+    std::cout << '\n';
   }
 }
 
