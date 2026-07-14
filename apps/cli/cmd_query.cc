@@ -2,8 +2,10 @@
 #include <rapidjson/writer.h>
 
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,6 +17,41 @@
 namespace bf::cli {
 
 namespace {
+
+// Print one named procedure's transitions and their legs (the ICAO/NAME query
+// form). One line per leg, omitting fields the leg does not carry.
+void PrintProcedureDetail(const AirportProcedureDetail& d) {
+  std::cout << d.icao << "/" << d.procedure << ": " << d.transitions.size() << " transitions\n";
+  std::cout << std::fixed;
+  for (const ProcedureDetail& t : d.transitions) {
+    std::cout << "  " << ToString(t.type) << " " << t.name << "." << t.transition;
+    if (!t.runway.empty()) {
+      std::cout << "  rwy " << t.runway;
+    }
+    std::cout << "\n";
+    for (const ProcedureLegInfo& leg : t.legs) {
+      std::cout << "    " << leg.path_term;
+      if (!leg.fix.empty()) {
+        std::cout << " " << leg.fix;
+      }
+      std::cout << std::setprecision(1) << "  crs " << leg.course_deg << "  " << leg.distance_nm
+                << " NM";
+      if (!leg.alt.empty()) {
+        std::cout << "  alt " << leg.alt;
+      }
+      if (leg.rnp_nm > 0.0) {
+        std::cout << std::setprecision(2) << "  RNP " << leg.rnp_nm;
+      }
+      if (leg.turn_dir != '\0') {
+        std::cout << "  " << leg.turn_dir << "-turn";
+      }
+      if (leg.speed_limit_kt > 0) {
+        std::cout << "  " << leg.speed_limit_kt << " kt";
+      }
+      std::cout << "\n";
+    }
+  }
+}
 
 // Run one batch query and print its results (text or JSON). The lookup returns a
 // vector parallel to `ids`; a missing entry is reported as not found. Returns
@@ -75,18 +112,37 @@ int RunQuery(const NavDatabase& db, const std::string& kind, const std::vector<s
       }
     }
   } else if (kind == "procedure") {
-    auto results = db.LookupProcedures(ids);
+    // Two forms: a bare ICAO lists procedure summaries; an "ICAO/NAME" selector
+    // (e.g. KJFK/DEEZZ5) prints that named procedure's per-leg detail.
     for (size_t i = 0; i < ids.size(); ++i) {
-      if (!results[i]) {
-        miss(ids[i]);
+      const std::string& id = ids[i];
+      const size_t slash = id.find('/');
+      if (slash != std::string::npos) {
+        const AirportProcedureDetail* detail_ptr = nullptr;
+        std::optional<AirportProcedureDetail> detail =
+            db.LookupProcedureDetail(id.substr(0, slash), id.substr(slash + 1));
+        detail_ptr = detail ? &*detail : nullptr;
+        if (detail_ptr == nullptr) {
+          miss(id);
+          continue;
+        }
+        if (json) {
+          WriteProcedureDetailJson(writer, *detail_ptr);
+        } else {
+          PrintProcedureDetail(*detail_ptr);
+        }
         continue;
       }
-      const AirportProcedures& ap = *results[i];
+      std::optional<AirportProcedures> ap = std::move(db.LookupProcedures({id})[0]);
+      if (!ap) {
+        miss(id);
+        continue;
+      }
       if (json) {
-        WriteProceduresJson(writer, ap);
+        WriteProceduresJson(writer, *ap);
       } else {
-        std::cout << ap.icao << ": " << ap.procedures.size() << " procedures\n";
-        for (const ProcedureSummary& p : ap.procedures) {
+        std::cout << ap->icao << ": " << ap->procedures.size() << " procedures\n";
+        for (const ProcedureSummary& p : ap->procedures) {
           std::cout << "  " << ToString(p.type) << " " << p.name << "." << p.transition
                     << (p.runway.empty() ? "" : "  rwy " + p.runway) << "\n";
         }
@@ -189,7 +245,11 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
       ->required()
       ->check(
           CLI::IsMember({"waypoint", "airport", "procedure", "airway", "navaid_detail", "hold"}));
-  query->add_option("id", a->ids, "One or more idents / ICAO codes / airway names")->required();
+  query
+      ->add_option("id", a->ids,
+                   "One or more idents / ICAO codes / airway names. For 'procedure', an "
+                   "ICAO/NAME selector (e.g. KJFK/DEEZZ5) prints that procedure's per-leg detail")
+      ->required();
   query->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();
   query->add_option("--db", a->db_path, "Prebuilt .bfdb cache to load (skips parsing)");

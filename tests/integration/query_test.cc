@@ -1,4 +1,5 @@
 #include <atomic>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <optional>
@@ -93,6 +94,42 @@ TEST_CASE("query: procedure lookup lists SIDs for an airport with CIFP", "[integ
   }
   CHECK(has_sid);
   CHECK_FALSE(r[1].has_value());  // KIKR has no CIFP
+}
+
+TEST_CASE("query: procedure detail surfaces per-leg rnp/turn/speed", "[integration][query]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  // KJFK R13L is an RNAV approach: its RF leg to JEVNI carries RNP 0.30 and a
+  // right turn, and it publishes a speed limit on an early leg. This exercises
+  // the three new leg fields end to end through the query path.
+  std::optional<bf::AirportProcedureDetail> d = db->LookupProcedureDetail("kjfk", "R13L");
+  REQUIRE(d.has_value());
+  CHECK(d->icao == "KJFK");
+  CHECK(d->procedure == "R13L");
+  REQUIRE_FALSE(d->transitions.empty());
+
+  bool saw_rf_rnp_turn = false;
+  bool saw_speed = false;
+  for (const bf::ProcedureDetail& t : d->transitions) {
+    for (const bf::ProcedureLegInfo& leg : t.legs) {
+      if (leg.fix == "JEVNI" && leg.path_term == "RF") {
+        CHECK(leg.rnp_nm == Catch::Approx(0.30));
+        CHECK(leg.turn_dir == 'R');
+        saw_rf_rnp_turn = true;
+      }
+      if (leg.speed_limit_kt > 0) {
+        saw_speed = true;
+      }
+    }
+  }
+  CHECK(saw_rf_rnp_turn);
+  CHECK(saw_speed);
+
+  // An airport without CIFP, and an unknown procedure name, both yield nullopt.
+  CHECK_FALSE(db->LookupProcedureDetail("KIKR", "ANYTHING").has_value());
+  CHECK_FALSE(db->LookupProcedureDetail("KJFK", "NO_SUCH_PROC").has_value());
 }
 
 TEST_CASE("query: airway lookup returns directed segments", "[integration][query]") {

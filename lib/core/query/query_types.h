@@ -46,6 +46,39 @@ struct AirportProcedures {
   std::vector<ProcedureSummary> procedures{};
 };
 
+// One leg of a procedure, surfaced for per-leg detail queries. Carries the
+// leg-level fields ProcedureSummary omits. Absent values use the empty/zero
+// sentinel: an empty `fix` for heading/altitude/manual-termination legs, empty
+// `alt`, rnp_nm 0, turn_dir '\0', speed_limit_kt 0.
+struct ProcedureLegInfo {
+  std::string fix{};        // terminating fix ident (empty for non-fix legs)
+  std::string path_term{};  // ARINC token, e.g. "TF", "RF"
+  double course_deg = 0.0;  // magnetic course
+  double distance_nm = 0.0;
+  std::string alt{};       // "@5000" / "+2500" / "-4000" / "3000-6000" / ""
+  double rnp_nm = 0.0;     // required navigation performance, NM (0 = absent)
+  char turn_dir = '\0';    // 'L' / 'R' / '\0'
+  int speed_limit_kt = 0;  // 0 = none
+};
+
+// One transition of a named procedure, with its ordered legs.
+struct ProcedureDetail {
+  ProcedureType type = ProcedureType::kSid;
+  std::string name{};
+  std::string transition{};
+  std::string runway{};
+  std::vector<ProcedureLegInfo> legs{};
+};
+
+// The per-leg detail of one named procedure at an airport. A published name
+// (e.g. "DEEZZ5") maps to several transitions (runway/common/enroute), so this
+// holds every Procedure record whose name matches the request.
+struct AirportProcedureDetail {
+  std::string icao{};
+  std::string procedure{};  // requested procedure name (as matched)
+  std::vector<ProcedureDetail> transitions{};
+};
+
 // One directed segment of an airway: a hop between two consecutive fixes.
 struct AirwayLeg {
   std::string from{};  // fix ident

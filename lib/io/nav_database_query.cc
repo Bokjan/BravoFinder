@@ -80,6 +80,68 @@ std::vector<std::optional<AirportProcedures>> NavDatabase::LookupProcedures(
   return out;
 }
 
+// Format a leg's altitude constraint as a compact display token. Empty when the
+// leg carries no altitude restriction. "+"=at or above, "-"=at or below,
+// "@"=at, "lo-hi"=between.
+namespace {
+std::string FormatAltToken(const AltitudeConstraint& a) {
+  switch (a.kind) {
+    case AltConstraintKind::kNone:
+      return {};
+    case AltConstraintKind::kAt:
+      return "@" + std::to_string(a.alt1_ft);
+    case AltConstraintKind::kAtOrAbove:
+      return "+" + std::to_string(a.alt1_ft);
+    case AltConstraintKind::kAtOrBelow:
+      return "-" + std::to_string(a.alt1_ft);
+    case AltConstraintKind::kBetween:
+      return std::to_string(a.alt2_ft) + "-" + std::to_string(a.alt1_ft);
+  }
+  return {};
+}
+}  // namespace
+
+std::optional<AirportProcedureDetail> NavDatabase::LookupProcedureDetail(
+    const std::string& icao, const std::string& procedure_name) const {
+  const std::string up_icao = ToUpper(icao);
+  const std::string up_name = ToUpper(procedure_name);
+  const CifpData* cifp = ProceduresFor(up_icao);
+  if (cifp == nullptr) {
+    return std::nullopt;
+  }
+  AirportProcedureDetail out;
+  out.icao = up_icao;
+  out.procedure = up_name;
+  for (const Procedure& p : cifp->procedures) {
+    if (ToUpper(p.name) != up_name) {
+      continue;
+    }
+    ProcedureDetail d;
+    d.type = p.type;
+    d.name = p.name;
+    d.transition = p.transition_ident;
+    d.runway = p.runway;
+    d.legs.reserve(p.legs.size());
+    for (const ProcedureLeg& leg : p.legs) {
+      ProcedureLegInfo info;
+      info.fix = std::string(leg.fix.IdentView());
+      info.path_term = PathTerminatorName(leg.path_term);
+      info.course_deg = leg.course_deg;
+      info.distance_nm = leg.distance_nm;
+      info.alt = FormatAltToken(leg.alt);
+      info.rnp_nm = leg.rnp_centinm / 100.0;
+      info.turn_dir = leg.turn_dir;
+      info.speed_limit_kt = leg.speed_limit_kt;
+      d.legs.push_back(std::move(info));
+    }
+    out.transitions.push_back(std::move(d));
+  }
+  if (out.transitions.empty()) {
+    return std::nullopt;  // airport has procedures, but none of that name
+  }
+  return out;
+}
+
 std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
     const std::vector<std::string>& names) const {
   std::vector<std::optional<AirwayInfo>> out(names.size());

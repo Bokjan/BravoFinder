@@ -107,6 +107,55 @@ void WriteProceduresJson(Writer& w, const AirportProcedures& ap) {
 }
 
 template <class Writer>
+void WriteProcedureDetailJson(Writer& w, const AirportProcedureDetail& d) {
+  w.StartObject();
+  detail::WriteKeyStr(w, "icao", d.icao);
+  detail::WriteKeyStr(w, "procedure", d.procedure);
+  w.Key("transitions");
+  w.StartArray();
+  for (const ProcedureDetail& t : d.transitions) {
+    w.StartObject();
+    w.Key("type");
+    w.String(ToString(t.type));
+    detail::WriteKeyStr(w, "name", t.name);
+    detail::WriteKeyStr(w, "transition", t.transition);
+    detail::WriteKeyStr(w, "runway", t.runway);
+    w.Key("legs");
+    w.StartArray();
+    for (const ProcedureLegInfo& leg : t.legs) {
+      w.StartObject();
+      detail::WriteKeyStr(w, "fix", leg.fix);
+      detail::WriteKeyStr(w, "path_term", leg.path_term);
+      w.Key("course_deg");
+      w.Double(leg.course_deg);
+      w.Key("distance_nm");
+      w.Double(leg.distance_nm);
+      // Omit absent optional fields (sentinel values) to keep output lean.
+      if (!leg.alt.empty()) {
+        detail::WriteKeyStr(w, "alt", leg.alt);
+      }
+      if (leg.rnp_nm > 0.0) {
+        w.Key("rnp_nm");
+        w.Double(leg.rnp_nm);
+      }
+      if (leg.turn_dir != '\0') {
+        w.Key("turn_dir");
+        w.String(leg.turn_dir == 'L' ? "L" : "R");
+      }
+      if (leg.speed_limit_kt > 0) {
+        w.Key("speed_limit_kt");
+        w.Int(leg.speed_limit_kt);
+      }
+      w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+}
+
+template <class Writer>
 void WriteAirwayJson(Writer& w, const AirwayInfo& a) {
   w.StartObject();
   detail::WriteKeyStr(w, "name", a.name);

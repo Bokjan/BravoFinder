@@ -266,6 +266,27 @@ std::pair<std::string, bool> FindRoutesHandler(const rapidjson::Value& args,
   return {buffer.GetString(), false};
 }
 
+// The lookup_procedure_legs handler: per-leg detail of one named procedure.
+std::pair<std::string, bool> LookupProcedureLegsHandler(const rapidjson::Value& args,
+                                                        const NavDatabase& db) {
+  if (!args.HasMember("airport") || !args["airport"].IsString() || !args.HasMember("procedure") ||
+      !args["procedure"].IsString()) {
+    return {JsonError("airport and procedure are required"), true};
+  }
+  std::optional<bf::AirportProcedureDetail> detail =
+      db.LookupProcedureDetail(args["airport"].GetString(), args["procedure"].GetString());
+  if (!detail) {
+    // Unknown airport, no CIFP data, or no procedure of that name: a tool error
+    // so the caller sees isError rather than an empty success payload.
+    return {JsonError("no procedure of that name at that airport"), true};
+  }
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.SetMaxDecimalPlaces(6);
+  bf::WriteProcedureDetailJson(writer, *detail);
+  return {buffer.GetString(), false};
+}
+
 // The parse_route handler: validate & expand a filed route string.
 std::pair<std::string, bool> ParseRouteHandler(const rapidjson::Value& args,
                                                const NavDatabase& db) {
@@ -289,7 +310,7 @@ std::vector<Tool> MakeTools() {
   // (move) rather than use an initializer list, because Tool holds a
   // rapidjson::Document, which is movable but not copyable.
   std::vector<Tool> tools;
-  tools.reserve(8);
+  tools.reserve(9);
 
   tools.emplace_back(
       "find_routes",
@@ -364,6 +385,20 @@ std::vector<Tool> MakeTools() {
       [](const NavDatabase& db, const std::vector<std::string>& ids) {
         return db.LookupProcedures(ids);
       }));
+
+  tools.emplace_back(
+      "lookup_procedure_legs",
+      "Look up the per-leg detail of one named terminal procedure at an airport. "
+      "Given an airport ICAO and a procedure name (e.g. DEEZZ5), returns every "
+      "transition of that procedure with its ordered legs: fix, path terminator, "
+      "magnetic course, distance, altitude constraint, RNP, turn direction, and "
+      "speed limit. Errors when the airport is unknown or publishes no such procedure.",
+      ParseSchema(
+          R"({"type":"object","properties":{)"
+          R"("airport":{"type":"string","description":"Airport ICAO code, e.g. KJFK."},)"
+          R"("procedure":{"type":"string","description":"Published procedure name, e.g. DEEZZ5 or LENDY6."}},)"
+          R"("required":["airport","procedure"]})"),
+      LookupProcedureLegsHandler);
 
   tools.push_back(MakeLookupTool<bf::AirwayInfo>(
       "lookup_airways",

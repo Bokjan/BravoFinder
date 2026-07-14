@@ -124,6 +124,14 @@ class NavDatabase {
   std::vector<std::optional<AirportProcedures>> LookupProcedures(
       const std::vector<std::string>& icaos) const;
 
+  // Per-leg detail of one named procedure at an airport. `procedure_name` is a
+  // published name (e.g. "DEEZZ5"); the result holds every transition of that
+  // name with its ordered legs (course/distance/altitude plus RNP, turn
+  // direction, and speed limit). nullopt when the airport is unknown, has no
+  // CIFP data, or publishes no procedure of that name. Case-insensitive.
+  std::optional<AirportProcedureDetail> LookupProcedureDetail(
+      const std::string& icao, const std::string& procedure_name) const;
+
   // Airways by designator (e.g. "Y28"). Returns every directed segment carrying
   // that name. nullopt when no segment uses the name.
   std::vector<std::optional<AirwayInfo>> LookupAirways(const std::vector<std::string>& names) const;
