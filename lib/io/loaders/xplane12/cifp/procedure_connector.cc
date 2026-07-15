@@ -97,7 +97,14 @@ struct WalkResult {
   bool have_last = false;
 };
 
-WalkResult WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder) {
+// Which airway-edge direction makes a fix a usable procedure connection point.
+// A SID hands the aircraft to a fix it then departs along an airway (needs an
+// outbound edge); a STAR picks the aircraft up at a fix reached along an airway
+// (needs an inbound edge). A forward-only airway that dead-ends at a STAR entry
+// gate leaves that fix inbound-only, so the two sides must not share one test.
+enum class WalkDir { kOutbound, kInbound };
+
+WalkResult WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder, WalkDir dir) {
   WalkResult result;
   double cumulative = 0.0;
   bool have_prev = false;
@@ -112,8 +119,11 @@ WalkResult WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder) {
     }
     cumulative +=
         LegDistance(leg, have_prev ? &prev_coord : nullptr, have_this ? &this_coord : nullptr);
-    if (v >= 0 && builder.OnNetwork(v)) {
-      result.hits.push_back(FixHit{v, cumulative});
+    if (v >= 0) {
+      const bool usable = dir == WalkDir::kInbound ? builder.HasInbound(v) : builder.HasOutbound(v);
+      if (usable) {
+        result.hits.push_back(FixHit{v, cumulative});
+      }
     }
     if (have_this) {
       if (!result.have_first) {
@@ -168,7 +178,7 @@ std::vector<Connection> ProcedureConnector::BuildDeparture(const CifpData& cifp,
     if (p.type != ProcedureType::kSid || !RunwayMatches(p, runway_filter)) {
       continue;
     }
-    const WalkResult walk = WalkOnNetworkFixes(p, builder);
+    const WalkResult walk = WalkOnNetworkFixes(p, builder, WalkDir::kOutbound);
     if (walk.hits.empty()) {
       continue;
     }
@@ -198,7 +208,7 @@ std::vector<Connection> ProcedureConnector::BuildArrival(const CifpData& cifp,
     if (p.type != ProcedureType::kStar || !RunwayMatches(p, runway_filter)) {
       continue;
     }
-    const WalkResult walk = WalkOnNetworkFixes(p, builder);
+    const WalkResult walk = WalkOnNetworkFixes(p, builder, WalkDir::kInbound);
     if (walk.hits.empty()) {
       continue;
     }

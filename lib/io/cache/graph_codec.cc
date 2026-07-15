@@ -20,7 +20,7 @@ static_assert(static_cast<int>(WaypointKind::kOther) < 256,
 //   header ints : U32 v, U32 e, U32 airway_count, U32 msa_count,
 //                 U32 first_airport_vertex
 //   vertex records [v] : F64 lat, F64 lon, U32 ident_off/len, U32 region_off/len,
-//                        U8 flags (bit0 = on_network), U8 kind
+//                        U8 flags (bit0 = has_outbound, bit1 = has_inbound), U8 kind
 //   airport records [v - first_airport_vertex] : I32 elevation_ft
 //   offsets [v + 1] : I32
 //   edges [e] : I32 to, F32 distance_nm, U16 airway_id, I16 base_fl, I16 top_fl,
@@ -38,7 +38,8 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
         Error(ErrorCode::kParseError, "too many airway names to serialize (> 65535)"));
   }
   if (snapshot.offsets.size() != v + 1 || snapshot.idents.size() != v ||
-      snapshot.on_network.size() != v || snapshot.kinds.size() != v) {
+      snapshot.has_outbound.size() != v || snapshot.has_inbound.size() != v ||
+      snapshot.kinds.size() != v) {
     return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent snapshot array sizes"));
   }
   const size_t airport_count = v - static_cast<size_t>(snapshot.first_airport_vertex);
@@ -72,8 +73,11 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
     w.U32(rr.first);
     w.U32(rr.second);
     uint8_t flags = 0;
-    if (snapshot.on_network[i]) {
+    if (snapshot.has_outbound[i]) {
       flags |= 0x01;
+    }
+    if (snapshot.has_inbound[i]) {
+      flags |= 0x02;
     }
     w.U8(flags);
     w.U8(static_cast<uint8_t>(snapshot.kinds[i]));
@@ -174,7 +178,8 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
     uint32_t io, il, ro, rl;
   };
   snapshot.coords.resize(v);
-  snapshot.on_network.assign(v, 0);
+  snapshot.has_outbound.assign(v, 0);
+  snapshot.has_inbound.assign(v, 0);
   snapshot.kinds.resize(v);
   std::vector<IdentRef> ident_refs(v);
   for (uint32_t i = 0; i < v; ++i) {
@@ -185,7 +190,8 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
     ident_refs[i].ro = r.U32();
     ident_refs[i].rl = r.U32();
     const uint8_t flags = r.U8();
-    snapshot.on_network[i] = (flags & 0x01) != 0 ? 1 : 0;
+    snapshot.has_outbound[i] = (flags & 0x01) != 0 ? 1 : 0;
+    snapshot.has_inbound[i] = (flags & 0x02) != 0 ? 1 : 0;
     snapshot.kinds[i] = static_cast<WaypointKind>(r.U8());
   }
   // Airport records: elevation per airport vertex, in vertex order.

@@ -20,7 +20,7 @@ struct WaypointInfo {
   std::string region{};  // two-letter ICAO region code
   Coordinate coord{};
   WaypointKind kind = WaypointKind::kFix;
-  bool on_network = false;  // participates in the enroute airway network
+  bool on_network = false;  // participates in the enroute airway network (inbound or outbound edge)
 };
 
 // An airport node.

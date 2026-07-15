@@ -138,6 +138,33 @@ TEST_CASE("real data: an arrival joins the STAR at a near fix, not a far entry",
   CHECK(last.distance_nm < 60.0);
 }
 
+TEST_CASE("real data: a STAR entry gate reached by a forward-only airway is usable",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+
+  // VHHH's ABEY STARs enter at ABBEY, a fix reached only via the forward-only
+  // airway FISHA->ABBEY (inbound edge, no outbound). Arrival connection must
+  // treat an inbound-only fix as a valid STAR entry; otherwise ABBEY is skipped
+  // and RJTT->VHHH detours far southwest to SIKOU to reach ROCCA on V571. With
+  // the inbound test, the route joins through ABBEY and takes an ABEY STAR.
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("RJTT", "VHHH"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+
+  const bf::Route& r = routes.value().front();
+  CHECK(r.points.front().ident == "RJTT");
+  CHECK(r.points.back().ident == "VHHH");
+  // The arrival uses an ABEY-family STAR entering at ABBEY, not the SIER7C/ROCCA
+  // detour. The compact route string collapses same-airway runs, so ABBEY (the
+  // airway exit / STAR entry) shows while the intermediate FISHA does not.
+  CHECK(r.star.rfind("ABEY", 0) == 0);
+  CHECK(r.route_string.find("ABBEY") != std::string::npos);
+  CHECK(r.route_string.find("SIKOU") == std::string::npos);
+}
+
 TEST_CASE("real data: K candidates can use different procedures", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

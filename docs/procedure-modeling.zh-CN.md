@@ -63,6 +63,13 @@ DESIGN §4.4 最初设想：非定点 leg 会挡住程序接入，需要用航�
 - **seed = 沿程序公布折线累计**（`FixHit.cumulative_nm`）+ 仅对「机场↔记录端点」未测段补直线。
   沿航迹累计意味着：一个绕远才到达的 fix 会得到**更大（更诚实）**的 seed，而不是它的直线
   距离——搜索因此自然偏向更近的在网 fix。
+- **在网判定分方向**：SID 是「飞到 fix 再沿航路飞出」，衔接 fix 需要有**出边**
+  （`GraphBuilder::HasOutbound`）；STAR 是「沿航路飞进 fix 再由程序接手」，衔接 fix 需要有
+  **入边**（`HasInbound`）。二者不能共用「有出边」这一个判定——否则只作为 forward-only 航段
+  终点的 STAR 入口门户（只有入边、无出边）会被误判为脱网。典型：VHHH 的 `ABEY` 系列 STAR 入口
+  `ABBEY` 仅由 forward-only 的 `FISHA→ABBEY` 到达；用出边判定会跳过它、迫使 RJTT→VHHH 绕到西南
+  的 SIKOU 接 `SIER7C`；改用入边判定后走 `…FISHA→ABBEY` + `ABEY` STAR，省约 330 NM。
+  （`OnNetwork` 现为入边∪出边的并集，仅用于 `bf query` 的 `[on-network]` 展示。）
 
 实测效果：KDEN→KLAX 现在从 BASET5 的公共段 **DOWNE 进场**（末段 STAR leg 仅 14.2 NM），
 而不再被迫接 ~260 NM 外的 PGS。

@@ -35,9 +35,9 @@ debug 7.6s → 1.4s，两条路径产出逐字节相同。单文件 60.9MB（含
 
 ## 3. 磁盘按顶点 record，内存按 struct-of-arrays
 
-内存里图是 **struct-of-arrays**（SoA）：`coords_` / `idents_` / `on_network_` / `kinds_` 各一条
-平行数组。这是为 A\* 热路径的 cache 友好——搜索只碰 `coords` 和 `edges`，不碰 ident 字符串，
-把冷热数据分开就不会把没用的 ident 拉进 cache 行。
+内存里图是 **struct-of-arrays**（SoA）：`coords_` / `idents_` / `has_outbound_` / `has_inbound_` /
+`kinds_` 各一条平行数组。这是为 A\* 热路径的 cache 友好——搜索只碰 `coords` 和 `edges`，不碰
+ident 字符串，把冷热数据分开就不会把没用的 ident 拉进 cache 行。
 
 但**磁盘格式不必跟随内存布局**——它只在 `Open` 时顺序读一遍、再分发填回各 SoA 数组，磁盘上
 是 AoS 还是 SoA 对运行时零影响。早期版本盲目照抄内存 SoA，把每个属性写成一段独立的平行数组，

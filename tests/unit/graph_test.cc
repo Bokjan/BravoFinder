@@ -76,6 +76,33 @@ TEST_CASE("one-way airway is not traversable backward", "[graph]") {
   CHECK_FALSE(bf::FindShortestPath(builder.graph(), b, a).found);
 }
 
+TEST_CASE("a forward-only airway leaves its destination inbound-only", "[graph]") {
+  // Mirrors the real ABBEY topology: a forward-only airway A -> B gives B an
+  // inbound edge but no outbound. B is on-network (union) and usable as a STAR
+  // entry gate (inbound), but not as a SID hand-off (outbound). A is the reverse.
+  bf::NavData d;
+  auto wp = [](const char* id, double lon) {
+    return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{0.0, lon}, bf::WaypointKind::kFix};
+  };
+  d.waypoints = {wp("AAA", 0.0), wp("BBB", 1.0)};
+  bf::AirwaySegment fwd;
+  fwd.name = "F1";
+  fwd.direction = bf::AirwayDirection::kForward;  // AAA -> BBB only
+  d.airways = {{bf::Ident("AAA", "ZZ"), bf::Ident("BBB", "ZZ"), fwd}};
+
+  bf::GraphBuilder builder(d);
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int b = builder.VerticesByIdent("BBB")[0];
+
+  CHECK(builder.HasOutbound(a));
+  CHECK_FALSE(builder.HasInbound(a));
+  CHECK(builder.HasInbound(b));
+  CHECK_FALSE(builder.HasOutbound(b));
+  // Both touch the network, so the display-facing union is true for each.
+  CHECK(builder.OnNetwork(a));
+  CHECK(builder.OnNetwork(b));
+}
+
 TEST_CASE("unreachable vertices report no path", "[graph]") {
   bf::NavData d;
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},

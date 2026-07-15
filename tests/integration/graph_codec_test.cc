@@ -141,6 +141,22 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
   }
   CHECK(has_nonzero_elev);
 
+  // Per-vertex airway-membership flags: both directions are present for every
+  // vertex, and at least one vertex is inbound-only (has_inbound && !has_outbound)
+  // -- a STAR entry gate reached only via a forward-only airway (e.g. ABBEY).
+  // This proves flags bit1 survived the round-trip and inbound-only terminals
+  // are not collapsed to off-network.
+  REQUIRE(snapshot.has_outbound.size() == snapshot.coords.size());
+  REQUIRE(snapshot.has_inbound.size() == snapshot.coords.size());
+  bool has_inbound_only = false;
+  for (size_t i = 0; i < snapshot.coords.size(); ++i) {
+    if (snapshot.has_inbound[i] && !snapshot.has_outbound[i]) {
+      has_inbound_only = true;
+      break;
+    }
+  }
+  CHECK(has_inbound_only);
+
   std::remove(path.c_str());
 }
 

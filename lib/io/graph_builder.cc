@@ -134,10 +134,20 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   // network. Terminal-area fixes (approach/SID/STAR points) are geographically
   // closest to an airport but are dead ends here until procedures are modeled,
   // so connecting to them would strand the airport off the network.
-  std::vector<uint8_t> on_network(total, 0);
+  //
+  // Two per-vertex flags are derived here, from airway edges only (before the
+  // DCT edges below are added): has_outbound (>=1 outgoing airway edge) and
+  // has_inbound (>=1 incoming airway edge). A SID must hand off to an outbound
+  // fix; a STAR must be picked up at an inbound fix. A forward-only airway that
+  // dead-ends at a fix (e.g. a STAR entry gate) leaves that fix inbound-only.
+  std::vector<uint8_t> has_outbound(total, 0);
+  std::vector<uint8_t> has_inbound(total, 0);
   for (int v = 0; v < total; ++v) {
     if (!adj[v].empty()) {
-      on_network[v] = 1;
+      has_outbound[v] = 1;
+      for (const GraphEdge& e : adj[v]) {
+        has_inbound[e.to] = 1;
+      }
     }
   }
   // A synthetic DCT leg is a direct segment with no airway structure, usable at
@@ -153,7 +163,7 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     std::vector<int> candidates;
     for (int radius = 2; radius <= 16 && candidates.empty(); radius += 2) {
       for (int cand : grid.Near(a.coord, radius)) {
-        if (on_network[cand]) {
+        if (has_outbound[cand]) {
           candidates.push_back(cand);
         }
       }
@@ -179,8 +189,10 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
   }
 
   // Persist the on-network flags (computed before DCT edges were added) so
-  // procedure wiring can tell true enroute vertices from terminal-only fixes.
-  on_network_ = std::move(on_network);
+  // procedure wiring can tell true enroute vertices from terminal-only fixes,
+  // and can pick the right direction: outbound for SID, inbound for STAR.
+  has_outbound_ = std::move(has_outbound);
+  has_inbound_ = std::move(has_inbound);
 }
 
 int GraphBuilder::VertexByIdent(const FixedIdent& key) const {
@@ -203,8 +215,14 @@ int GraphBuilder::VertexByIdent(const Ident& ident) const {
   return VertexByIdent(FixedIdent::FromIdent(ident));
 }
 
-bool GraphBuilder::OnNetwork(int vertex) const {
-  return vertex >= 0 && vertex < static_cast<int>(on_network_.size()) && on_network_[vertex];
+bool GraphBuilder::OnNetwork(int vertex) const { return HasOutbound(vertex) || HasInbound(vertex); }
+
+bool GraphBuilder::HasOutbound(int vertex) const {
+  return vertex >= 0 && vertex < static_cast<int>(has_outbound_.size()) && has_outbound_[vertex];
+}
+
+bool GraphBuilder::HasInbound(int vertex) const {
+  return vertex >= 0 && vertex < static_cast<int>(has_inbound_.size()) && has_inbound_[vertex];
 }
 
 std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int count) const {
@@ -212,7 +230,7 @@ std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int cou
   const int v_count = graph_.VertexCount();
   candidates.reserve(256);
   for (int v = 0; v < v_count; ++v) {
-    if (on_network_[v]) {
+    if (has_outbound_[v]) {
       candidates.push_back(v);
     }
   }
@@ -316,7 +334,8 @@ GraphBuilder GraphBuilder::FromSnapshot(GraphSnapshot&& snapshot) {
   b.graph_.offsets_ = std::move(snapshot.offsets);
   b.graph_.edges_ = std::move(snapshot.edges);
   b.idents_ = std::move(snapshot.idents);
-  b.on_network_ = std::move(snapshot.on_network);
+  b.has_outbound_ = std::move(snapshot.has_outbound);
+  b.has_inbound_ = std::move(snapshot.has_inbound);
   b.kinds_ = std::move(snapshot.kinds);
   b.airport_elevations_ft_ = std::move(snapshot.airport_elevations_ft);
   b.airway_names_ = std::move(snapshot.airway_names);
@@ -331,7 +350,8 @@ GraphSnapshot GraphBuilder::ToSnapshot() const {
   snapshot.coords = graph_.coords_;
   snapshot.offsets = graph_.offsets_;
   snapshot.edges = graph_.edges_;
-  snapshot.on_network = on_network_;
+  snapshot.has_outbound = has_outbound_;
+  snapshot.has_inbound = has_inbound_;
   snapshot.idents = idents_;
   snapshot.kinds = kinds_;
   snapshot.airport_elevations_ft = airport_elevations_ft_;

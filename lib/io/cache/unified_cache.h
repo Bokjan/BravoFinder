@@ -69,7 +69,12 @@ class UnifiedCache {
   // v6: CIFP ProcedureLeg gained rnp_centinm (U16), turn_dir (U8), and
   //     speed_limit_kt (U16), appended to each leg record; the CIFP section grew
   //     5 bytes per leg, so older files must be rebuilt.
-  static constexpr uint32_t kFormatVersion = 6;
+  // v7: the vertex-record flags byte gained bit1 = has_inbound (bit0, formerly
+  //     on_network, is now has_outbound). Same byte width, but v6 files decode
+  //     has_inbound as all-false, which silently strips STAR entry gates (fixes
+  //     reachable only via a forward-only airway) off the network — so v6 is
+  //     rejected and must be rebuilt rather than read with a wrong flag.
+  static constexpr uint32_t kFormatVersion = 7;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

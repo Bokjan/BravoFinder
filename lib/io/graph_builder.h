@@ -66,14 +66,28 @@ class GraphBuilder {
   // unrelated airport.
   bool IsAirport(int vertex) const;
 
-  // Whether `vertex` participates in the enroute airway network (has at least
-  // one airway edge, as opposed to only synthetic DCT edges or none). Terminal
-  // fixes that only appear in procedures are not on-network until procedures
-  // wire them in, so this distinguishes usable connection fixes.
+  // Whether `vertex` participates in the enroute airway network, i.e. has at
+  // least one airway edge in either direction (as opposed to only synthetic DCT
+  // edges or none). This is the union of HasInbound / HasOutbound and is the
+  // "does this fix touch the network at all" answer surfaced to queries. The
+  // direction-specific variants below decide procedure connectivity.
   bool OnNetwork(int vertex) const;
 
-  // Find up to `count` on-network vertices nearest to `coord`, ordered nearest
-  // first. Used as the DCT fallback when an airport has no procedure data.
+  // Whether `vertex` has at least one outbound airway edge — a fix a SID can
+  // hand off to (fly the SID to the fix, then depart along an airway). Airport
+  // DCT connection and NearestOnNetwork also use this, so departures never seed
+  // on a dead-end fix.
+  bool HasOutbound(int vertex) const;
+
+  // Whether `vertex` has at least one inbound airway edge — a fix a STAR can be
+  // picked up at (fly in along an airway, then the STAR takes over). A fix that
+  // is only ever the destination of a forward-only airway (e.g. a STAR entry
+  // gate) has inbound but no outbound, and is valid for arrivals only.
+  bool HasInbound(int vertex) const;
+
+  // Find up to `count` vertices with an outbound airway edge nearest to `coord`,
+  // ordered nearest first. Used as the DCT fallback when an airport has no
+  // procedure data.
   std::vector<int> NearestOnNetwork(const Coordinate& coord, int count) const;
 
   // The airway name for an edge's airway_id, or "DCT" for synthetic edges.
@@ -114,10 +128,11 @@ class GraphBuilder {
   void RebuildIndices();
 
   NavGraph graph_;
-  std::vector<FixedIdent> idents_;   // per-vertex ident, size = V
-  std::vector<uint8_t> on_network_;  // per-vertex: participates in an airway (0/1), size = V
-  std::vector<WaypointKind> kinds_;  // per-vertex point kind, size = V
-  int first_airport_vertex_ = 0;     // vertices [this, V) are airports
+  std::vector<FixedIdent> idents_;     // per-vertex ident, size = V
+  std::vector<uint8_t> has_outbound_;  // per-vertex: >=1 outbound airway edge (0/1), size = V
+  std::vector<uint8_t> has_inbound_;   // per-vertex: >=1 inbound airway edge (0/1), size = V
+  std::vector<WaypointKind> kinds_;    // per-vertex point kind, size = V
+  int first_airport_vertex_ = 0;       // vertices [this, V) are airports
   std::vector<int>
       airport_elevations_ft_;  // per-airport elevation, size = V - first_airport_vertex_
   std::vector<std::string> airway_names_;

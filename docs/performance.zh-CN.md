@@ -141,7 +141,7 @@ cycle 2601 整文件 **60.9 MB**，其中 CIFP 段约 ~42 MB：
 
 | 段 | 约占 | 内容 |
 |---|---:|---|
-| graph + detail + 全局池 | ~18.9 MB | CSR coords/offsets/edges + on-network + idents + airway 名 + MORA + MSA + 导航台细节 + 等待航线 + 全局池（~1.5MB） |
+| graph + detail + 全局池 | ~18.9 MB | CSR coords/offsets/edges + in/out 航路成员标志 + idents + airway 名 + MORA + MSA + 导航台细节 + 等待航线 + 全局池（~1.5MB） |
 | cifp | ~42 MB | 14838 机场分段程序（结构化后远小于 ~105MB 原始 CIFP 文本） |
 
 全局池三段共用、去重后 ~1.5MB（三段各自局部池之和 ~8.7MB → −83%），是整文件比旧三文件分离

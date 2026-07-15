@@ -30,12 +30,13 @@ namespace bf {
 struct GraphSnapshot {
   int first_airport_vertex = 0;
 
-  std::vector<Coordinate> coords;   // per-vertex position, size V
-  std::vector<int> offsets;         // CSR row offsets, size V + 1
-  std::vector<GraphEdge> edges;     // CSR edge array, size E
-  std::vector<uint8_t> on_network;  // per-vertex airway membership (0/1), size V
-  std::vector<FixedIdent> idents;   // per-vertex (ident, region), size V
-  std::vector<WaypointKind> kinds;  // per-vertex kind (fix/VOR/NDB/DME), size V
+  std::vector<Coordinate> coords;     // per-vertex position, size V
+  std::vector<int> offsets;           // CSR row offsets, size V + 1
+  std::vector<GraphEdge> edges;       // CSR edge array, size E
+  std::vector<uint8_t> has_outbound;  // per-vertex: >=1 outbound airway edge (0/1), size V
+  std::vector<uint8_t> has_inbound;   // per-vertex: >=1 inbound airway edge (0/1), size V
+  std::vector<FixedIdent> idents;     // per-vertex (ident, region), size V
+  std::vector<WaypointKind> kinds;    // per-vertex kind (fix/VOR/NDB/DME), size V
   std::vector<std::string> airway_names;
   MoraGrid mora;
   std::vector<MsaSector> msa;
