@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.9.1
+        VERSION 3.10.0
         DESCRIPTION "A realistic / compliant flight route engine"
         LANGUAGES C CXX)
 
@@ -95,6 +95,45 @@ FetchContent_MakeAvailable(sqlite3)
 # are scoped to sqlite3.c via set_source_files_properties in lib/CMakeLists.txt.
 set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 
+# libuv (event-loop async I/O + a built-in worker threadpool) and llhttp (Node's
+# HTTP/1.1 parser): the two C libraries behind the hand-rolled HTTP query server
+# (apps/http_server). Both are proper CMake projects with native MSVC support;
+# libuv abstracts epoll/kqueue/IOCP under one API. We build only the static
+# libraries, no tests/benchmarks. As C libraries they are untouched by the
+# project's C++ -Werror (CMAKE_C_FLAGS is unset, exactly like the SQLite
+# amalgamation); we additionally mark their headers SYSTEM below so the C++ that
+# includes them stays clean under -Wpedantic -Werror. Pin exact tags.
+set(LIBUV_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LIBUV_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  libuv
+  GIT_REPOSITORY https://github.com/libuv/libuv.git
+  GIT_TAG v1.49.2)
+FetchContent_MakeAvailable(libuv)
+
+# llhttp: build the static library and alias it as llhttp::llhttp (its CMake
+# points the alias at llhttp_static when the shared build is off).
+set(BUILD_SHARED_LIBS OFF)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  llhttp
+  GIT_REPOSITORY https://github.com/nodejs/llhttp.git
+  GIT_TAG release/v9.2.1)
+FetchContent_MakeAvailable(llhttp)
+
+# Present the two C libraries' interface headers as system headers, so including
+# uv.h / llhttp.h from the -Wall -Wextra -Wpedantic -Werror C++ code never trips
+# a warning inside third-party headers.
+foreach(_c_lib uv_a llhttp_static)
+  if(TARGET ${_c_lib})
+    get_target_property(_c_incs ${_c_lib} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_c_incs)
+      set_target_properties(${_c_lib} PROPERTIES
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_c_incs}")
+    endif()
+  endif()
+endforeach()
+
 # ---------------------------------------------------------------------------
 # Subdirectories
 # ---------------------------------------------------------------------------
@@ -102,6 +141,7 @@ add_subdirectory(lib)
 add_subdirectory(apps/query_core)
 add_subdirectory(apps/cli)
 add_subdirectory(apps/mcp_stdio)
+add_subdirectory(apps/http_server)
 
 if(BRAVOFINDER_BUILD_BENCH)
   add_subdirectory(bench)
