@@ -159,10 +159,13 @@ Parameter semantics:
   (`PSB/K6`); the response echoes them resolved as `IDENT/REGION`.
 
 Each returned route element carries: `route` (ICAO filed-flight-plan string),
-`total_distance_nm`, `sid`, `dep_runway`, `sid_options`, `star`, `arr_runway`,
-`star_options`, `forced_points` (if any), `dep_connection` / `arr_connection`
-(`procedure` / `radar_vectors` etc.), and `legs` (each with `from` / `to` /
-`via` / `distance_nm`; concurrency segments add `concurrent_airways`).
+`total_distance_nm`, `dep_distance_nm` / `enroute_distance_nm` / `arr_distance_nm`,
+`sid`, `dep_runway`, `sid_options`, `star`, `arr_runway`, `star_options`,
+`forced_points` (if any), `dep_connection` / `arr_connection`
+(`procedure` / `radar_vectors` etc.), `points` (each `{ident, lat, lon}`, ordered
+along the route), and `legs` (each with `from` / `to` / `via` / `distance_nm` /
+`cumulative_nm`; concurrency segments add `concurrent_airways`). `points` has one
+more entry than `legs` (the destination of leg *i* is `points[i+1]`).
 
 ### `parse_route`
 

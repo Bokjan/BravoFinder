@@ -185,7 +185,9 @@ request (bad JSON, missing/invalid field, bad `?cycle=`), **404** when nothing
 matched (all ids missing, or an unknown path), and **422** when a well-formed
 request cannot be satisfied (no route, a bad route token). Request bodies over
 `--max-body` get **413**; `Transfer-Encoding: chunked` is refused. See
-[docs/http-service.zh-CN.md](docs/http-service.zh-CN.md) for the design.
+[apps/http_server/README.md](apps/http_server/README.md) for the full per-endpoint
+request/response contract, and [docs/http-service.zh-CN.md](docs/http-service.zh-CN.md)
+for the design.
 
 `bf build` (cache creation) remains a CLI concern and is not exposed here.
 
