@@ -30,6 +30,9 @@
   跨 rehash 稳定、eager 冻结无锁读、tsan 验证。
 - **[领域建模与内存设计](domain-design.zh-CN.md)** — 值类型、自研 `Result<T,E>`、无 static/
   无裸 new 的设计宪法、数据驱动的紧凑内存表示（`SmallVec`→`FixedIdent`）；v2→v3 重写动机的直接体现。
+- **[HTTP 查询服务](http-service.zh-CN.md)** — `bf-http`：为何服务化优于 in-process binding、
+  复用中性 `bf::service`、libuv + llhttp 手搓、offload 线程模型与连接存活守卫、HTTP 安全硬化、
+  状态码错误模型。
 - **[性能测试](performance.zh-CN.md)** — 测试机配置、方法、启动 ~11×、优化分解表、内存与
   缓存大小、可复现步骤。
 

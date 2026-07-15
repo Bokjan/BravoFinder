@@ -118,6 +118,7 @@ jobs:
         run: |
           strip build/${{ matrix.preset }}/apps/cli/bf
           strip build/${{ matrix.preset }}/apps/mcp_stdio/bf-mcp-stdio
+          strip build/${{ matrix.preset }}/apps/http_server/bf-http
 
       - name: Stage binary archive contents
         shell: bash
@@ -126,10 +127,14 @@ jobs:
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp build/${{ matrix.preset }}/apps/cli/Release/bf.exe pkg/bin/
             cp build/${{ matrix.preset }}/apps/mcp_stdio/Release/bf-mcp-stdio.exe pkg/bin/
+            cp build/${{ matrix.preset }}/apps/http_server/Release/bf-http.exe pkg/bin/
           else
             cp build/${{ matrix.preset }}/apps/cli/bf pkg/bin/
             cp build/${{ matrix.preset }}/apps/mcp_stdio/bf-mcp-stdio pkg/bin/
+            cp build/${{ matrix.preset }}/apps/http_server/bf-http pkg/bin/
           fi
+          # bf-http statically links libuv + llhttp (MIT), so the archive must
+          # carry their license text; THIRD_PARTY_LICENSES.md covers every dep.
           cp staging/share/doc/BravoFinder/LICENSE pkg/share/doc/BravoFinder/
           cp staging/share/doc/BravoFinder/THIRD_PARTY_LICENSES.md pkg/share/doc/BravoFinder/
 

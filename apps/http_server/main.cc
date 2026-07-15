@@ -21,30 +21,7 @@
 #include "io/cache/bfdb_inventory.h"
 #include "registry.h"
 #include "router.h"
-
-namespace {
-
-// Shared with the accept callback via the listener handle's data pointer.
-struct ServerContext {
-  bf::http::Router* router = nullptr;
-  bf::http::Limits limits;
-};
-
-void OnNewConnection(uv_stream_t* server, int status) {
-  if (status != 0) {
-    return;  // accept failed at the libuv level; nothing to clean up yet
-  }
-  auto* ctx = static_cast<ServerContext*>(server->data);
-  std::shared_ptr<bf::http::Connection> conn =
-      bf::http::Connection::Create(server->loop, *ctx->router, ctx->limits);
-  if (uv_accept(server, conn->stream()) == 0) {
-    conn->Start();
-  } else {
-    conn->Close();  // could not accept into the handle; close and free it
-  }
-}
-
-}  // namespace
+#include "server.h"
 
 int main(int argc, char** argv) {
   CLI::App app{"BravoFinder HTTP query server"};
@@ -102,28 +79,12 @@ int main(int argc, char** argv) {
   uv_loop_init(&loop);
   bf::http::Router router(registry, &loop);
 
-  ServerContext ctx;
-  ctx.router = &router;
-  ctx.limits.max_body_bytes = static_cast<size_t>(max_body);
-  ctx.limits.io_timeout_ms = static_cast<uint64_t>(io_timeout_sec) * 1000;
+  bf::http::Limits limits;
+  limits.max_body_bytes = static_cast<size_t>(max_body);
+  limits.io_timeout_ms = static_cast<uint64_t>(io_timeout_sec) * 1000;
 
-  uv_tcp_t server;
-  uv_tcp_init(&loop, &server);
-  server.data = &ctx;
-
-  struct sockaddr_in addr;
-  int rc = uv_ip4_addr(host.c_str(), port, &addr);
-  if (rc != 0) {
-    std::cerr << "error: invalid bind address '" << host << ":" << port << "': " << uv_strerror(rc)
-              << "\n";
-    return EXIT_FAILURE;
-  }
-  rc = uv_tcp_bind(&server, reinterpret_cast<const struct sockaddr*>(&addr), 0);
-  if (rc != 0) {
-    std::cerr << "error: cannot bind " << host << ":" << port << ": " << uv_strerror(rc) << "\n";
-    return EXIT_FAILURE;
-  }
-  rc = uv_listen(reinterpret_cast<uv_stream_t*>(&server), /*backlog=*/128, OnNewConnection);
+  bf::http::Server server(&loop, router, limits);
+  const int rc = server.Listen(host, port);
   if (rc != 0) {
     std::cerr << "error: cannot listen on " << host << ":" << port << ": " << uv_strerror(rc)
               << "\n";

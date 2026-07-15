@@ -140,6 +140,55 @@ argument semantics, and client configuration.
 
 `bf build` (cache creation) remains a CLI concern and is not exposed as a tool.
 
+### HTTP server (`bf-http`)
+
+BravoFinder also ships an HTTP+JSON query server for an internal (e.g. Go)
+gateway to call over the network. It exposes the same route-finding and
+navigation-data lookups as the MCP server, but as REST-style endpoints. It is a
+hand-rolled transport over [libuv](https://github.com/libuv/libuv) (async I/O +
+a worker threadpool) and [llhttp](https://github.com/nodejs/llhttp) (Node's HTTP
+parser): a single event-loop thread does all non-blocking I/O, and each route
+computation is offloaded to the threadpool, so one loop scales to many
+connections.
+
+Like the MCP server, it is pointed at a **directory** of `.bfdb` caches and can
+serve multiple AIRAC cycles (query endpoints accept an optional `?cycle=2601`,
+defaulting to the newest). It fails fast at startup if the directory holds no
+cache.
+
+Build and run it:
+
+```bash
+cmake --preset release && cmake --build --preset release   # or: debug
+# binary: build/release/apps/http_server/bf-http
+
+# The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
+bf-http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
+# Other flags: --worker-threads N (threadpool size), --max-body BYTES,
+# --io-timeout SEC (header/body read + idle keep-alive).
+```
+
+Endpoints (all query endpoints are `POST` with a JSON body; a batch lookup takes
+`{"ids":[...]}`, a single lookup is a one-element array):
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/routes` | find k candidate routes |
+| POST | `/v1/parse-route` | validate/expand a filed route string |
+| POST | `/v1/waypoints` `/v1/airports` `/v1/procedures` `/v1/airways` `/v1/navaid-detail` `/v1/holds` | batch lookups (parallel to `ids`) |
+| POST | `/v1/procedure-legs` | one named procedure's per-leg detail |
+| GET | `/v1/cycles` | list the servable AIRAC cycles |
+| GET | `/healthz` `/readyz` | liveness / readiness probes |
+
+Errors return `{"error":"..."}` with an HTTP status: **400** for a malformed
+request (bad JSON, missing/invalid field, bad `?cycle=`), **404** when nothing
+matched (all ids missing, or an unknown path), and **422** when a well-formed
+request cannot be satisfied (no route, a bad route token). Request bodies over
+`--max-body` get **413**; `Transfer-Encoding: chunked` is refused. See
+[docs/http-service.zh-CN.md](docs/http-service.zh-CN.md) for the design.
+
+`bf build` (cache creation) remains a CLI concern and is not exposed here.
+
 ### CLI (`bf`)
 
 ```bash

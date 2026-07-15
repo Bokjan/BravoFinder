@@ -22,9 +22,11 @@ add_executable(bf_tests
                integration/bfdb_inventory_test.cc
                integration/cifp_codec_test.cc
                integration/unified_cache_test.cc
-               integration/mcp_registry_test.cc)
+               integration/mcp_registry_test.cc
+               integration/http_handlers_test.cc
+               integration/http_server_test.cc)
 
-target_link_libraries(bf_tests PRIVATE bf::bravofinder3 bf_query_core bf_mcp_lib Catch2::Catch2WithMain)
+target_link_libraries(bf_tests PRIVATE bf::bravofinder3 bf_query_core bf_mcp_lib bf_http_lib Catch2::Catch2WithMain)
 
 # Register each Catch2 TEST_CASE with CTest. Run from the project root so the
 # integration tests find the default navdata/ directory. Catch2 returns exit

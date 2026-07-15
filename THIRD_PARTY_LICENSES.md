@@ -12,6 +12,8 @@ permissive licenses compatible with MIT.
 | [CLI11](https://github.com/CLIUtils/CLI11) | Command-line parsing | BSD-3-Clause | https://github.com/CLIUtils/CLI11/blob/main/LICENSE |
 | [RapidJSON](https://github.com/Tencent/rapidjson) | JSON output (`route --format json`) | MIT | https://github.com/Tencent/rapidjson/blob/master/license.txt |
 | [SQLite](https://www.sqlite.org/) 3.46.0 | DFD SQLite loaders (v1/v2) | Public Domain | https://www.sqlite.org/copyright.html |
+| [libuv](https://github.com/libuv/libuv) v1.49.2 | Async I/O event loop + threadpool (`bf-http`) | MIT | https://github.com/libuv/libuv/blob/v1.49.2/LICENSE |
+| [llhttp](https://github.com/nodejs/llhttp) v9.2.1 | HTTP/1.1 request parser (`bf-http`) | MIT | https://github.com/nodejs/llhttp/blob/release/v9.2.1/LICENSE-MIT |
 
 ## Obligations
 
@@ -26,6 +28,12 @@ permissive licenses compatible with MIT.
   for JSON serialization; the parser is not used.)
 - **Public Domain** (SQLite): no obligations whatsoever. SQLite is dedicated to the
   public domain and may be used in any project without restriction.
+- **MIT** (libuv, llhttp): require the copyright notice and permission notice to be
+  retained. Unlike RapidJSON these are compiled into the `bf-http` binary, so release
+  artifacts that ship `bf-http` bundle this license text (see the release workflow).
+  libuv's `LICENSE` additionally includes a few permissive sub-notices (e.g. `tree.h`
+  under BSD-2-Clause); retaining the upstream file as-is satisfies them, with no new
+  obligation.
 
 ## Navigation Data (not a code dependency)
 
