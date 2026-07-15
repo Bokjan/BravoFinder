@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
 #include "core/routing/route.h"
+#include "core/routing/route_metrics.h"
 
 namespace bf {
 
@@ -58,9 +60,29 @@ void WriteRouteJson(Writer& writer, const Route& route) {
   writer.Key("arr_connection");
   writer.String(ToString(route.arr_connection));
 
+  // Ordered points along the route, each carrying its ident and coordinate.
+  // points is parallel to legs with one extra entry (N points, N-1 legs): the
+  // destination of leg i is points[i+1].
+  writer.Key("points");
+  writer.StartArray();
+  for (const RoutePoint& point : route.points) {
+    writer.StartObject();
+    key_str("ident", point.ident);
+    writer.Key("lat");
+    writer.Double(point.coord.latitude);
+    writer.Key("lon");
+    writer.Double(point.coord.longitude);
+    writer.EndObject();
+  }
+  writer.EndArray();
+
+  // Running distance after each leg (parallel to legs), so consumers do not have
+  // to accumulate distance_nm themselves. The last entry equals total_distance_nm.
+  const std::vector<double> cumulative = CumulativeDistances(route.legs);
   writer.Key("legs");
   writer.StartArray();
-  for (const RouteLeg& leg : route.legs) {
+  for (size_t i = 0; i < route.legs.size(); ++i) {
+    const RouteLeg& leg = route.legs[i];
     writer.StartObject();
     key_str("from", leg.from);
     key_str("to", leg.to);
@@ -72,6 +94,8 @@ void WriteRouteJson(Writer& writer, const Route& route) {
     }
     writer.Key("distance_nm");
     writer.Double(leg.distance_nm);
+    writer.Key("cumulative_nm");
+    writer.Double(cumulative[i]);
     writer.EndObject();
   }
   writer.EndArray();

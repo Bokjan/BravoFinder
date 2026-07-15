@@ -220,6 +220,12 @@ Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an
 airport has procedure data, the route and its legs name the SID and STAR used (and
 the interchangeable procedures that share the same connection fix).
 
+The `--format json` route output carries, alongside the filed route string and
+per-phase distances, an ordered `points[]` array (each `{ident, lat, lon}`) and a
+running `cumulative_nm` on every leg. `points` has one more entry than `legs`
+(N points, N-1 legs); the destination of leg *i* is `points[i+1]`, and the last
+`cumulative_nm` equals `total_distance_nm`.
+
 The `.bfdb` cache is a portable, little-endian binary snapshot. One unified file
 holds three sections sharing a global string pool: the route graph, the
 per-airport CIFP procedures (loaded on demand), and the radio-navaid attributes

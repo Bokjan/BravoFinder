@@ -101,7 +101,20 @@ SID/STAR 段同理作硬边界处理。这些是语义上确定的转换点，�
 - JSON 输出：仅并线段带 `concurrent_airways` key。
 - 文本表：via 列附注 `(concurrent: V210, V394)`。
 
-## 7. 实现取舍：纯函数 + vector 交集
+## 7. 坐标与累计距离：points[] 与 cumulative_nm
+
+路由 JSON 除航路串与分段外，还直出两组机器可读数据，消费方（CLI-json / MCP / HTTP 服务）无需再自行推导：
+
+- **`points[]{ident,lat,lon}`**：沿航路的有序点，各带 ident 与坐标（十进制度，WGS-84）。`points` 与 `legs`
+  平行但多一项——**N 个点、N-1 条 leg**，leg i 的目的点是 `points[i+1]`。坐标取自 `Route::points[].coord`，
+  过去只有文本表打印、JSON 缺失，现补齐。
+- **每条 leg 的 `cumulative_nm`**：到该 leg 为止的累计距离（`route_metrics.h::CumulativeDistances`，与 `legs`
+  平行），末项等于 `total_distance_nm`。
+
+坐标/距离小数位沿用序列化器的 `SetMaxDecimalPlaces`（route 输出为 2 位）。这些字段与 `route_json.h` 共享，
+一处改三端受益，不涉及 cache 层、不 bump `format_version`。
+
+## 8. 实现取舍：纯函数 + vector 交集
 
 - **纯函数**:`BuildRouteString(first_point, legs)` 原地改写每个 leg 的 `via` 并填
   `concurrent_airways`，无副作用、易测。属 `bf_core`。
