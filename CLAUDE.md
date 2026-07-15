@@ -14,7 +14,7 @@
 >   current architecture lives in `docs/`), `plans/`/`records/`/`research/` are historical plans
 >   and records. Start from `.notes/README.md` when you need background.
 > - `docs/` — public-facing docs (CONTRIBUTING, algorithm articles, architecture: binary-cache /
->   domain-design / thread-safety / performance; the authority for "how it works now"; committed).
+>   domain-design / thread-safety / http-service / performance; the authority for "how it works now"; committed).
 
 One-line background (details in README / docs/): a realistic/compliant flight route
 engine that parses X-Plane 12 native navigation data (including ARINC 424 procedures),
@@ -40,6 +40,23 @@ A\* + Yen K-shortest.
   the rewrite).
 - JSON output uses **RapidJSON `Writer`** (SAX streaming, auto-escaping); no hand-rolled
   strings, no nlohmann.
+
+## Apps and transports (query_core / MCP / HTTP)
+
+- The route engine is `lib/` (`bf3`, alias `bf::bravofinder3`) and has **no** JSON /
+  network dependency. Query capabilities shared across transports live in
+  `apps/query_core` (namespace **`bf::service`**): the multi-cycle `NavDatabaseRegistry`
+  and the nine handlers, each returning `HandlerResult{body, status}` (an HTTP-style code).
+- Two **peer** transports depend on `query_core`, never on each other: `apps/mcp_stdio`
+  (`bf-mcp-stdio`, MCP over stdio — projects `is_error = status >= 400`) and
+  `apps/http_server` (`bf-http`, HTTP+JSON via libuv + llhttp — uses `status` directly).
+  Add a query capability **once** in `bf::service`; both transports get it. Don't add an
+  http↔mcp dependency.
+- **HTTP offload minefield** (`apps/http_server`): the 10–30 ms route compute must run on
+  the libuv **threadpool** (`uv_queue_work`), never the loop thread. A work item holds a
+  strong `shared_ptr<Connection>` so the connection survives a client disconnect mid-
+  compute; the completion callback checks `IsAlive()` before writing, and workers never
+  touch libuv handles. Touching this concurrency → `ctest --preset tsan` (Contract B).
 
 ## Thread-safety Contract B (must follow when touching concurrency)
 
@@ -93,8 +110,8 @@ ctest --preset <debug|release|tsan>
 ```
 On Windows MSVC, `windows-debug` / `windows-release` presets are available (no
 sanitizers; used in CI).
-Dependencies are pure CMake + FetchContent (Catch2 v3 / CLI11 / RapidJSON); no vendoring,
-no vcpkg.
+Dependencies are pure CMake + FetchContent (Catch2 v3 / CLI11 / RapidJSON; + libuv /
+llhttp for the HTTP server); no vendoring, no vcpkg.
 
 ### Pick test scope by change (saves time; see Testing section for the principle)
 

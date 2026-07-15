@@ -36,10 +36,16 @@ of ~2160 NM.
 
 A single loaded database is safe to query concurrently from multiple threads.
 
+The engine is exposed through three front-ends (see [Usage](#usage)): the `bf`
+CLI, an MCP stdio server (`bf-mcp-stdio`) for LLM clients, and an HTTP+JSON
+server (`bf-http`) for network callers. The latter two share one query layer
+(`apps/query_core`, namespace `bf::service`).
+
 ## Building
 
-Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11, RapidJSON)
-are fetched automatically via FetchContent.
+Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11,
+RapidJSON, plus libuv and llhttp for the HTTP server) are fetched automatically
+via FetchContent.
 
 ```bash
 cmake --preset debug              # or: release
@@ -54,12 +60,14 @@ Build only what you need with `--target`:
 | `bf` | CLI tool (`apps/cli/`) |
 | `bf_mcp_stdio` | MCP stdio server (`apps/mcp_stdio/`) |
 | `bf_mcp_lib`   | MCP server library (static) |
+| `bf_http` | HTTP query server (`apps/http_server/`) |
+| `bf_query_core` | Shared query layer: registry + handlers, `bf::service` (static) |
 | `bf_tests` | Test runner |
 | `bf3` | The unified static library (`lib/`, alias `bf::bravofinder3`) |
 
 ```bash
 cmake --build --preset debug --target bf_mcp_stdio    # just the MCP server
-cmake --build --preset debug --target bf bf_mcp_stdio # both binaries
+cmake --build --preset debug --target bf bf_http      # CLI + HTTP server
 ```
 
 A `tsan` preset (ThreadSanitizer) is available to verify concurrency safety:
