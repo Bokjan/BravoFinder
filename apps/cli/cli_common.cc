@@ -105,7 +105,10 @@ void PrintText(const Route& route) {
 void PrintRoutesJson(const std::vector<Route>& routes) {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  writer.SetMaxDecimalPlaces(2);
+  // 6 dp so the point coordinates (lat/lon) are not truncated to ~1.1 km; the
+  // distance fields gain a few harmless extra digits. Matches the MCP/HTTP
+  // handlers, which share WriteRouteJson.
+  writer.SetMaxDecimalPlaces(6);
   writer.StartArray();
   for (const Route& route : routes) {
     WriteRouteJson(writer, route);

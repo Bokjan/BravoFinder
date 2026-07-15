@@ -41,12 +41,15 @@ exit, reason on stderr) if the directory holds no usable `nav_<cycle>.bfdb`.
   `Content-Type: application/json` and `Content-Length` (never chunked). The
   server honors `Connection: keep-alive`.
 - **Cycle selection**: query endpoints accept `?cycle=2601` to pick an AIRAC
-  cycle; omit it for the newest loaded cycle. A malformed cycle is `400`; a
-  well-formed but unserved cycle is `400`.
-- **Numbers**: route distances/coordinates are emitted at 2 decimal places;
-  lookup coordinates/frequencies at 6.
+  cycle; omit it for the newest loaded cycle. The value is matched literally
+  (not URL-decoded), so percent-encoding it (`24%33001`) yields `400`; a plain
+  integer that names no loaded cycle is also `400`.
+- **Numbers**: route distances and point coordinates are emitted at 6 decimal
+  places (coordinates are ~0.1 m; the distance fields simply carry a few extra
+  digits). Lookup coordinates/frequencies are also 6 dp.
 - **Errors**: any non-2xx response has body `{"error":"<message>"}`. See
   [Error model](#error-model).
+- **Binding**: `--host` expects an IPv4 address (the server binds via IPv4 only).
 
 ## Endpoint reference
 
@@ -115,7 +118,7 @@ Response `200`: an **array** of route objects, each:
   "star": "BASET5", "arr_runway": "", "star_options": ["BASET5", "..."],
   "forced_points": ["PSB/K6"],
   "dep_connection": "procedure", "arr_connection": "procedure",
-  "points": [{"ident": "KJFK", "lat": 40.97, "lon": -74.95}, ...],
+  "points": [{"ident": "KJFK", "lat": 40.970986, "lon": -74.959827}, ...],
   "legs": [
     {"from": "KJFK", "to": "CANDR", "via": "DEEZZ5", "distance_nm": 77.43, "cumulative_nm": 77.43},
     {"from": "SPOTZ", "to": "MIKYG", "via": "Q480", "concurrent_airways": ["Q42", "Q480"], "distance_nm": 22.17, "cumulative_nm": 122.44}

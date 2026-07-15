@@ -239,7 +239,11 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   }
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  writer.SetMaxDecimalPlaces(2);
+  // 6 dp: the route object carries point coordinates (lat/lon), which 2 dp
+  // would truncate to ~1.1 km -- defeating the coordinates added for callers.
+  // 6 dp (~0.1 m) matches the lookup handlers; the distance fields simply gain
+  // a few harmless extra digits.
+  writer.SetMaxDecimalPlaces(6);
   writer.StartArray();
   for (const bf::Route& route : result.value()) {
     bf::WriteRouteJson(writer, route);
@@ -282,7 +286,8 @@ HandlerResult ParseRouteHandler(const rapidjson::Value& args, const NavDatabase&
   }
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  writer.SetMaxDecimalPlaces(2);
+  // 6 dp so the point coordinates are not truncated (see FindRoutesHandler).
+  writer.SetMaxDecimalPlaces(6);
   bf::WriteRouteJson(writer, result.value());
   return {buffer.GetString(), kOk};
 }

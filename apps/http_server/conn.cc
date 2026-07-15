@@ -60,7 +60,9 @@ const char* ReasonPhrase(int status) {
     case 503:
       return "Service Unavailable";
     default:
-      return "OK";
+      // An unmapped status is unexpected (every status we emit is listed above);
+      // a neutral phrase avoids a misleading "200 OK" style status line.
+      return "Error";
   }
 }
 

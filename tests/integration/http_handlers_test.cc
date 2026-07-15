@@ -5,6 +5,7 @@
 // navigation data; SKIPs when it is absent.
 
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <string>
 #include <unordered_map>
 
@@ -57,6 +58,37 @@ TEST_CASE("http handlers: find_routes status mapping", "[integration][http]") {
   CHECK(Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":0})", *db).status == 400);
   // A well-formed request with an unknown endpoint is a semantic failure (422).
   CHECK(Run("find_routes", R"({"departure":"ZZ_NOPE_ZZ","arrival":"KLAX"})", *db).status == 422);
+}
+
+TEST_CASE("http handlers: find_routes emits full-precision coordinates", "[integration][http]") {
+  // Regression guard: the route writer must run at 6 dp, not 2 -- 2 dp truncates
+  // point lat/lon to ~1.1 km. A real route's points are not all 2-dp values, so
+  // at least one coordinate must differ from its 2-dp rounding by > 1e-4.
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  const bf::service::HandlerResult result =
+      Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":1})", *db);
+  REQUIRE(result.status == 200);
+  rapidjson::Document doc;
+  doc.Parse(result.body.c_str());
+  REQUIRE_FALSE(doc.HasParseError());
+  REQUIRE(doc.IsArray());
+  REQUIRE(doc.Size() >= 1);
+  const rapidjson::Value& points = doc[0]["points"];
+  REQUIRE(points.IsArray());
+  REQUIRE(points.Size() > 0);
+  bool found_full_precision = false;
+  for (const rapidjson::Value& p : points.GetArray()) {
+    const double lat = p["lat"].GetDouble();
+    const double rounded = std::round(lat * 100.0) / 100.0;
+    if (std::abs(lat - rounded) > 1e-4) {
+      found_full_precision = true;
+      break;
+    }
+  }
+  CHECK(found_full_precision);
 }
 
 TEST_CASE("http handlers: parse_route status mapping", "[integration][http]") {

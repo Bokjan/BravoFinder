@@ -11,6 +11,7 @@
 #include <uv.h>
 
 #include <CLI/CLI.hpp>
+#include <csignal>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -24,6 +25,15 @@
 #include "server.h"
 
 int main(int argc, char** argv) {
+  // libuv on Linux neither sets SO_NOSIGPIPE nor passes MSG_NOSIGNAL to its
+  // write syscalls, so a uv_write to a socket the peer has RST'd would deliver
+  // SIGPIPE and kill the process. Ignore it process-wide (standard for a
+  // hand-rolled network server); write errors still surface via the write
+  // callback. No-op on Windows, which has no SIGPIPE.
+#ifdef SIGPIPE
+  std::signal(SIGPIPE, SIG_IGN);
+#endif
+
   CLI::App app{"BravoFinder HTTP query server"};
 
   const char* env_dir = bf::GetEnv("BRAVOFINDER_NAVDATA");
@@ -93,5 +103,19 @@ int main(int argc, char** argv) {
 
   std::cerr << "bf-http listening on " << host << ":" << port << " (" << cycle_count
             << " cycle(s), " << worker_threads << " worker threads)\n";
-  return uv_run(&loop, UV_RUN_DEFAULT);
+
+  // Graceful shutdown: SIGINT / SIGTERM stop the loop so uv_run returns and main
+  // exits cleanly (lets in-flight I/O drain a final iteration) instead of being
+  // killed mid-write. SIGINT works on Windows; SIGTERM is POSIX-only.
+  uv_signal_t sigint;
+  uv_signal_init(&loop, &sigint);
+  uv_signal_start(&sigint, [](uv_signal_t* h, int) { uv_stop(h->loop); }, SIGINT);
+#ifndef _WIN32
+  uv_signal_t sigterm;
+  uv_signal_init(&loop, &sigterm);
+  uv_signal_start(&sigterm, [](uv_signal_t* h, int) { uv_stop(h->loop); }, SIGTERM);
+#endif
+
+  uv_run(&loop, UV_RUN_DEFAULT);
+  return 0;
 }

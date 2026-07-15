@@ -1,7 +1,12 @@
 #include "core/routing/route_json.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <string>
+
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 
 namespace {
 
@@ -103,6 +108,41 @@ TEST_CASE("ToString maps every connection kind", "[route_json]") {
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kProcedure)) == "procedure");
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kDirect)) == "direct");
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kRadarVectors)) == "radar_vectors");
+}
+
+TEST_CASE("WriteRouteJson preserves coordinate precision with a 6-dp writer", "[route_json]") {
+  // The route object carries point lat/lon. A writer configured for 2 decimal
+  // places (as the handlers used to be) would truncate a real coordinate such
+  // as 40.639927 to 40.64 (~1.1 km). This drives the writer at 6 dp -- as the
+  // CLI / MCP / HTTP handlers now do -- and asserts the precision survives.
+  // (The StubWriter above discards Double values, so it cannot catch this; a
+  // real RapidJSON writer is needed.)
+  bf::Route route;
+  route.route_string = "A Y28 C";
+  bf::RoutePoint a;
+  a.ident = "A";
+  a.coord = {40.123456, -73.987654};
+  route.points = {a};
+  bf::RouteLeg leg;
+  leg.from = "A";
+  leg.to = "B";
+  leg.via = "Y28";
+  leg.distance_nm = 12.345678;
+  route.legs = {leg};
+
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.SetMaxDecimalPlaces(6);
+  bf::WriteRouteJson(writer, route);
+
+  rapidjson::Document doc;
+  doc.Parse(buffer.GetString());
+  REQUIRE_FALSE(doc.HasParseError());
+  const rapidjson::Value& point = doc["points"][0];
+  // At 6 dp the coordinate round-trips to its full precision; a 2-dp writer
+  // would have emitted 40.12 / -73.99, off by ~3e-3 -- well outside the margin.
+  CHECK(point["lat"].GetDouble() == Catch::Approx(40.123456).margin(1e-6));
+  CHECK(point["lon"].GetDouble() == Catch::Approx(-73.987654).margin(1e-6));
 }
 
 }  // namespace

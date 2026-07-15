@@ -52,10 +52,15 @@ void OnWork(uv_work_t* req) {
 // the work item (dropping its connection reference).
 void OnAfterWork(uv_work_t* req, int status) {
   std::unique_ptr<WorkRequest> w(static_cast<WorkRequest*>(req->data));
-  // status is non-zero only on cancellation, which we never request; either way
-  // a dead connection means the client left while we computed -- drop it.
-  if (status == 0 && w->conn->IsAlive()) {
+  if (!w->conn->IsAlive()) {
+    return;  // the client left while we computed -- drop the response
+  }
+  if (status == 0) {
     w->conn->WriteResponse(w->result.status, w->result.body, w->keep_alive);
+  } else {
+    // status != 0 means the work was cancelled (we never request this). Rather
+    // than leave the connection hanging until the idle timeout, close it.
+    w->conn->Close();
   }
 }
 
