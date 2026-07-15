@@ -15,6 +15,7 @@
 #include <string>
 
 #include "core/version.h"
+#include "handlers.h"
 #include "tools.h"
 
 namespace bf::mcp {
@@ -295,14 +296,16 @@ void McpServer::HandleToolsCall(const rapidjson::Value& id, const rapidjson::Val
     // the latest: a client passing cycle:-1 would otherwise be served a
     // different cycle's data with no signal.
     if (!args["cycle"].IsUint()) {
-      SendToolResult(id, JsonError("cycle must be a non-negative integer (omit for latest)"), true);
+      SendToolResult(
+          id, bf::service::JsonError("cycle must be a non-negative integer (omit for latest)"),
+          true);
       return;
     }
     cycle = args["cycle"].GetUint();
   }
   Result<const NavDatabase*> db = registry_.Get(cycle);
   if (!db) {
-    SendToolResult(id, JsonError(db.error().message), true);
+    SendToolResult(id, bf::service::JsonError(db.error().message), true);
     return;
   }
 
@@ -315,7 +318,7 @@ void McpServer::HandleToolsCall(const rapidjson::Value& id, const rapidjson::Val
   }
   // The tool name is client-controlled, so escape it (a name with a quote must
   // not break the JSON frame).
-  SendToolResult(id, JsonError("unknown tool: " + name), true);
+  SendToolResult(id, bf::service::JsonError("unknown tool: " + name), true);
 }
 
 }  // namespace bf::mcp

@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     std::cerr << "warning: ignoring unreadable cache '" << skipped << "'\n";
   }
 
-  bf::mcp::NavDatabaseRegistry registry(std::move(inventory.value()));
+  bf::service::NavDatabaseRegistry registry(std::move(inventory.value()));
   bf::mcp::McpServer server(registry);
   return server.Run();
 }

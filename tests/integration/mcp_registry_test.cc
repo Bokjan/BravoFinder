@@ -38,10 +38,10 @@ fs::path TempDir(const std::string& tag) {
   return dir;
 }
 
-bf::mcp::NavDatabaseRegistry MakeRegistry(const fs::path& dir) {
+bf::service::NavDatabaseRegistry MakeRegistry(const fs::path& dir) {
   bf::Result<bf::BfdbInventory> inv = bf::BfdbInventory::Scan(dir.string());
   REQUIRE(inv);
-  return bf::mcp::NavDatabaseRegistry(std::move(inv.value()));
+  return bf::service::NavDatabaseRegistry(std::move(inv.value()));
 }
 
 }  // namespace
@@ -50,7 +50,7 @@ TEST_CASE("mcp registry: Get with no cycle serves the latest", "[integration][mc
   const fs::path dir = TempDir("latest");
   WriteCache(dir, 2601);
   WriteCache(dir, 2602);
-  bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
+  bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   bf::Result<const bf::NavDatabase*> db = reg.Get(std::nullopt);
   REQUIRE(db);
@@ -61,7 +61,7 @@ TEST_CASE("mcp registry: Get by cycle serves that cycle", "[integration][mcp]") 
   const fs::path dir = TempDir("bycycle");
   WriteCache(dir, 2601);
   WriteCache(dir, 2602);
-  bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
+  bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   bf::Result<const bf::NavDatabase*> db = reg.Get(2601);
   REQUIRE(db);
@@ -71,7 +71,7 @@ TEST_CASE("mcp registry: Get by cycle serves that cycle", "[integration][mcp]") 
 TEST_CASE("mcp registry: repeated Get returns the same cached instance", "[integration][mcp]") {
   const fs::path dir = TempDir("cache");
   WriteCache(dir, 2601);
-  bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
+  bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   bf::Result<const bf::NavDatabase*> a = reg.Get(2601);
   bf::Result<const bf::NavDatabase*> b = reg.Get(2601);
@@ -83,7 +83,7 @@ TEST_CASE("mcp registry: repeated Get returns the same cached instance", "[integ
 TEST_CASE("mcp registry: unknown cycle is an error", "[integration][mcp]") {
   const fs::path dir = TempDir("unknown");
   WriteCache(dir, 2601);
-  bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
+  bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   CHECK_FALSE(reg.Get(9999));
 }
@@ -98,7 +98,7 @@ TEST_CASE("mcp registry: concurrent Get is safe and consistent", "[integration][
   WriteCache(dir, 2601);
   WriteCache(dir, 2602);
   WriteCache(dir, 2603);
-  bf::mcp::NavDatabaseRegistry reg = MakeRegistry(dir);
+  bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   constexpr int kThreads = 8;
   std::vector<std::thread> threads;

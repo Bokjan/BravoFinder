@@ -2,9 +2,10 @@
 //
 // A Tool is fully self-describing: it carries its MCP name, a human/LLM-facing
 // description, its JSON-Schema input descriptor, and the handler that implements
-// it. Handlers take the request arguments and a read-only NavDatabase, so they
-// are pure with respect to server state (no globals) and easy to reason about.
-// The set of available tools is built by MakeTools(); the server owns that
+// it. The handler logic itself lives in bf::service (apps/query_core), shared
+// with the HTTP transport; MakeTools() attaches the MCP-specific description and
+// JSON-Schema to each shared handler by name and adapts its HandlerResult to the
+// {json_text, is_error} shape the stdio server writes. The server owns the tool
 // vector as a member, iterating it for tools/list and looking up by name for
 // tools/call.
 
@@ -12,6 +13,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "io/nav_database.h"
@@ -21,7 +23,8 @@ namespace bf::mcp {
 
 // A tool handler: given the parsed "arguments" object and a read-only database,
 // returns {json_text, is_error}. json_text is a JSON value (object or array)
-// that the server wraps in a single text content block.
+// that the server wraps in a single text content block. is_error is the MCP
+// projection of the shared handler's status (status >= 400).
 using ToolHandler = std::function<std::pair<std::string, bool>(const rapidjson::Value& args,
                                                                const bf::NavDatabase& db)>;
 
@@ -43,15 +46,10 @@ struct Tool {
        ToolHandler tool_handler);
 };
 
-// Build every tool the server exposes, in display order. Returns a vector
-// (moved, since Tool holds a non-copyable rapidjson::Document) for the server
-// to own as a member -- no function-level static mutable state.
+// Build every tool the server exposes, in display order. Takes the shared
+// bf::service handlers and dresses each with its MCP description + JSON-Schema.
+// Returns a vector (moved, since Tool holds a non-copyable rapidjson::Document)
+// for the server to own as a member -- no function-level static mutable state.
 std::vector<Tool> MakeTools();
-
-// Build a tool-error JSON payload `{"error":"<message>"}` with RapidJSON's
-// Writer so the message is auto-escaped. Tool error messages may carry
-// user-controlled strings (an unknown departure airport, a bad route token, an
-// unknown tool name); this is the only sanctioned way to emit such a payload.
-std::string JsonError(const std::string& message);
 
 }  // namespace bf::mcp

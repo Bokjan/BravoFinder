@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.9.0
+        VERSION 3.9.1
         DESCRIPTION "A realistic / compliant flight route engine"
         LANGUAGES C CXX)
 
@@ -99,6 +99,7 @@ set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 # Subdirectories
 # ---------------------------------------------------------------------------
 add_subdirectory(lib)
+add_subdirectory(apps/query_core)
 add_subdirectory(apps/cli)
 add_subdirectory(apps/mcp_stdio)
 

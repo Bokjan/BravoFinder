@@ -27,7 +27,7 @@
 #include "io/cache/bfdb_inventory.h"
 #include "io/nav_database.h"
 
-namespace bf::mcp {
+namespace bf::service {
 
 class NavDatabaseRegistry {
  public:
@@ -52,4 +52,4 @@ class NavDatabaseRegistry {
   std::mutex mutex_;
 };
 
-}  // namespace bf::mcp
+}  // namespace bf::service

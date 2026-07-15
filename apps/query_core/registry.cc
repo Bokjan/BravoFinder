@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace bf::mcp {
+namespace bf::service {
 
 NavDatabaseRegistry::NavDatabaseRegistry(BfdbInventory inventory)
     : inventory_(std::move(inventory)) {}
@@ -47,4 +47,4 @@ Result<const NavDatabase*> NavDatabaseRegistry::Get(std::optional<uint32_t> cycl
   return Result<const NavDatabase*>::Ok(it->second.get());
 }
 
-}  // namespace bf::mcp
+}  // namespace bf::service

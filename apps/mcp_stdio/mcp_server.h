@@ -20,7 +20,8 @@ class McpServer {
  public:
   // Takes the registry to serve from. The registry must outlive the server.
   // Each database it holds is read-only per NavDatabase contract B.
-  explicit McpServer(NavDatabaseRegistry& registry) : registry_(registry), tools_(MakeTools()) {}
+  explicit McpServer(bf::service::NavDatabaseRegistry& registry)
+      : registry_(registry), tools_(MakeTools()) {}
 
   // Run the stdio request/response loop until stdin closes. Returns the process
   // exit status.
@@ -29,7 +30,7 @@ class McpServer {
  private:
   // The registry to serve from. Each database it holds is read-only per
   // NavDatabase contract B.
-  NavDatabaseRegistry& registry_;
+  bf::service::NavDatabaseRegistry& registry_;
 
   // The tool list, built once in the constructor (no function-level static
   // mutable state). Each Tool owns its rapidjson::Document schema, so the vector
