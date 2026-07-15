@@ -109,7 +109,7 @@ Response `200`: an **array** of route objects, each:
 
 ```json
 {
-  "route": "KJFK DEEZZ5 CANDR ... KLAX",
+  "route": "KJFK SID CANDR ... STAR KLAX",
   "total_distance_nm": 2190.26,
   "dep_distance_nm": 77.43,
   "enroute_distance_nm": 2098.6,
@@ -120,12 +120,15 @@ Response `200`: an **array** of route objects, each:
   "dep_connection": "procedure", "arr_connection": "procedure",
   "points": [{"ident": "KJFK", "lat": 40.970986, "lon": -74.959827}, ...],
   "legs": [
-    {"from": "KJFK", "to": "CANDR", "via": "DEEZZ5", "distance_nm": 77.43, "cumulative_nm": 77.43},
+    {"from": "KJFK", "to": "CANDR", "via": "SID", "distance_nm": 77.43, "cumulative_nm": 77.43},
     {"from": "SPOTZ", "to": "MIKYG", "via": "Q480", "concurrent_airways": ["Q42", "Q480"], "distance_nm": 22.17, "cumulative_nm": 122.44}
   ]
 }
 ```
 
+- `route` / `legs[].via`: the airport↔network procedure legs use the literal
+  connector keyword `SID`/`STAR` (or `DCT` for a direct link); the procedure names
+  themselves are in the `sid` / `star` fields.
 - `dep_connection` / `arr_connection`: `procedure` | `direct` | `radar_vectors`.
 - `points` has N entries, `legs` has N−1; the destination of `legs[i]` is
   `points[i+1]`, and the last `cumulative_nm` equals `total_distance_nm`.
@@ -137,11 +140,13 @@ an unknown endpoint or no feasible route → **422**.
 
 ### POST `/v1/parse-route`
 
-Request: `{"route": "KJFK DEEZZ5 CANDR J60 PSB ... KLAX"}` (required). The string
+Request: `{"route": "KJFK SID CANDR J60 PSB ... STAR KLAX"}` (required). The string
 is `[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]`: each airway must connect
 its bracketing fixes (expanded to intermediate points), else the error names the
-offending token. Response `200`: a **single** route object, same shape as above.
-Status: missing `route` → **400**; a parse failure → **422**.
+offending token. The `[SID]`/`[STAR]` slots accept either the literal keyword
+`SID`/`STAR` or a published procedure name (e.g. `DEEZZ5`); the returned `route`
+canonicalizes both to the keyword. Response `200`: a **single** route object,
+same shape as above. Status: missing `route` → **400**; a parse failure → **422**.
 
 ### Batch lookups
 

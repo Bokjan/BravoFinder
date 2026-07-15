@@ -23,7 +23,7 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
       "parse-route", "Validate and expand a filed route string (reverse of route)");
   parse
       ->add_option("route", a->route_str,
-                   "Filed route string, e.g. \"KJFK DEEZZ5 CANDR J60 PSB ... KLAX\"")
+                   "Filed route string, e.g. \"KJFK SID CANDR J60 PSB ... STAR KLAX\"")
       ->required();
   parse->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();

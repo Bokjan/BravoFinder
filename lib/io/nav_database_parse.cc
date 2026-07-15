@@ -144,9 +144,10 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   Coordinate ref =
       dep_airport.empty() ? Coordinate{} : graph.CoordOf(builder_->VertexByAirport(dep_airport));
 
-  // --- Optional leading SID and trailing STAR (named procedures). ---
-  // Recognized only adjacent to their airport and only if that airport actually
-  // publishes the named procedure; otherwise the token is treated as a fix.
+  // --- Optional leading SID and trailing STAR. ---
+  // Helper: does `icao` publish a procedure of `type` named `proc_name`? Used to
+  // accept a hand-filed procedure name adjacent to its airport (the literal
+  // "SID"/"STAR" keyword is handled separately below).
   auto airport_has_procedure = [&](const std::string& icao, const std::string& proc_name,
                                    ProcedureType type) -> bool {
     if (icao.empty()) {
@@ -164,14 +165,31 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     return false;
   };
 
+  // A procedure connector is recognized adjacent to its airport in either form:
+  // the literal keyword "SID"/"STAR" that FindRoutes emits (the name is not
+  // recoverable from the string, so it stays empty), or an actual published
+  // procedure name (accepted for hand-filed plans and preserved in route.sid/
+  // star). Anything else is treated as a fix. The rebuilt leg's `via` always
+  // carries the literal keyword, matching FindRoutes output.
   std::string sid_name;
-  if (i < end && airport_has_procedure(dep_airport, tokens[i], ProcedureType::kSid)) {
-    sid_name = tokens[i];
+  bool dep_via_sid = false;
+  if (i < end && !dep_airport.empty() &&
+      (tokens[i] == "SID" || airport_has_procedure(dep_airport, tokens[i], ProcedureType::kSid))) {
+    if (tokens[i] != "SID") {
+      sid_name = tokens[i];
+    }
+    dep_via_sid = true;
     ++i;
   }
   std::string star_name;
-  if (end > i && airport_has_procedure(arr_airport, tokens[end - 1], ProcedureType::kStar)) {
-    star_name = tokens[end - 1];
+  bool arr_via_star = false;
+  if (end > i && !arr_airport.empty() &&
+      (tokens[end - 1] == "STAR" ||
+       airport_has_procedure(arr_airport, tokens[end - 1], ProcedureType::kStar))) {
+    if (tokens[end - 1] != "STAR") {
+      star_name = tokens[end - 1];
+    }
+    arr_via_star = true;
     --end;
   }
 
@@ -269,7 +287,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     route.points.insert(route.points.begin(), RoutePoint{dep_airport, graph.CoordOf(apt)});
     route.legs.insert(route.legs.begin(), RouteLeg{dep_airport,
                                                    builder_->IdentOf(point_vertices.front()).ident,
-                                                   sid_name.empty() ? "DCT" : sid_name,
+                                                   dep_via_sid ? "SID" : "DCT",
                                                    d,
                                                    {}});
     route.total_distance_nm += d;
@@ -281,7 +299,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     route.points.push_back(RoutePoint{arr_airport, graph.CoordOf(apt)});
     route.legs.push_back(RouteLeg{builder_->IdentOf(point_vertices.back()).ident,
                                   arr_airport,
-                                  star_name.empty() ? "DCT" : star_name,
+                                  arr_via_star ? "STAR" : "DCT",
                                   d,
                                   {}});
     route.total_distance_nm += d;

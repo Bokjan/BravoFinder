@@ -31,8 +31,9 @@ directionality and high/low levels, and finds routes between two airports (or
 waypoints) with A* and Yen K-shortest. Airports connect to the enroute network
 through their real SID/STAR procedures (parsed from ARINC 424 / CIFP), falling back
 to a direct link where no procedure data exists. For example, `KJFK KLAX` resolves
-to a filed-flight-plan-style route such as `KJFK DEEZZ5 TOWIN ... PGS BASET5 KLAX`
-of ~2160 NM.
+to a filed-flight-plan-style route such as `KJFK SID TOWIN ... PGS STAR KLAX`
+of ~2160 NM (the literal `SID`/`STAR` connect the airports to the enroute network;
+the actual procedure names appear in the route's `sid`/`star` fields).
 
 A single loaded database is safe to query concurrently from multiple threads.
 
@@ -257,7 +258,7 @@ bf route KJFK KLAX --seed 42
 # Validate and expand a filed route string (the reverse of route): checks that
 # each airway connects its bracketing fixes, expands airways to their
 # intermediate points, and totals the distance. Errors name the bad token.
-bf parse-route "KJFK DEEZZ5 CANDR Q480 HOTEE J80 MCI ... KLAX" --db navdata/nav_2601.bfdb
+bf parse-route "KJFK SID CANDR Q480 HOTEE J80 MCI ... STAR KLAX" --db navdata/nav_2601.bfdb
 
 # Look up navigation data: waypoints, airports, procedures, airways, navaid
 # details, or holds. Each accepts one or more ids (a batch), and --format json
@@ -276,8 +277,10 @@ bf --version
 ```
 
 Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an
-airport has procedure data, the route and its legs name the SID and STAR used (and
-the interchangeable procedures that share the same connection fix).
+airport has procedure data, the route names the SID and STAR used in its `sid`/
+`star` fields (and the interchangeable procedures that share the same connection
+fix); in the route string and the leg list they show as the literal `SID`/`STAR`
+connectors.
 
 The `--format json` route output carries, alongside the filed route string and
 per-phase distances, an ordered `points[]` array (each `{ident, lat, lon}`) and a

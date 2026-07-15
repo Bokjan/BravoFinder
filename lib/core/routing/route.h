@@ -30,12 +30,14 @@ inline const char* ToString(ConnectionKind k) {
   return "direct";
 }
 
-// A single leg of a computed route: a segment from one point to the next via a
-// named airway (or "DCT" for a direct leg).
+// A single leg of a computed route: a segment from one point to the next. `via`
+// names the ATS airway designator, "DCT" for a direct leg, or the literal
+// connector keyword "SID"/"STAR" for the airport<->network procedure legs (the
+// procedure names themselves live in Route::sid/star, not here).
 struct RouteLeg {
   std::string from{};
   std::string to{};
-  std::string via{};  // the single filed ATS route designator, or "DCT"
+  std::string via{};  // airway designator, "DCT", or "SID"/"STAR" for procedure legs
   double distance_nm = 0.0;
 
   // When the underlying airway segment is a concurrency (two or more named

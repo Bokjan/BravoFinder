@@ -107,15 +107,17 @@ TEST_CASE("DCT legs never fold and list every fix", "[route_string]") {
 
 TEST_CASE("procedure legs stay as their own segments around the enroute airways",
           "[route_string]") {
-  // Leading SID and trailing STAR are single tokens unequal to the airway, so
-  // the intersection empties at each boundary and they stand alone.
+  // The leading SID and trailing STAR legs carry the literal connector keyword
+  // "SID"/"STAR" (the procedure name lives in Route::sid/star, not the string).
+  // Each is a single token unequal to the airway, so the intersection empties at
+  // each boundary and they stand alone.
   std::vector<bf::RouteLeg> legs{
-      Leg("KJFK", "MERIT", "DEEZZ5"),
+      Leg("KJFK", "MERIT", "SID"),
       Leg("MERIT", "IGN", "Y28"),
-      Leg("IGN", "KLAX", "CAMRN5"),
+      Leg("IGN", "KLAX", "STAR"),
   };
   const std::string rs = bf::BuildRouteString("KJFK", legs);
-  CHECK(rs == "KJFK DEEZZ5 MERIT Y28 IGN CAMRN5 KLAX");
+  CHECK(rs == "KJFK SID MERIT Y28 IGN STAR KLAX");
 }
 
 TEST_CASE("empty legs yield just the first point", "[route_string]") {

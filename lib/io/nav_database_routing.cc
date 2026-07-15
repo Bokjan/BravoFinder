@@ -125,10 +125,13 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
     route.points.push_back(RoutePoint{arr_label, graph.CoordOf(path.vertices.back())});
   }
 
-  // Leading procedure leg: airport -> first connection fix via the SID (or DCT
-  // when the airport fell back to a direct link).
+  // Leading procedure leg: airport -> first connection fix. The leg's `via`
+  // carries the literal connector keyword "SID" (or "DCT" when the airport fell
+  // back to a direct link), not the procedure name -- the name lives in
+  // route.sid, so the compact route string stays airline/ICAO style.
   if (!dep_label.empty()) {
-    route.legs.push_back(RouteLeg{dep_label, dep_fix_id, sid.empty() ? "DCT" : sid, dep_seed, {}});
+    route.legs.push_back(
+        RouteLeg{dep_label, dep_fix_id, sid.empty() ? "DCT" : "SID", dep_seed, {}});
   }
   // Enroute legs between consecutive on-network fixes.
   for (size_t i = 0; i + 1 < path.vertices.size(); ++i) {
@@ -146,10 +149,11 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
     route.legs.push_back(
         RouteLeg{builder.IdentOf(u).ident, builder.IdentOf(w).ident, via, dist, {}});
   }
-  // Trailing procedure leg: last connection fix -> airport via the STAR.
+  // Trailing procedure leg: last connection fix -> airport. `via` carries the
+  // literal "STAR" (or "DCT"); the STAR name lives in route.star.
   if (!arr_label.empty()) {
     route.legs.push_back(
-        RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : star, arr_seed, {}});
+        RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : "STAR", arr_seed, {}});
   }
 
   // Phase split, computed here from the leg positions (not re-derived at print
@@ -160,10 +164,11 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   route.enroute_distance_nm =
       route.total_distance_nm - route.dep_distance_nm - route.arr_distance_nm;
 
-  // Route string in filed-flight-plan style: DEP SID FIX <airways> FIX STAR ARR.
-  // BuildRouteString folds consecutive legs on a shared airway (listing it only
-  // at the join/leave fixes) and, as a side effect, rewrites each leg's `via` to
-  // the single chosen designator and records any concurrency in
+  // Route string in filed-flight-plan style: DEP SID FIX <airways> FIX STAR ARR,
+  // where "SID"/"STAR" are literal connector keywords (the procedure names are in
+  // route.sid/star). BuildRouteString folds consecutive legs on a shared airway
+  // (listing it only at the join/leave fixes) and, as a side effect, rewrites each
+  // leg's `via` to the single chosen designator and records any concurrency in
   // `concurrent_airways`.
   const std::string first_point = route.points.empty() ? "" : route.points.front().ident;
   route.route_string = BuildRouteString(first_point, route.legs);

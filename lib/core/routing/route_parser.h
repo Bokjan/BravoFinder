@@ -11,7 +11,7 @@ namespace bf {
 // token (airport / airway / SID/STAR / DCT / waypoint) and resolving it on the
 // graph is done by NavDatabase::ParseRoute, which has the navigation data.
 //
-// Example: "KJFK DEEZZ5 CANDR J60 PSB KLAX" -> {KJFK, DEEZZ5, CANDR, J60, PSB, KLAX}.
+// Example: "KJFK SID CANDR J60 PSB KLAX" -> {KJFK, SID, CANDR, J60, PSB, KLAX}.
 std::vector<std::string> TokenizeRoute(const std::string& route_str);
 
 }  // namespace bf

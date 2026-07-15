@@ -165,18 +165,23 @@ Each returned route element carries: `route` (ICAO filed-flight-plan string),
 (`procedure` / `radar_vectors` etc.), `points` (each `{ident, lat, lon}`, ordered
 along the route), and `legs` (each with `from` / `to` / `via` / `distance_nm` /
 `cumulative_nm`; concurrency segments add `concurrent_airways`). `points` has one
-more entry than `legs` (the destination of leg *i* is `points[i+1]`).
+more entry than `legs` (the destination of leg *i* is `points[i+1]`). In `route`
+and in `legs[].via`, the airport↔network procedure legs show the literal connector
+keyword `SID`/`STAR` (or `DCT` for a direct link); the procedure names are in the
+`sid` / `star` fields.
 
 ### `parse_route`
 
 `route` is an ICAO filed-flight-plan string
 (`[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]`). Each segment is validated:
 an airway designator must actually connect its bracketing fixes (expanded to its
-intermediate points on the graph), else an error names the offending token. A
-named SID/STAR is checked against the endpoint airport's published procedures and
-shown as a single connection leg (not expanded leg-by-leg). Returns a single
-route object with the same shape as `find_routes` (`route` / `total_distance_nm`
-/ `legs` etc.).
+intermediate points on the graph), else an error names the offending token. The
+`[SID]`/`[STAR]` slots accept either the literal keyword `SID`/`STAR` or a
+published procedure name (the latter checked against the endpoint airport's
+procedures); either way it becomes a single connection leg (not expanded
+leg-by-leg) and the returned `route` canonicalizes to the keyword. Returns a
+single route object with the same shape as `find_routes` (`route` /
+`total_distance_nm` / `legs` etc.).
 
 ### lookup tools
 

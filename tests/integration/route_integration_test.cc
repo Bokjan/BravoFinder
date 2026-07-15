@@ -436,14 +436,16 @@ TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integra
   CHECK(r.total_distance_nm < 2144.0 * 1.2);
 
   // The procedures appear as explicit first/last legs (airport <-> connection
-  // fix) labeled by the SID/STAR, and the route string reads like a filed plan.
+  // fix). Their `via` carries the literal connector keyword "SID"/"STAR" (the
+  // procedure names live in r.sid/r.star), and the route string reads like a
+  // filed plan.
   REQUIRE(r.legs.size() >= 2);
   CHECK(r.legs.front().from == "KJFK");
-  CHECK(r.legs.front().via == r.sid);
+  CHECK(r.legs.front().via == "SID");
   CHECK(r.legs.back().to == "KLAX");
-  CHECK(r.legs.back().via == r.star);
-  CHECK(r.route_string.rfind("KJFK " + r.sid + " ", 0) == 0);  // starts with "KJFK <SID> "
-  CHECK(r.route_string.find(" " + r.star + " KLAX") != std::string::npos);
+  CHECK(r.legs.back().via == "STAR");
+  CHECK(r.route_string.rfind("KJFK SID ", 0) == 0);  // starts with "KJFK SID "
+  CHECK(r.route_string.find(" STAR KLAX") != std::string::npos);
   // Leg distances should sum to the reported total (procedures included).
   double leg_sum = 0.0;
   for (const bf::RouteLeg& leg : r.legs) {

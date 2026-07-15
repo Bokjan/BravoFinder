@@ -69,7 +69,7 @@ const ToolMeta kToolMeta[] = {
      "their intermediate points, totals the distance, and returns the resolved "
      "route. Errors name the offending token when the route is invalid.",
      R"({"type":"object","properties":{)"
-     R"("route":{"type":"string","description":"Filed route string, e.g. 'KJFK DEEZZ5 CANDR J60 PSB ... KLAX'."}},)"
+     R"("route":{"type":"string","description":"Filed route string, e.g. 'KJFK SID CANDR J60 PSB ... STAR KLAX'."}},)"
      R"("required":["route"]})"},
     {"lookup_waypoints",
      "Look up waypoints / navaids by ident. An ident is reused across regions, "

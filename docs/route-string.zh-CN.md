@@ -17,11 +17,12 @@ KLAX GARDY V210 HESPE V210 APLES V442 HEC J64 GLACO J64 PGS J64 ...
 「上这条航路的点」和「下这条航路的点」：
 
 ```
-KLAX GARDY4 GARDY V210 APLES V442 HEC J64 RSK J110 ALS ...
+KLAX SID GARDY V210 APLES V442 HEC J64 RSK J110 ALS ...
 ```
 
 `V210` 从 GARDY 一路飞到 APLES，中间的 HESPE 不列。这就是 `BuildRouteString` 做的**折叠**：把
-`via` 相同的连续 leg 合并成一段，只在边界列航路名。
+`via` 相同的连续 leg 合并成一段，只在边界列航路名。开头的 `SID`（结尾的 `STAR`）是**字面量连接词**，
+不是程序名——具体的 SID/STAR 名字放在 `Route::sid`/`star` 字段里（详见 §5）。
 
 ## 2. 陷阱：不能按 `via` 字符串相等来折叠
 
@@ -90,7 +91,11 @@ if (legs[i].via == "DCT") {
 }
 ```
 
-SID/STAR 段同理作硬边界处理。这些是语义上确定的转换点，不该被并线折叠算法碰。
+机场到航路网的衔接腿（离场 SID、进场 STAR）在 `via` 里存的是**字面量关键字** `"SID"`/`"STAR"`，
+而不是程序名（`OPPAR4`、`ABEY2G` 这类名字放在 `Route::sid`/`star` 字段）——航路串因此保持
+航空/ICAO 风格：`RJTT SID JYOGA … ABBEY STAR VHHH`。这两个 token 与任何航路 designator 都不相交，
+折叠的累积交集在它们处必然清空，所以无需像 `DCT` 那样特判就天然单独成段。这样一来 `ParseRoute`
+把计算出的航路串喂回时，也靠这两个关键字（而非查程序库）复原衔接腿，round-trip 稳定。
 
 ## 6. 并线信息不丢：concurrent_airways 字段
 
