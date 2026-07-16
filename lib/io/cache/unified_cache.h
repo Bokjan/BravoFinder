@@ -74,7 +74,12 @@ class UnifiedCache {
   //     has_inbound as all-false, which silently strips STAR entry gates (fixes
   //     reachable only via a forward-only airway) off the network — so v6 is
   //     rejected and must be rebuilt rather than read with a wrong flag.
-  static constexpr uint32_t kFormatVersion = 7;
+  // v8: no layout change. The DFD loaders used to read each airway record's
+  //     direction/level/altitude off the wrong row, shifting every restriction
+  //     one leg forward (e.g. a forward-only 'F' barred the bidirectional leg
+  //     before it). v7 files built from DFD carry those wrong edge directions and
+  //     would silently reject valid routes, so v7 is retired to force a rebuild.
+  static constexpr uint32_t kFormatVersion = 8;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

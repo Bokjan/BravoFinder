@@ -158,6 +158,68 @@ TEST_CASE("dfd2: LoadProcedure loads a single airport on demand", "[integration]
 }
 
 // ---------------------------------------------------------------------------
+// Airway leg direction: a record's direction_restriction governs the OUTBOUND
+// leg leaving that fix, so segment prev->current must inherit prev's direction.
+// Regression for "airway 'G212' does not connect JMU to VYK": G212 flows
+// ...IGADO(none) JMU('F') IJ('F')... where the 'F' on JMU restricts JMU->IJ,
+// NOT the IGADO->JMU leg before it. Reading direction off the current row (the
+// old bug) turned the bidirectional IGADO<->JMU leg one-way and stranded routes
+// that fly JMU->IGADO. Verified against X-Plane earth_awy.dat, which lists the
+// same segments as JMU<->IGADO 'N' (both) and JMU->IJ 'F' (one-way).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Finds the airway segment named `name` from `from` to `to` (idents only), or
+// nullptr. AirwayConnection stores endpoints in increasing-seqno order.
+const bf::AirwayConnection* FindSegment(const bf::NavData& data, const std::string& name,
+                                        const std::string& from, const std::string& to) {
+  for (const bf::AirwayConnection& c : data.airways) {
+    if (c.segment.name == name && c.from.ident == from && c.to.ident == to) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+// Asserts G212's direction restrictions land on the correct legs. Shared by the
+// dfd1 and dfd2 cases so both loaders are held to the same contract.
+void CheckG212Directions(const bf::NavData& data) {
+  // IGADO(none) -> JMU: the leg before JMU is unrestricted (both directions).
+  const bf::AirwayConnection* igado_jmu = FindSegment(data, "G212", "IGADO", "JMU");
+  REQUIRE(igado_jmu != nullptr);
+  CHECK(igado_jmu->segment.direction == bf::AirwayDirection::kBoth);
+  // JMU('F') -> IJ: the 'F' on the JMU record restricts *this* outbound leg.
+  const bf::AirwayConnection* jmu_ij = FindSegment(data, "G212", "JMU", "IJ");
+  REQUIRE(jmu_ij != nullptr);
+  CHECK(jmu_ij->segment.direction == bf::AirwayDirection::kForward);
+}
+
+}  // namespace
+
+TEST_CASE("dfd1: airway direction restriction governs the outbound leg", "[integration][dfd]") {
+  const std::string dir = EnsureDfd1();
+  if (dir.empty()) {
+    SKIP("DFD v1 data not found");
+  }
+  bf::Dfd1Loader loader;
+  bf::Result<bf::NavData> data = loader.LoadNavData(dir);
+  REQUIRE(data);
+  CheckG212Directions(data.value());
+}
+
+TEST_CASE("dfd2: airway direction restriction governs the outbound leg", "[integration][dfd]") {
+  const std::string dir = EnsureDfd2();
+  if (dir.empty()) {
+    SKIP("DFD v2 data not found");
+  }
+  bf::Dfd2Loader loader;
+  bf::Result<bf::NavData> data = loader.LoadNavData(dir);
+  REQUIRE(data);
+  CheckG212Directions(data.value());
+}
+
+// ---------------------------------------------------------------------------
 // Cross-loader consistency: the same fix must resolve to the same coordinate
 // across dfd1, dfd2, and xplane12 (the plan's AROKE KJFK K6 verification point).
 // ---------------------------------------------------------------------------

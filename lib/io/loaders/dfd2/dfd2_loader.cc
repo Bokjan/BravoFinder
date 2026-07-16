@@ -237,27 +237,39 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   }
   sqlite3_stmt* stmt = s.value().get();
   bool have_prev = false;
-  std::string prev_route, prev_ident, prev_icao;
-  AirwaySegment seg;
+  std::string prev_route, prev_ident, prev_icao, prev_dir, prev_level;
+  int prev_min_alt = 0, prev_max_alt = 0;
   return ForEachRow(stmt, [&]() {
     const std::string route = ColumnText(stmt, 0);
     const std::string ident = ColumnText(stmt, 2);
     const std::string icao = ColumnText(stmt, 3);
     if (have_prev && route == prev_route) {
+      // Each airway record's direction/level/altitude describe the OUTBOUND leg
+      // leaving that fix (in increasing-seqno order), so the segment prev->current
+      // takes its attributes from the PREVIOUS row, not the current one. Reading
+      // them off the current row shifts every restriction one leg forward -- e.g.
+      // a 'F' meant for the JMU->IJ leg would wrongly bar the IGADO->JMU leg,
+      // breaking otherwise-valid routes (regression: "G212 does not connect JMU").
+      // (Same as dfd1.)
+      AirwaySegment seg;
       seg.name = prev_route;
-      seg.direction = ParseDirection(ColumnText(stmt, 4));
-      seg.level = ParseAirwayLevel(ColumnText(stmt, 5));
-      seg.base_fl = ColumnInt(stmt, 6) / 100;  // feet -> flight level
+      seg.direction = ParseDirection(prev_dir);
+      seg.level = ParseAirwayLevel(prev_level);
+      seg.base_fl = prev_min_alt / 100;  // feet -> flight level
       // 99999 ("no ceiling") -> 999: a very high finite band, not the
       // base_fl==0 && top_fl==0 sentinel AltitudeBandConstraint exempts. Harmless
       // since no query cruises above FL999. (Same as dfd1.)
-      seg.top_fl = ColumnInt(stmt, 7) / 100;
+      seg.top_fl = prev_max_alt / 100;
       data.airways.push_back(
           AirwayConnection{Ident(prev_ident, prev_icao), Ident(ident, icao), seg});
     }
     prev_route = route;
     prev_ident = ident;
     prev_icao = icao;
+    prev_dir = ColumnText(stmt, 4);
+    prev_level = ColumnText(stmt, 5);
+    prev_min_alt = ColumnInt(stmt, 6);
+    prev_max_alt = ColumnInt(stmt, 7);
     have_prev = true;
   });
 }
