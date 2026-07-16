@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.12.0
+        VERSION 3.12.1
         DESCRIPTION "A realistic / compliant flight route engine"
         LANGUAGES C CXX)
 

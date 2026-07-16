@@ -193,6 +193,23 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     --end;
   }
 
+  // Pure direct airport-to-airport link: "DEP DCT ARR" with no enroute fix -- the
+  // only no-fix shape we accept. The middle is exactly the "DCT" connector between
+  // the two airports; emit a single direct leg. Anything that does not both start
+  // and end at an airport still requires an enroute fix and falls through to the
+  // loop below (and fails there if it has none).
+  if (!dep_airport.empty() && !arr_airport.empty() && end - i == 1 && tokens[i] == "DCT") {
+    const int dep_v = builder_->VertexByAirport(dep_airport);
+    const int arr_v = builder_->VertexByAirport(arr_airport);
+    const double d = graph.CoordOf(dep_v).DistanceTo(graph.CoordOf(arr_v));
+    route.points.push_back(RoutePoint{dep_airport, graph.CoordOf(dep_v)});
+    route.points.push_back(RoutePoint{arr_airport, graph.CoordOf(arr_v)});
+    route.legs.push_back(RouteLeg{dep_airport, arr_airport, "DCT", d, {}});
+    route.total_distance_nm += d;
+    route.route_string = BuildRouteString(route.points.front().ident, route.legs);
+    return Result<Route>::Ok(std::move(route));
+  }
+
   // --- Middle: FIX (AWY FIX | DCT FIX)* --------------------------------------
   // Track the previous fix vertex/coord; connectors (airway names, "DCT") apply
   // to the hop from the previous fix to the next.

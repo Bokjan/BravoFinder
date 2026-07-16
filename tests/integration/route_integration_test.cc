@@ -725,4 +725,28 @@ TEST_CASE("real data: ParseRoute rejects an unknown fix", "[integration]") {
   CHECK_FALSE(r);
 }
 
+TEST_CASE("real data: ParseRoute accepts a pure direct airport pair", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // "DEP DCT ARR" with no enroute fix is a valid hand-filed direct route: one DCT
+  // leg between the two airports.
+  bf::Result<bf::Route> r = db->ParseRoute("ZHHH DCT ZGGG");
+  if (!r) {
+    SKIP("ZHHH / ZGGG not present in this AIRAC cycle");
+  }
+  CHECK(r.value().points.size() == 2);
+  REQUIRE(r.value().legs.size() == 1);
+  CHECK(r.value().legs.front().via == "DCT");
+  CHECK(r.value().route_string == "ZHHH DCT ZGGG");
+  CHECK(r.value().total_distance_nm > 0.0);
+
+  // The no-fix shape is accepted only with an explicit DCT and airports at both
+  // ends. A bare airport pair (no connector) and an airport->fix DCT both stay
+  // errors -- they are not valid filed routes.
+  CHECK_FALSE(db->ParseRoute("ZHHH ZGGG"));
+  CHECK_FALSE(db->ParseRoute("ZHHH DCT OLMIB"));
+}
+
 }  // namespace
