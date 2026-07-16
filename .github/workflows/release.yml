@@ -96,10 +96,14 @@ jobs:
           ${{ runner.os != 'Windows' && '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache' || '' }}
 
       - name: Build
-        # Explicit -j: the presets set jobs:0 (serial) by project convention;
-        # bare -j (CMake 3.21+) uses all cores. Without it Apple clang compiles
-        # Catch2 + sqlite3.c serially on macOS, turning a ~2 min build into ~20.
-        run: cmake --build --preset ${{ matrix.preset }} -j
+        # Pin macOS to an explicit, auto-detected -j. The preset's jobs:0 (and a
+        # bare -j) both resolve to a bare `-j` forwarded to the Make generator,
+        # which Make treats as UNLIMITED parallelism -- it thrashes low-core
+        # machines and makes the macOS build time unpredictable (12-36 min today).
+        # `$(sysctl -n hw.ncpu)` yields the runner's real core count, bounding
+        # macOS to its actual width with no hardcoded number. Linux/Windows keep
+        # their bare -j / jobs:0 behavior for now.
+        run: cmake --build --preset ${{ matrix.preset }} ${{ runner.os == 'macOS' && '-j $(sysctl -n hw.ncpu)' || '-j' }}
 
       - name: Test
         # Release-config tests verify the shipped binaries themselves (plan H1).

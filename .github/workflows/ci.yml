@@ -70,7 +70,11 @@ jobs:
           ${{ runner.os != 'Windows' && '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache' || '' }}
 
       - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
+        # macOS only: pin to an explicit, auto-detected -j. The preset's jobs:0
+        # resolves to a bare `-j` (UNLIMITED parallelism) on a Make generator --
+        # the footgun this bounds. The other runners keep the preset's jobs:0
+        # behavior; see release.yml for the full rationale.
+        run: cmake --build --preset ${{ matrix.preset }} ${{ runner.os == 'macOS' && '-j $(sysctl -n hw.ncpu)' || '' }}
 
       - name: Test
         run: ctest --preset ${{ matrix.preset }} --timeout 300
