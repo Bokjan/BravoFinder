@@ -96,14 +96,14 @@ jobs:
           ${{ runner.os != 'Windows' && '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache' || '' }}
 
       - name: Build
-        # Pin macOS to an explicit, auto-detected -j. The preset's jobs:0 (and a
-        # bare -j) both resolve to a bare `-j` forwarded to the Make generator,
-        # which Make treats as UNLIMITED parallelism -- it thrashes low-core
-        # machines and makes the macOS build time unpredictable (12-36 min today).
-        # `$(sysctl -n hw.ncpu)` yields the runner's real core count, bounding
-        # macOS to its actual width with no hardcoded number. Linux/Windows keep
-        # their bare -j / jobs:0 behavior for now.
-        run: cmake --build --preset ${{ matrix.preset }} ${{ runner.os == 'macOS' && '-j $(sysctl -n hw.ncpu)' || '-j' }}
+        # Auto-detect build parallelism per runner instead of relying on the
+        # preset's jobs:0 / a bare -j, both of which resolve to a bare `-j` that
+        # Make treats as UNLIMITED parallelism (thrashes low-core machines, makes
+        # macOS build time erratic). `nproc` covers Linux/Windows; macOS falls back
+        # to `sysctl -n hw.ncpu`; the final `echo 4` is a safe default matching the
+        # 4 vCPU runners. Run under bash so the same expression works on all OSes.
+        shell: bash
+        run: cmake --build --preset ${{ matrix.preset }} -j $(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
       - name: Test
         # Release-config tests verify the shipped binaries themselves (plan H1).
