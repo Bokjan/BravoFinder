@@ -749,4 +749,25 @@ TEST_CASE("real data: ParseRoute accepts a pure direct airport pair", "[integrat
   CHECK_FALSE(db->ParseRoute("ZHHH DCT OLMIB"));
 }
 
+TEST_CASE("real data: ParseRoute rejects a no-fix shape that also names a procedure",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  if (!db->ParseRoute("ZHHH DCT ZGGG")) {
+    SKIP("ZHHH / ZGGG not present in this AIRAC cycle");
+  }
+  // A no-fix shape paired with a procedure connector ("DEP SID DCT ARR",
+  // "DEP DCT STAR ARR", "DEP SID DCT STAR ARR") is not a valid filed route: a
+  // SID/STAR leg always bridges the airport to a transition fix, never to the
+  // far airport directly. The "DEP DCT ARR" shortcut must not fire once a
+  // SID/STAR has been recognized -- otherwise it would emit a bare "DCT" leg and
+  // leave route.sid/star empty, silently dropping the procedure. These must be
+  // rejected, not parsed with the procedure dropped.
+  CHECK_FALSE(db->ParseRoute("ZHHH SID DCT ZGGG"));
+  CHECK_FALSE(db->ParseRoute("ZHHH DCT STAR ZGGG"));
+  CHECK_FALSE(db->ParseRoute("ZHHH SID DCT STAR ZGGG"));
+}
+
 }  // namespace

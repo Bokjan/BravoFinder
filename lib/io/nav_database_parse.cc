@@ -198,7 +198,17 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // the two airports; emit a single direct leg. Anything that does not both start
   // and end at an airport still requires an enroute fix and falls through to the
   // loop below (and fails there if it has none).
-  if (!dep_airport.empty() && !arr_airport.empty() && end - i == 1 && tokens[i] == "DCT") {
+  //
+  // The SID/STAR recognition above may have consumed a leading "SID" / trailing
+  // "STAR" before reaching here. A no-fix shape that also names a procedure (e.g.
+  // "DEP SID DCT ARR") is not a valid filed route -- a SID/STAR leg always pairs
+  // the airport with a transition fix, never with the far airport directly -- so
+  // it must NOT take this shortcut: the shortcut emits a bare "DCT" leg and leaves
+  // route.sid/star empty, silently dropping the procedure that was just parsed.
+  // Guard against that by requiring no procedure connector was recognized; such
+  // shapes then fall through and fail cleanly in the enroute loop.
+  if (!dep_airport.empty() && !arr_airport.empty() && end - i == 1 && tokens[i] == "DCT" &&
+      !dep_via_sid && !arr_via_star) {
     const int dep_v = builder_->VertexByAirport(dep_airport);
     const int arr_v = builder_->VertexByAirport(arr_airport);
     const double d = graph.CoordOf(dep_v).DistanceTo(graph.CoordOf(arr_v));
