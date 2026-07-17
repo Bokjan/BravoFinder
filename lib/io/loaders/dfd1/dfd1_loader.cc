@@ -198,24 +198,34 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   // seqno) form segments. 0=route_identifier 1=seqno 2=waypoint_identifier
   // 3=icao_code 4=direction_restriction 5=flightlevel 6=minimum_altitude1
   // 7=maximum_altitude 8=outbound_course 9=inbound_course
+  // 10=waypoint_description_code
   Result<SqliteStmt> s =
       Prepare(conn,
               "SELECT route_identifier, seqno, waypoint_identifier, icao_code, "
               "direction_restriction, flightlevel, minimum_altitude1, maximum_altitude, "
-              "outbound_course, inbound_course FROM tbl_enroute_airways "
-              "ORDER BY route_identifier, seqno");
+              "outbound_course, inbound_course, waypoint_description_code "
+              "FROM tbl_enroute_airways ORDER BY route_identifier, seqno");
   if (!s) {
     return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
   bool have_prev = false;
+  // route_identifier is NOT unique per physical airway: a single identifier (e.g.
+  // "V105") can carry several geographically disjoint airway strings that share
+  // the name, distinguished only by icao_code (US K2 / China ZB-ZH / India VA).
+  // ARINC 424 waypoint_description_code column 2 == 'E' ("End of Airway") flags the
+  // LAST fix of each string, so we must break the prev->current chain there --
+  // otherwise the last US fix would be joined to the first China fix, forging a
+  // ~5400 nm cross-ocean phantom leg. icao_code changes cannot be used (a real
+  // airway crosses regions); the description code is the authoritative boundary.
+  bool prev_is_awy_end = false;
   std::string prev_route, prev_ident, prev_icao, prev_dir, prev_level;
   int prev_min_alt = 0, prev_max_alt = 0;
   return ForEachRow(stmt, [&]() {
     const std::string route = ColumnText(stmt, 0);
     const std::string ident = ColumnText(stmt, 2);
     const std::string icao = ColumnText(stmt, 3);
-    if (have_prev && route == prev_route) {
+    if (have_prev && route == prev_route && !prev_is_awy_end) {
       // Each airway record's direction/level/altitude describe the OUTBOUND leg
       // leaving that fix (in increasing-seqno order), so the segment prev->current
       // takes its attributes from the PREVIOUS row, not the current one. Reading
@@ -243,6 +253,10 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     prev_level = ColumnText(stmt, 5);
     prev_min_alt = ColumnInt(stmt, 6);
     prev_max_alt = ColumnInt(stmt, 7);
+    // Column 2 ('E') of the waypoint description code marks End of Airway; the next
+    // same-route row then starts a fresh string and must not be chained to this fix.
+    const std::string desc = ColumnText(stmt, 10);
+    prev_is_awy_end = desc.size() > 1 && desc[1] == 'E';
     have_prev = true;
   });
 }

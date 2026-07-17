@@ -79,7 +79,14 @@ class UnifiedCache {
   //     one leg forward (e.g. a forward-only 'F' barred the bidirectional leg
   //     before it). v7 files built from DFD carry those wrong edge directions and
   //     would silently reject valid routes, so v7 is retired to force a rebuild.
-  static constexpr uint32_t kFormatVersion = 8;
+  // v9: no layout change. The DFD loaders used to chain every same-route_identifier
+  //     fix sequence into one airway, but that identifier is not unique per
+  //     physical airway (e.g. "V105" spans disjoint US/China/India strings). v8
+  //     files built from DFD carry thousands of cross-string phantom legs (e.g. a
+  //     ~5400 nm FMG->PADNO edge) that let routes teleport across oceans, so v8 is
+  //     retired to force a rebuild once the loaders break the chain at the ARINC
+  //     424 End-of-Airway marker (waypoint_description_code column 2 == 'E').
+  static constexpr uint32_t kFormatVersion = 9;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

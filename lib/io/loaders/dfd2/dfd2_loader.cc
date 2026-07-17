@@ -229,7 +229,7 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
       std::string(
           "SELECT route_identifier, seqno, waypoint_identifier, icao_code, "
           "direction_restriction, flightlevel, minimum_altitude1, maximum_altitude, "
-          "outbound_course, inbound_course FROM ") +
+          "outbound_course, inbound_course, waypoint_description_code FROM ") +
       std::string(kTblAirways) + " ORDER BY route_identifier, seqno";
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
@@ -237,13 +237,18 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   }
   sqlite3_stmt* stmt = s.value().get();
   bool have_prev = false;
+  // route_identifier is NOT unique per physical airway; description-code column 2
+  // == 'E' ("End of Airway") flags the last fix of each same-name string, so the
+  // prev->current chain must break there or disjoint strings get a phantom leg.
+  // (Same as dfd1; see the dfd1 LoadAirways comment for the full rationale.)
+  bool prev_is_awy_end = false;
   std::string prev_route, prev_ident, prev_icao, prev_dir, prev_level;
   int prev_min_alt = 0, prev_max_alt = 0;
   return ForEachRow(stmt, [&]() {
     const std::string route = ColumnText(stmt, 0);
     const std::string ident = ColumnText(stmt, 2);
     const std::string icao = ColumnText(stmt, 3);
-    if (have_prev && route == prev_route) {
+    if (have_prev && route == prev_route && !prev_is_awy_end) {
       // Each airway record's direction/level/altitude describe the OUTBOUND leg
       // leaving that fix (in increasing-seqno order), so the segment prev->current
       // takes its attributes from the PREVIOUS row, not the current one. Reading
@@ -270,6 +275,9 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     prev_level = ColumnText(stmt, 5);
     prev_min_alt = ColumnInt(stmt, 6);
     prev_max_alt = ColumnInt(stmt, 7);
+    // Column 2 ('E') of the waypoint description code marks End of Airway.
+    const std::string desc = ColumnText(stmt, 10);
+    prev_is_awy_end = desc.size() > 1 && desc[1] == 'E';
     have_prev = true;
   });
 }

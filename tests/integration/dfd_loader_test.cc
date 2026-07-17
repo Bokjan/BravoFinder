@@ -195,6 +195,22 @@ void CheckG212Directions(const bf::NavData& data) {
   CHECK(jmu_ij->segment.direction == bf::AirwayDirection::kForward);
 }
 
+// route_identifier is not unique per physical airway: "V105" carries three
+// disjoint strings sharing the name -- US (K2, ...->CHIME->FMG), China
+// (ZB/ZH, PADNO->IGPIL->...->CGO) and India (VA). The loaders must break the
+// prev->current chain at the ARINC 424 End-of-Airway marker
+// (waypoint_description_code column 2 == 'E') so the US string's last fix (FMG)
+// is not joined to the China string's first fix (PADNO). Shared by dfd1/dfd2.
+void CheckV105NoPhantom(const bf::NavData& data) {
+  // The cross-ocean phantom leg (FMG@K2 -> PADNO@ZB, ~5400 nm) must be gone.
+  CHECK(FindSegment(data, "V105", "FMG", "PADNO") == nullptr);
+  // But the real strings on either side of the boundary must survive (i.e. we
+  // broke the chain, not over-cut it): the China string's PADNO->IGPIL leg and
+  // the US string's CHIME->FMG leg both remain.
+  CHECK(FindSegment(data, "V105", "PADNO", "IGPIL") != nullptr);
+  CHECK(FindSegment(data, "V105", "CHIME", "FMG") != nullptr);
+}
+
 }  // namespace
 
 TEST_CASE("dfd1: airway direction restriction governs the outbound leg", "[integration][dfd]") {
@@ -217,6 +233,30 @@ TEST_CASE("dfd2: airway direction restriction governs the outbound leg", "[integ
   bf::Result<bf::NavData> data = loader.LoadNavData(dir);
   REQUIRE(data);
   CheckG212Directions(data.value());
+}
+
+TEST_CASE("dfd1: airway chain breaks at End-of-Airway (no cross-instance phantom leg)",
+          "[integration][dfd]") {
+  const std::string dir = EnsureDfd1();
+  if (dir.empty()) {
+    SKIP("DFD v1 data not found");
+  }
+  bf::Dfd1Loader loader;
+  bf::Result<bf::NavData> data = loader.LoadNavData(dir);
+  REQUIRE(data);
+  CheckV105NoPhantom(data.value());
+}
+
+TEST_CASE("dfd2: airway chain breaks at End-of-Airway (no cross-instance phantom leg)",
+          "[integration][dfd]") {
+  const std::string dir = EnsureDfd2();
+  if (dir.empty()) {
+    SKIP("DFD v2 data not found");
+  }
+  bf::Dfd2Loader loader;
+  bf::Result<bf::NavData> data = loader.LoadNavData(dir);
+  REQUIRE(data);
+  CheckV105NoPhantom(data.value());
 }
 
 // ---------------------------------------------------------------------------
