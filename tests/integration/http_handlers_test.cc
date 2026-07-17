@@ -1,8 +1,8 @@
 // http_handlers_test.cc — the "router mapping layer": each shared bf::service
 // handler, given parsed args + a real NavDatabase, returns the right
 // HTTP-style status. This is the fast, socket-free coverage of the 200 / 400 /
-// 404 / 422 contract the HTTP transport relies on (design section 四). Uses real
-// navigation data; SKIPs when it is absent.
+// 404 / 422 contract the HTTP transport relies on (see docs/http-service). Uses
+// real navigation data; SKIPs when it is absent.
 
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>

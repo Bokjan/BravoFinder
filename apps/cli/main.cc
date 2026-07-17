@@ -9,9 +9,6 @@ int main(int argc, char** argv) {
   app.require_subcommand(1);
   app.set_version_flag("--version", bf::kBravoFinderVersion);
 
-  // Each subcommand registers its options and a callback; CLI11 invokes the
-  // callback of the selected subcommand during parse. The callbacks write the
-  // process exit code here.
   int exit_code = EXIT_SUCCESS;
   bf::cli::RegisterBuild(app, exit_code);
   bf::cli::RegisterRoute(app, exit_code);

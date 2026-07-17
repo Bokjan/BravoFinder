@@ -8,8 +8,7 @@ namespace bf {
 
 // Small pure metrics derived from a computed Route, kept out of the plain-data
 // route.h so the domain type stays a POD. Header-only: callers that already
-// have RouteLeg link nothing extra. (When JSON/MCP need the same report values
-// these can move under a core/report/ home; see the report plan -- YAGNI now.)
+// have RouteLeg link nothing extra.
 
 // Running cumulative distance after each leg: element i is the sum of
 // distance_nm for legs 0..i, so the last element equals the route total. The

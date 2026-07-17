@@ -277,10 +277,11 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
 
     // Spur nodes are every node of the previous path except the goal, plus a
     // conceptual super-source at index -1 whose "edge" to the first node selects
-    // the starting connection fix. Banning that first-node choice forces the
-    // search onto a different SID/STAR entry, which is how candidates that use a
-    // different source fix arise. Lawler: start at the previous path's deviation
-    // index rather than always at -1.
+    // the starting connection fix. This super-source spur is the extension over
+    // standard (single-source, single-goal) Yen: banning the first-node choice
+    // forces the search onto a different SID/STAR entry, which is how candidates
+    // that use a different source fix arise. Lawler: start at the previous path's
+    // deviation index rather than always at -1.
     for (int i = last_deviation; i + 1 < static_cast<int>(prev_path.size()); ++i) {
       if (i < 0) {
         // Source-level spur: re-run the multi-source search with every starting

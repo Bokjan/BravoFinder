@@ -300,6 +300,8 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
     h.airport_icao = ColumnText(stmt, 0);                     // region_code = airport/ENRT
     h.inbound_course = ColumnDouble(stmt, 3);
     const std::string turn = ColumnText(stmt, 4);
+    // Hold turn direction defaults to right ('R') when absent/unknown, matching
+    // the X-Plane earth_hold parse. (Leg turn_dir elsewhere uses '\0' for none.)
     h.turn_dir = (turn == "L") ? 'L' : 'R';
     h.leg_dist_nm = ColumnDouble(stmt, 5);
     h.leg_time_min = ColumnDouble(stmt, 6);

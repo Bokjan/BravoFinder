@@ -1,7 +1,7 @@
 #pragma once
 
 // Internal little-endian byte serialization helpers shared by the cache
-// writers/readers (graph_cache, cifp_cache). Not a public API.
+// section codecs (graph_codec, cifp_codec, nav_detail_codec). Not a public API.
 //
 // Integers are emitted least-significant-byte first, so output is identical
 // regardless of host endianness. Floats are written via their IEEE-754 bit

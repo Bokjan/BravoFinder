@@ -137,8 +137,8 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   std::remove(path.c_str());
 }
 
-// The has_inbound / has_outbound per-vertex flags (the v7 cache layout: flags
-// byte bit0 = has_outbound, bit1 = has_inbound) must survive a round-trip, and
+// The has_inbound / has_outbound per-vertex flags (flags byte bit0 =
+// has_outbound, bit1 = has_inbound) must survive a round-trip, and
 // specifically an inbound-only vertex (has_inbound && !has_outbound -- a STAR
 // entry gate reached only via a forward-only airway) must not be collapsed to
 // off-network. This is a data-independent invariant: MakeGraph's vertex 1 is

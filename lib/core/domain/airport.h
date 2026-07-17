@@ -6,9 +6,9 @@
 
 namespace bf {
 
-// An airport, identified by ICAO code with its reference position. In M1 the
-// airport connects to the route network via a direct (DCT) leg to the nearest
-// waypoints; procedure-based connection (SID/STAR) arrives in a later milestone.
+// An airport, identified by ICAO code with its reference position. The airport
+// joins the route network either via a direct (DCT) leg to nearby waypoints or
+// via a SID/STAR procedure connection.
 struct Airport {
   std::string icao;    // e.g. "KJFK"
   std::string region;  // two-letter ICAO region code, e.g. "K6"

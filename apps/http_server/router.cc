@@ -16,8 +16,8 @@ namespace bf::http {
 
 namespace {
 
-// The HTTP path each shared handler is exposed under (design section 二). Keyed
-// by the stable bf::service handler name.
+// The HTTP path each shared handler is exposed under (see docs/http-service).
+// Keyed by the stable bf::service handler name.
 struct Route {
   const char* name;
   const char* path;

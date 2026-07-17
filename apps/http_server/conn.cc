@@ -163,6 +163,10 @@ void Connection::StartClose() {
   }
   closing_ = true;
   uv_timer_stop(&timer_);
+  // Each of the two handles (timer, tcp) must drop open_handles_ exactly once.
+  // When a handle is already closing (shut down by an earlier EOF/error path),
+  // uv_close cannot be called again and OnHandleClosed would never fire, so the
+  // count is decremented here directly instead.
   if (!uv_is_closing(reinterpret_cast<uv_handle_t*>(&timer_))) {
     uv_close(reinterpret_cast<uv_handle_t*>(&timer_), OnHandleClosed);
   } else {

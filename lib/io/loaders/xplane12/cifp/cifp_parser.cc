@@ -247,6 +247,8 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
       current.name = name;
       current.transition_ident = trans;
       current.route_type = route_type;
+      // A runway transition's identifier is the runway name prefixed with "RW"
+      // (e.g. "RW04L"); record it as the procedure's runway filter key.
       if (trans.rfind("RW", 0) == 0) {
         current.runway = trans;
       }

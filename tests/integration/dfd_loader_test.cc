@@ -48,7 +48,7 @@ TEST_CASE("dfd1: registry resolves and names itself", "[integration][dfd]") {
 TEST_CASE("dfd1: LoadNavData parses the enroute dataset", "[integration][dfd]") {
   const std::string dir = EnsureDfd1();
   if (dir.empty()) {
-    SKIP("DFD v1 data not found (set up navdata_dfd1/ with a .s3db)");
+    SKIP("DFD v1 data not found (set up navdata/dfd1/ with a .s3db)");
   }
   bf::Dfd1Loader loader;
   bf::Result<bf::NavData> data = loader.LoadNavData(dir);
@@ -121,7 +121,7 @@ TEST_CASE("dfd2: registry resolves and names itself", "[integration][dfd]") {
 TEST_CASE("dfd2: LoadNavData parses the enroute dataset", "[integration][dfd]") {
   const std::string dir = EnsureDfd2();
   if (dir.empty()) {
-    SKIP("DFD v2 data not found (set up navdata_dfd2/ with a .s3db)");
+    SKIP("DFD v2 data not found (set up navdata/dfd2/ with a .s3db)");
   }
   bf::Dfd2Loader loader;
   bf::Result<bf::NavData> data = loader.LoadNavData(dir);

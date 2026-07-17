@@ -85,12 +85,9 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
       return it->second;
     }
     const int id = static_cast<int>(airway_names_.size());
-    // airway_id is a uint16 in GraphEdge; guard against overflow. Real AIRAC
-    // data has ~12k distinct airway names, far under the limit, so this is a
-    // fuse rather than an expected condition. On overflow we flag it (checked
-    // by NavDatabase::Open, which returns an error) rather than silently
-    // mapping the airway to "DCT" -- a silent DCT fallback would route over it
-    // as a synthetic direct edge and produce wrong routes with no signal.
+    // Overflow guard for the uint16 airway_id space (see airway_overflow()); real
+    // data (~12k names) never hits this. Return a -1 sentinel so the caller drops
+    // the edge rather than silently remapping it to a synthetic DCT.
     if (id > 0xFFFF) {
       airway_overflow_ = true;
       return -1;  // sentinel: caller skips the edge rather than emitting a wrong DCT

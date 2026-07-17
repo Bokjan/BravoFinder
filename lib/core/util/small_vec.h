@@ -10,15 +10,6 @@
 
 namespace bf {
 
-// Formerly the inline capacity for GraphBuilder's `ident -> regions` map, sized
-// from the AIRAC 2601 distribution (98.88% of idents span <= 4 regions). That
-// map was replaced by a sorted vector + binary search (see
-// .notes/plans/2026-07-09_memory_compaction.md #3), so this constant currently
-// has no production user; kept as documented guidance for any future
-// SmallVec-backed map-of-vector. Do NOT reuse the value without measuring the
-// new site's own distribution -- N is per-site, not a global default.
-inline constexpr int kIdentRegionInline = 4;
-
 // A tiny vector that stores up to N elements inline and only allocates on the
 // heap when it grows past N. A general-purpose utility (currently exercised only
 // by its own unit test after the GraphBuilder ident-map migration); use it to

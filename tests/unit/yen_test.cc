@@ -228,7 +228,9 @@ TEST_CASE("Yen golden candidate sequence on a lattice (Lawler regression guard)"
 
   // Golden signature captured from the current (pre-Lawler) implementation. The
   // Lawler change must reproduce this exactly (it only skips redundant spur
-  // computations; the accepted set and order are unchanged).
+  // computations; the accepted set and order are unchanged). The vertex ids are
+  // positional in MakeLatticeData, so renumbering its construction rewrites the
+  // whole signature.
   static const std::string kGolden =
       "cost=180121616 [1,4,7,10,]\n"
       "cost=182499088 [1,3,6,10,]\n"
@@ -266,6 +268,8 @@ TEST_CASE("multi-source Yen golden sequence on a lattice (Lawler regression guar
     CHECK(seen.insert(paths[i].vertices).second);
   }
 
+  // Golden signature (positional vertex ids; regenerate if MakeLatticeData
+  // changes its numbering).
   static const std::string kGolden =
       "cost=188120517 [0,3,6,9,]\n"
       "cost=188121616 [1,4,7,10,]\n"

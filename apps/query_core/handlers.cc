@@ -25,11 +25,8 @@
 
 namespace bf::service {
 
-// Build an error JSON payload `{"error":"<message>"}` using RapidJSON's Writer
-// so the message is auto-escaped. Error messages may carry user-controlled
-// strings (an unknown departure airport, a bad route token, an unknown tool
-// name), and a hand-rolled `R"({"error":")" + msg + R"("})"` concatenation
-// would let a quote/backslash in the message break the JSON frame.
+// Build `{"error":"<message>"}` via RapidJSON's Writer so the message is
+// auto-escaped; hand-rolling it is unsafe (see JsonError in the header).
 std::string JsonError(const std::string& message) {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -42,11 +39,8 @@ std::string JsonError(const std::string& message) {
 
 namespace {
 
-// HTTP-style status codes the handlers report. 400: the request was malformed
-// (missing/invalid arguments). 404: nothing matched (all ids missing, no such
-// procedure). 422: the request was well-formed but could not be satisfied (no
-// route, a bad route token) -- distinct from 400 so callers can tell "you sent
-// it wrong" from "you sent it right but there is no answer".
+// HTTP-style status codes the handlers report (see HandlerResult in the header
+// for the 400/404/422 semantics).
 constexpr int kOk = 200;
 constexpr int kBadRequest = 400;
 constexpr int kNotFound = 404;
@@ -239,10 +233,8 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   }
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  // 6 dp: the route object carries point coordinates (lat/lon), which 2 dp
-  // would truncate to ~1.1 km -- defeating the coordinates added for callers.
-  // 6 dp (~0.1 m) matches the lookup handlers; the distance fields simply gain
-  // a few harmless extra digits.
+  // 6 dp so the point coordinates (lat/lon) are not truncated to ~1.1 km; the
+  // distance fields just gain a few harmless extra digits.
   writer.SetMaxDecimalPlaces(6);
   writer.StartArray();
   for (const bf::Route& route : result.value()) {

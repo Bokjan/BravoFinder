@@ -272,8 +272,9 @@ int ResolveForcedPoint(const GraphBuilder& builder, const std::string& token,
     return v;
   }
   // Bare ident: choose the non-airport match minimizing the added detour
-  // d(from,v) + d(v,to) - d(from,to). Ties break on the lowest vertex index for
-  // determinism.
+  // d(from,v) + d(v,to). The constant d(from,to) is omitted since it is the
+  // same for every candidate and does not change the argmin. Ties break on the
+  // lowest vertex index for determinism.
   int best = -1;
   double best_detour = 0.0;
   bool saw_airport = false;
@@ -403,12 +404,9 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
     bool operator>(const HeapItem& o) const { return cost > o.cost; }
   };
   std::priority_queue<HeapItem, std::vector<HeapItem>, std::greater<>> heap;
-  // Dedup queued picks by a 64-bit FNV-1a hash of the pick vector rather than
-  // storing the vectors themselves (a std::set<vector<int>> copied every pick).
-  // The heap owns the only real copies. A hash collision would drop one combo
-  // from the merge; with 64-bit hashes over the few thousand picks this cold
-  // path (forced-points / via routing) ever enqueues, that is astronomically
-  // unlikely, and even then stitch() fully validates every emitted path, so the
+  // Dedup queued picks by a 64-bit FNV-1a hash of the pick vector, rather than
+  // copying every pick into a std::set<vector<int>>. A collision would drop one
+  // combo from the merge, but stitch() validates every emitted path, so the
   // worst case is a missed alternative, never a wrong route.
   auto hash_pick = [](const std::vector<int>& pick) -> uint64_t {
     uint64_t h = 1469598103934665603ULL;  // FNV-1a offset basis

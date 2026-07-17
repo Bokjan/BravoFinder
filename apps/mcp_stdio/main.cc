@@ -19,7 +19,7 @@ namespace {
 
 // Resolve the directory of `.bfdb` caches: --db-dir wins, else the
 // BRAVOFINDER_NAVDATA environment variable, else "navdata". A single-cycle
-// deployment is just a directory holding one nav_<cycle>_<build>.bfdb.
+// deployment is just a directory holding one nav_<cycle>.bfdb.
 std::string ResolveDir(int argc, char** argv) {
   const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA");
   std::string dir = env ? env : "navdata";
@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   if (inventory.value().empty()) {
-    std::cerr << "error: no nav_<cycle>_<build>.bfdb caches found in '" << dir
+    std::cerr << "error: no nav_<cycle>.bfdb caches found in '" << dir
               << "' (build one with `bf build`, or set --db-dir / BRAVOFINDER_NAVDATA)\n";
     return EXIT_FAILURE;
   }

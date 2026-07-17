@@ -1,7 +1,8 @@
 // http_server_test.cc — end-to-end coverage of the bf-http transport: a real
 // libuv server on a loopback port, driven over an actual socket, exercising the
 // hardening paths llhttp does not handle. This is where the "does the whole
-// thing behave" checks live (design section 九): success shapes, the 400/404/422
+// thing behave" checks live (see docs/http-service): success shapes, the
+// 400/404/422
 // status mapping, an oversized body (413), chunked rejection, keep-alive with
 // several requests on one connection, and a client that disconnects while the
 // route computation is still running (the liveness guard must not crash).

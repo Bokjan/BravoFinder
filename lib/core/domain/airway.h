@@ -15,7 +15,8 @@ enum class AirwayDirection {
 
 // Whether a segment belongs to the low (Victor) or high (Jet) airway structure,
 // or both. X-Plane `earth_awy.dat` uses integer 1/2; DFD `flightlevel` uses
-// 'L'/'H'/'B' (实测 'B'≈1/3, must be honored -- see DFD loader plan).
+// 'L'/'H'/'B' ('B' occurs for roughly 1/3 of segments and must be honored -- see the DFD loader
+// plan).
 //
 // The underlying type is uint8_t so the value fits in a single byte on a
 // GraphEdge. The integer values are part of the cache format: the edge 'level'
