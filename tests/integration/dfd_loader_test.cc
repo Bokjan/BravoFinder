@@ -5,6 +5,7 @@
 // (CLAUDE.md: real data, no mocks).
 
 #include <algorithm>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <filesystem>
@@ -211,6 +212,24 @@ void CheckV105NoPhantom(const bf::NavData& data) {
   CHECK(FindSegment(data, "V105", "CHIME", "FMG") != nullptr);
 }
 
+// Terminal waypoints must be keyed by icao_code (the 2-char ICAO region), not
+// region_code (the airport the fix belongs to, e.g. "01OH"). Shared by dfd1/dfd2.
+void CheckTerminalWaypointRegion(const bf::NavData& data) {
+  // WADON is a terminal fix at airport 01OH in ICAO region K5; it must carry K5,
+  // not the (4-char, overflowing) airport id "01OH" or its truncation "01O".
+  auto it = std::find_if(data.waypoints.begin(), data.waypoints.end(),
+                         [](const bf::Waypoint& w) { return w.ident.ident == "WADON"; });
+  REQUIRE(it != data.waypoints.end());
+  CHECK(it->ident.region == "K5");
+  CHECK(it->coord.latitude == Catch::Approx(39.4956).margin(0.01));
+  CHECK(it->coord.longitude == Catch::Approx(-84.3001).margin(0.01));
+  // Invariant guarding the whole overflow class: every waypoint region is a valid
+  // 2-char ICAO region, never an airport id. A region_code leak trips this at once.
+  for (const bf::Waypoint& w : data.waypoints) {
+    CHECK(w.ident.region.size() <= 2);
+  }
+}
+
 }  // namespace
 
 TEST_CASE("dfd1: airway direction restriction governs the outbound leg", "[integration][dfd]") {
@@ -257,6 +276,30 @@ TEST_CASE("dfd2: airway chain breaks at End-of-Airway (no cross-instance phantom
   bf::Result<bf::NavData> data = loader.LoadNavData(dir);
   REQUIRE(data);
   CheckV105NoPhantom(data.value());
+}
+
+TEST_CASE("dfd1: terminal waypoints are keyed by ICAO region, not the airport region_code",
+          "[integration][dfd]") {
+  const std::string dir = EnsureDfd1();
+  if (dir.empty()) {
+    SKIP("DFD v1 data not found");
+  }
+  bf::Dfd1Loader loader;
+  bf::Result<bf::NavData> data = loader.LoadNavData(dir);
+  REQUIRE(data);
+  CheckTerminalWaypointRegion(data.value());
+}
+
+TEST_CASE("dfd2: terminal waypoints are keyed by ICAO region, not the airport region_code",
+          "[integration][dfd]") {
+  const std::string dir = EnsureDfd2();
+  if (dir.empty()) {
+    SKIP("DFD v2 data not found");
+  }
+  bf::Dfd2Loader loader;
+  bf::Result<bf::NavData> data = loader.LoadNavData(dir);
+  REQUIRE(data);
+  CheckTerminalWaypointRegion(data.value());
 }
 
 // ---------------------------------------------------------------------------

@@ -149,8 +149,12 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_s
 }
 
 Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
+  // Use icao_code (2-char ICAO region), NOT region_code (the airport the fix
+  // belongs to, e.g. "01OH"): region_code is not a region, mismatches how
+  // airways/procedures reference the fix, and overflows FixedIdent::kRegionCap.
+  // (Same as dfd1; see the dfd1 LoadTerminalWaypoints comment.)
   const std::string sql = std::string(
-                              "SELECT region_code, waypoint_identifier, "
+                              "SELECT icao_code, waypoint_identifier, "
                               "waypoint_latitude, waypoint_longitude FROM ") +
                           std::string(kTblTerminalWp);
   Result<SqliteStmt> s = Prepare(conn, sql);
@@ -747,10 +751,6 @@ Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
   if (!load) {
     return Result<NavData>::Err(load.error());
   }
-  load = LoadTerminalWaypoints(conn.value(), data, seen);
-  if (!load) {
-    return Result<NavData>::Err(load.error());
-  }
   load = LoadVhfNavaids(conn.value(), data, seen);
   if (!load) {
     return Result<NavData>::Err(load.error());
@@ -760,6 +760,12 @@ Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
     return Result<NavData>::Err(load.error());
   }
   load = LoadNdbNavaids(conn.value(), data, kTblTerminalNdb, seen);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  // Terminal waypoints load LAST so canonical enroute/navaid entries win the
+  // first-wins `seen` dedup once terminal fixes are keyed by icao_code. (Same as dfd1.)
+  load = LoadTerminalWaypoints(conn.value(), data, seen);
   if (!load) {
     return Result<NavData>::Err(load.error());
   }

@@ -86,7 +86,12 @@ class UnifiedCache {
   //     ~5400 nm FMG->PADNO edge) that let routes teleport across oceans, so v8 is
   //     retired to force a rebuild once the loaders break the chain at the ARINC
   //     424 End-of-Airway marker (waypoint_description_code column 2 == 'E').
-  static constexpr uint32_t kFormatVersion = 9;
+  // v10: no layout change. The DFD loaders keyed terminal waypoints by region_code
+  //      (the airport the fix belongs to, e.g. "01OH") instead of icao_code (the
+  //      2-char ICAO region). v9 DFD files store those fixes under a wrong,
+  //      truncated region -- unreachable by airways/procedures and wrong in
+  //      lookups -- so v9 is retired to force a rebuild once the key is corrected.
+  static constexpr uint32_t kFormatVersion = 10;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

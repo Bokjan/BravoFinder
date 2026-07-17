@@ -121,10 +121,14 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_s
 }
 
 Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
-  // 0=region_code 1=waypoint_identifier 2=lat 3=lon
+  // 0=icao_code 1=waypoint_identifier 2=lat 3=lon
+  // Use icao_code (the 2-char ICAO region), NOT region_code -- region_code is the
+  // airport/heliport the terminal fix belongs to (e.g. "01OH", 4 chars), which is
+  // not a region: keying by it mismatches how airways/procedures reference the fix
+  // (by icao_code) and overflows FixedIdent::kRegionCap. Matches LoadEnrouteWaypoints.
   Result<SqliteStmt> s =
       Prepare(conn,
-              "SELECT region_code, waypoint_identifier, waypoint_latitude, waypoint_longitude "
+              "SELECT icao_code, waypoint_identifier, waypoint_latitude, waypoint_longitude "
               "FROM tbl_terminal_waypoints");
   if (!s) {
     return Result<void>::Err(s.error());
@@ -415,10 +419,6 @@ Result<NavData> Dfd1Loader::LoadNavData(const std::string& source_dir) const {
   if (!load) {
     return Result<NavData>::Err(load.error());
   }
-  load = LoadTerminalWaypoints(conn.value(), data, seen);
-  if (!load) {
-    return Result<NavData>::Err(load.error());
-  }
   load = LoadVhfNavaids(conn.value(), data, seen);
   if (!load) {
     return Result<NavData>::Err(load.error());
@@ -428,6 +428,13 @@ Result<NavData> Dfd1Loader::LoadNavData(const std::string& source_dir) const {
     return Result<NavData>::Err(load.error());
   }
   load = LoadNdbNavaids(conn.value(), data, "tbl_terminal_ndbnavaids", seen);
+  if (!load) {
+    return Result<NavData>::Err(load.error());
+  }
+  // Terminal waypoints load LAST: keyed by icao_code they can now share an
+  // (ident, region) with an enroute fix or navaid, and the shared `seen` set is
+  // first-wins -- letting the canonical enroute/navaid entries take priority.
+  load = LoadTerminalWaypoints(conn.value(), data, seen);
   if (!load) {
     return Result<NavData>::Err(load.error());
   }
