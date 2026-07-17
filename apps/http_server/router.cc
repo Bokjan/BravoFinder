@@ -121,12 +121,16 @@ void Router::Handle(std::shared_ptr<Connection> conn, const HttpRequest& req) {
     return;
   }
   // The body is the handler's arguments object. Empty body => empty object;
-  // malformed JSON (or a non-object) is a 400 before any work.
+  // malformed JSON (or a non-object) is a 400 before any work. Parse iteratively
+  // (kParseIterativeFlag): the body is untrusted and up to 1 MiB, and rapidjson's
+  // default recursive-descent parser would blow the C++ stack on a deeply nested
+  // "[[[[..." payload, crashing the whole process. Parse over (data, size) rather
+  // than a C string so an embedded NUL cannot truncate the body.
   rapidjson::Document args;
   if (req.body.empty()) {
     args.SetObject();
   } else {
-    args.Parse(req.body.c_str());
+    args.Parse<rapidjson::kParseIterativeFlag>(req.body.data(), req.body.size());
     if (args.HasParseError() || !args.IsObject()) {
       conn->WriteResponse(400, bf::service::JsonError("request body must be a JSON object"),
                           req.keep_alive);

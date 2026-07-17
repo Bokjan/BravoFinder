@@ -54,7 +54,43 @@ bool ParseRequest(const std::string& line, rapidjson::Document& doc) {
   if (line.empty()) {
     return false;
   }
-  return !doc.Parse(line.c_str()).HasParseError() && doc.IsObject();
+  // Parse iteratively (kParseIterativeFlag) over (data, size): the line is
+  // untrusted, and rapidjson's default recursive-descent parser would blow the
+  // C++ stack on a deeply nested payload. Using the length form also stops an
+  // embedded NUL from truncating the request.
+  return !doc.Parse<rapidjson::kParseIterativeFlag>(line.data(), line.size()).HasParseError() &&
+         doc.IsObject();
+}
+
+// Read one newline-terminated line from `in`, bounding memory to `max_len`
+// bytes. std::getline grows the target string without limit, so a client that
+// streams bytes and never sends a newline (exactly the attack the cap is meant
+// to stop) makes getline consume until OOM -- the size check afterward never
+// runs. This reader stops growing `out` once `max_len` is reached and keeps
+// draining the rest of the oversized line to the newline, so the buffer never
+// exceeds the cap. kEof is returned only at end of input with no pending bytes.
+enum class LineResult { kOk, kOversized, kEof };
+
+LineResult ReadBoundedLine(std::istream& in, std::string& out, size_t max_len) {
+  out.clear();
+  bool oversized = false;
+  bool saw_any = false;
+  char ch = 0;
+  while (in.get(ch)) {
+    saw_any = true;
+    if (ch == '\n') {
+      return oversized ? LineResult::kOversized : LineResult::kOk;
+    }
+    if (out.size() < max_len) {
+      out.push_back(ch);
+    } else {
+      oversized = true;  // keep draining to the newline without growing `out`
+    }
+  }
+  if (!saw_any) {
+    return LineResult::kEof;  // clean end of input
+  }
+  return oversized ? LineResult::kOversized : LineResult::kOk;  // final unterminated line
 }
 
 }  // namespace
@@ -67,11 +103,17 @@ int McpServer::Run() {
   std::string line;
   // Cap a single request line: a malicious or buggy client could stream without
   // a newline and grow `line` until OOM. The MCP frame is bounded by realistic
-  // tool arguments; anything larger is rejected before parsing.
+  // tool arguments; anything larger is drained and rejected without buffering it
+  // whole (see ReadBoundedLine).
   constexpr size_t kMaxLineLen = 16 * 1024 * 1024;  // 16 MiB
-  while (std::getline(std::cin, line)) {
-    if (line.size() > kMaxLineLen) {
-      // Drop the oversized line; there is no request id to reply to yet.
+  for (;;) {
+    const LineResult lr = ReadBoundedLine(std::cin, line, kMaxLineLen);
+    if (lr == LineResult::kEof) {
+      break;
+    }
+    if (lr == LineResult::kOversized) {
+      // The oversized line was drained to its newline; drop it (there is no
+      // request id to reply to yet).
       continue;
     }
     rapidjson::Document doc;

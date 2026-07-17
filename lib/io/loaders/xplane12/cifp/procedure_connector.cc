@@ -222,10 +222,10 @@ std::vector<Connection> ProcedureConnector::BuildArrival(const CifpData& cifp,
 }
 
 std::vector<Connection> ProcedureConnector::BuildDctFallback(const Coordinate& airport_coord,
-                                                             const GraphBuilder& builder,
-                                                             int count) {
+                                                             const GraphBuilder& builder, int count,
+                                                             bool arrival) {
   std::vector<Connection> out;
-  for (int v : builder.NearestOnNetwork(airport_coord, count)) {
+  for (int v : builder.NearestOnNetwork(airport_coord, count, /*inbound=*/arrival)) {
     Connection c;
     c.fix_vertex = v;
     c.seed_distance_nm = airport_coord.DistanceTo(builder.graph().CoordOf(v));

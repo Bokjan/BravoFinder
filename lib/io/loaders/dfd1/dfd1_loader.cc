@@ -259,7 +259,9 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     prev_max_alt = ColumnInt(stmt, 7);
     // Column 2 ('E') of the waypoint description code marks End of Airway; the next
     // same-route row then starts a fresh string and must not be chained to this fix.
-    const std::string desc = ColumnText(stmt, 10);
+    // Read raw (untrimmed): trimming a blank column 1 would shift the byte offsets
+    // and silently miss the 'E', reintroducing cross-instance phantom legs.
+    const std::string desc = ColumnTextRaw(stmt, 10);
     prev_is_awy_end = desc.size() > 1 && desc[1] == 'E';
     have_prev = true;
   });

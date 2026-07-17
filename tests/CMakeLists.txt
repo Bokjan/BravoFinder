@@ -13,6 +13,10 @@ add_executable(bf_tests
                unit/route_json_test.cc
                unit/route_metrics_test.cc
                unit/small_vec_test.cc
+               unit/fixed_ident_test.cc
+               unit/mora_grid_test.cc
+               unit/codec_fuzz_test.cc
+               unit/dfd_magvar_test.cc
                unit/bfdb_naming_test.cc
                unit/nav_detail_codec_test.cc
                integration/route_integration_test.cc

@@ -348,17 +348,21 @@ void Connection::WriteResponse(int status, const std::string& body, bool keep_al
   if (closing_) {
     return;
   }
-  auto* wr = new WriteReq();
+  // Own the write request through the uv_write handoff: if BuildResponse throws
+  // (or uv_write fails) the unique_ptr frees it; on a successful queue libuv owns
+  // it and OnWriteDone deletes it, so release() the pointer there.
+  auto wr = std::make_unique<WriteReq>();
   wr->payload = BuildResponse(status, body, keep_alive);
   wr->conn = shared_from_this();
   wr->keep_alive = keep_alive;
-  wr->req.data = wr;
+  wr->req.data = wr.get();
   uv_buf_t b = uv_buf_init(wr->payload.data(), static_cast<unsigned>(wr->payload.size()));
   const int r = uv_write(&wr->req, stream(), &b, 1, OnWriteDone);
   if (r != 0) {
-    delete wr;
     StartClose();
+    return;  // wr is freed as it goes out of scope
   }
+  wr.release();  // libuv owns it now; freed in OnWriteDone
 }
 
 void Connection::OnWriteDone(uv_write_t* req, int status) {

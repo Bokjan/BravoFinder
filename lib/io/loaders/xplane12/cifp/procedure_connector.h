@@ -54,9 +54,12 @@ class ProcedureConnector {
                                               const std::string& runway_filter);
 
   // DCT fallback: connect to the nearest on-network waypoints by great-circle
-  // distance. Used when no procedure connections are available.
+  // distance. Used when no procedure connections are available. `arrival` picks
+  // the direction: departures seed on fixes with an outbound airway edge (leave
+  // along one), arrivals on fixes with an inbound edge (are reached along one).
   static std::vector<Connection> BuildDctFallback(const Coordinate& airport_coord,
-                                                  const GraphBuilder& builder, int count);
+                                                  const GraphBuilder& builder, int count,
+                                                  bool arrival);
 
   // Convert connections to seeded A* endpoints (vertex + seed cost).
   static std::vector<SeededEndpoint> ToEndpoints(const std::vector<Connection>& connections);

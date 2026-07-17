@@ -117,5 +117,24 @@ int main(int argc, char** argv) {
 #endif
 
   uv_run(&loop, UV_RUN_DEFAULT);
+
+  // Graceful drain. uv_stop returned the loop while route-compute work may still
+  // be in flight on the threadpool; its completion callbacks (which read the
+  // registry) must run before `registry` -- a stack local below -- is destroyed,
+  // or a worker could touch it in the exit window. Close every remaining handle
+  // (listener, live connections, signal watchers) and run the loop again: the
+  // pending uv_work_t requests keep it alive until they finish, so this final run
+  // delivers their completions and every handle's close callback before we exit.
+  // Mirrors the teardown idiom in http_server_test.cc.
+  uv_walk(
+      &loop,
+      [](uv_handle_t* h, void*) {
+        if (uv_is_closing(h) == 0) {
+          uv_close(h, nullptr);
+        }
+      },
+      nullptr);
+  uv_run(&loop, UV_RUN_DEFAULT);
+  uv_loop_close(&loop);
   return 0;
 }

@@ -279,8 +279,10 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     prev_level = ColumnText(stmt, 5);
     prev_min_alt = ColumnInt(stmt, 6);
     prev_max_alt = ColumnInt(stmt, 7);
-    // Column 2 ('E') of the waypoint description code marks End of Airway.
-    const std::string desc = ColumnText(stmt, 10);
+    // Column 2 ('E') of the waypoint description code marks End of Airway. Read
+    // raw (untrimmed): trimming a blank column 1 would shift the byte offsets and
+    // silently miss the 'E', reintroducing cross-instance phantom legs. (Same as dfd1.)
+    const std::string desc = ColumnTextRaw(stmt, 10);
     prev_is_awy_end = desc.size() > 1 && desc[1] == 'E';
     have_prev = true;
   });
@@ -421,19 +423,6 @@ Result<void> LoadGridMora(sqlite3* conn, NavData& data) {
       }
     }
   });
-}
-
-// Convert a true course to magnetic using the airport's magnetic variation.
-// magnetic = true - variation (variation: west negative, so magnetic > true west).
-double ToMagnetic(double true_course, double magvar) {
-  double mag = true_course - magvar;
-  while (mag < 0.0) {
-    mag += 360.0;
-  }
-  while (mag >= 360.0) {
-    mag -= 360.0;
-  }
-  return mag;
 }
 
 // v2 procedure column layout (differs from v1: course+course_flag, swapped
@@ -712,6 +701,21 @@ std::optional<CifpData> LoadAirportProcedures(
 }
 
 }  // namespace
+
+// Convert a true course to magnetic using the airport's magnetic variation.
+// magnetic = true - variation (variation: west negative, so magnetic > true west).
+// Defined at namespace scope (declared in the header) so the sign convention can
+// be locked by a unit test.
+double ToMagnetic(double true_course, double magvar) {
+  double mag = true_course - magvar;
+  while (mag < 0.0) {
+    mag += 360.0;
+  }
+  while (mag >= 360.0) {
+    mag -= 360.0;
+  }
+  return mag;
+}
 
 Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
   Result<std::string> db_path = FindV2Db(source_dir);

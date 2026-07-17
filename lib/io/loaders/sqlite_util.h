@@ -68,4 +68,11 @@ std::string ColumnText(sqlite3_stmt* stmt, int col);
 int ColumnInt(sqlite3_stmt* stmt, int col);
 double ColumnDouble(sqlite3_stmt* stmt, int col);
 
+// Like ColumnText but WITHOUT trimming, so a caller indexing by fixed ARINC
+// column position sees the original byte offsets. The waypoint description code
+// (column 2 == 'E' marks End of Airway) must be read this way: trimming leading
+// spaces would shift the columns left whenever column 1 is blank and silently
+// break the End-of-Airway detection. Null -> empty string.
+std::string ColumnTextRaw(sqlite3_stmt* stmt, int col);
+
 }  // namespace bf

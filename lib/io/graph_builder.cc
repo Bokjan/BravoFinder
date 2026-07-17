@@ -222,12 +222,14 @@ bool GraphBuilder::HasInbound(int vertex) const {
   return vertex >= 0 && vertex < static_cast<int>(has_inbound_.size()) && has_inbound_[vertex];
 }
 
-std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int count) const {
+std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int count,
+                                                bool inbound) const {
   std::vector<int> candidates;
   const int v_count = graph_.VertexCount();
   candidates.reserve(256);
+  const std::vector<uint8_t>& mask = inbound ? has_inbound_ : has_outbound_;
   for (int v = 0; v < v_count; ++v) {
-    if (has_outbound_[v]) {
+    if (mask[v]) {
       candidates.push_back(v);
     }
   }

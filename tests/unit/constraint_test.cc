@@ -132,6 +132,28 @@ TEST_CASE("MORA: unknown cell imposes no limit", "[constraint]") {
   CHECK(c.Evaluate(ctx, WithAltitude(50)).allowed);
 }
 
+TEST_CASE("MORA: samples the short way across the antimeridian", "[constraint]") {
+  bf::MoraGrid grid;
+  // A high floor on the far side of the globe (lon 0). A correct short-path
+  // sampler for a +179 -> -179 leg must NOT walk through it; the old long-way
+  // interpolation swept the whole globe and would wrongly pick it up, blocking a
+  // legitimate trans-Pacific leg.
+  grid.SetCell(0, 0, 300);
+  bf::MoraConstraint c(grid);
+  bf::EdgeContext ctx{MakeEdge(0, 0, false), bf::Coordinate{0.5, 179.2},
+                      bf::Coordinate{0.5, -179.4}};
+  CHECK(c.Evaluate(ctx, WithAltitude(200)).allowed);  // no floor on the true track
+}
+
+TEST_CASE("MORA: a high cell on the antimeridian crossing still blocks", "[constraint]") {
+  bf::MoraGrid grid;
+  grid.SetCell(0, 179, 300);  // a cell the true short track actually passes through
+  bf::MoraConstraint c(grid);
+  bf::EdgeContext ctx{MakeEdge(0, 0, false), bf::Coordinate{0.5, 179.2},
+                      bf::Coordinate{0.5, -179.4}};
+  CHECK_FALSE(c.Evaluate(ctx, WithAltitude(200)).allowed);  // below the FL300 floor
+}
+
 TEST_CASE("MORA grid floors negative coordinates correctly", "[constraint]") {
   bf::MoraGrid grid;
   grid.SetCell(-1, -1, 50);

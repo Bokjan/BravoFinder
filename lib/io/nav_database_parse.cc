@@ -301,8 +301,11 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   if (point_vertices.empty()) {
     return Result<Route>::Err(Error(ErrorCode::kNoRoute, "route has no waypoints"));
   }
-  if (!expect_fix && !pending_connector.empty()) {
-    // A trailing connector with no following fix (e.g. "... PSB J60").
+  // A trailing connector with no following fix (e.g. "MCI J24" or "... PSB J60").
+  // The loop's invariant is expect_fix==false <=> pending_connector.empty(): a
+  // dangling connector always leaves expect_fix==true, so checking !expect_fix
+  // here would be dead. Gate on the pending connector alone.
+  if (!pending_connector.empty()) {
     return Result<Route>::Err(
         Error(ErrorCode::kNoRoute, "route ends with '" + pending_connector + "' but no fix"));
   }

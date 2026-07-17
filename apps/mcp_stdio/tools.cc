@@ -52,7 +52,7 @@ const ToolMeta kToolMeta[] = {
      R"("min_fl":{"type":"integer","description":"Lower bound of the cruise flight-level range, in hundreds of feet (e.g. 300 for FL300). May be given alone for a single level. Setting min_fl and/or max_fl enables altitude/MORA constraint filtering."},)"
      R"("max_fl":{"type":"integer","description":"Upper bound of the cruise flight-level range, in hundreds of feet (e.g. 400 for FL400). May be given alone for a single level."},)"
      R"("level":{"type":"string","enum":["none","low","high"],"description":"Preferred airway level: none=no preference (default), low=prefer Victor low airways, high=prefer Jet high airways."},)"
-     R"("k":{"type":"integer","minimum":1,"description":"Number of candidate routes to return (Yen K-shortest). Defaults to 1."},)"
+     R"("k":{"type":"integer","minimum":1,"maximum":100,"description":"Number of candidate routes to return (Yen K-shortest). Defaults to 1; capped at 100."},)"
      R"("departure_runway":{"type":"string","description":"Restrict the SID to this departure runway, e.g. RW31L. Empty=any."},)"
      R"("arrival_runway":{"type":"string","description":"Restrict the STAR to this arrival runway, e.g. RW25L. Empty=any."},)"
      R"("departure_sid":{"type":"string","description":"Pin a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN. Empty=auto."},)"

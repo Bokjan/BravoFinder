@@ -57,4 +57,24 @@ TEST_CASE("value_or on an rvalue moves the value out", "[result]") {
   CHECK(q == nullptr);
 }
 
+TEST_CASE("Result<void>: Ok reports success", "[result]") {
+  Result<void> r = Result<void>::Ok();
+  REQUIRE(r.has_value());
+  CHECK(static_cast<bool>(r));
+}
+
+TEST_CASE("Result<void>: Err carries the error", "[result]") {
+  Result<void> r = Result<void>::Err(Error(ErrorCode::kCacheCorrupt, "corrupt cache"));
+  REQUIRE_FALSE(r.has_value());
+  CHECK_FALSE(static_cast<bool>(r));
+  CHECK(r.error().code == ErrorCode::kCacheCorrupt);
+  CHECK(r.error().message == "corrupt cache");
+}
+
+TEST_CASE("Result<void>: error is mutable via the non-const accessor", "[result]") {
+  Result<void> r = Result<void>::Err(Error(ErrorCode::kUnknown, "x"));
+  r.error().message = "y";
+  CHECK(r.error().message == "y");
+}
+
 }  // namespace

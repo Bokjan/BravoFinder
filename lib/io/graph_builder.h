@@ -74,9 +74,9 @@ class GraphBuilder {
   bool OnNetwork(int vertex) const;
 
   // Whether `vertex` has at least one outbound airway edge — a fix a SID can
-  // hand off to (fly the SID to the fix, then depart along an airway). Airport
-  // DCT connection and NearestOnNetwork also use this, so departures never seed
-  // on a dead-end fix.
+  // hand off to (fly the SID to the fix, then depart along an airway). The
+  // departure-side DCT fallback (NearestOnNetwork with inbound=false) uses this,
+  // so departures never seed on a dead-end fix.
   bool HasOutbound(int vertex) const;
 
   // Whether `vertex` has at least one inbound airway edge — a fix a STAR can be
@@ -85,10 +85,12 @@ class GraphBuilder {
   // gate) has inbound but no outbound, and is valid for arrivals only.
   bool HasInbound(int vertex) const;
 
-  // Find up to `count` vertices with an outbound airway edge nearest to `coord`,
-  // ordered nearest first. Used as the DCT fallback when an airport has no
-  // procedure data.
-  std::vector<int> NearestOnNetwork(const Coordinate& coord, int count) const;
+  // Find up to `count` on-network vertices nearest to `coord`, ordered nearest
+  // first. `inbound` picks the direction filter: false selects fixes with an
+  // outbound airway edge (a departure DCT hands off and leaves along one); true
+  // selects fixes with an inbound edge (an arrival DCT is reached along one).
+  // Used as the DCT fallback when an airport has no procedure data.
+  std::vector<int> NearestOnNetwork(const Coordinate& coord, int count, bool inbound) const;
 
   // The airway name for an edge's airway_id, or "DCT" for synthetic edges.
   const std::string& AirwayName(int airway_id) const;

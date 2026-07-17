@@ -85,6 +85,18 @@ std::string ColumnText(sqlite3_stmt* stmt, int col) {
   return s.substr(b, e - b + 1);
 }
 
+std::string ColumnTextRaw(sqlite3_stmt* stmt, int col) {
+  const unsigned char* t = sqlite3_column_text(stmt, col);
+  if (t == nullptr) {
+    return {};
+  }
+  // No trimming: preserve leading/trailing spaces so fixed ARINC column offsets
+  // stay aligned (see the header). Use the byte count so the full padded field
+  // is returned verbatim.
+  const int n = sqlite3_column_bytes(stmt, col);
+  return std::string(reinterpret_cast<const char*>(t), static_cast<size_t>(n < 0 ? 0 : n));
+}
+
 int ColumnInt(sqlite3_stmt* stmt, int col) {
   if (sqlite3_column_type(stmt, col) == SQLITE_NULL) {
     return 0;

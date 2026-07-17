@@ -30,4 +30,10 @@ class Dfd2Loader final : public Loader {
   std::string name() const override { return "dfd2"; }
 };
 
+// Convert a true course to magnetic using the airport's magnetic variation
+// (west negative, so magnetic > true when variation is west). The v2 loader
+// applies this to 'T' (true-course) procedure legs; exposed here so the sign
+// convention is locked by a unit test.
+double ToMagnetic(double true_course, double magvar);
+
 }  // namespace bf

@@ -770,4 +770,18 @@ TEST_CASE("real data: ParseRoute rejects a no-fix shape that also names a proced
   CHECK_FALSE(db->ParseRoute("ZHHH SID DCT STAR ZGGG"));
 }
 
+TEST_CASE("real data: ParseRoute rejects a trailing dangling connector", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // A route that ends with an airway name but no following fix ("MCI J24") is
+  // incomplete: the airway leg has no destination. It must error, not silently
+  // drop the trailing airway and return a single-point route. (Regression: the
+  // dangling-connector guard was reachable only via expect_fix==false, which the
+  // loop invariant makes impossible, so it was dead code.)
+  bf::Result<bf::Route> r = db->ParseRoute("MCI J24");
+  CHECK_FALSE(r);
+}
+
 }  // namespace

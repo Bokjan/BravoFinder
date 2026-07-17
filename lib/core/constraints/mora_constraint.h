@@ -52,14 +52,20 @@ class MoraConstraint : public Constraint {
     // Sample the straight-line lat/lon interpolation; for a 1-degree grid this
     // is close enough to the great-circle track that no cell is missed.
     const double dlat = to.latitude - from.latitude;
-    const double dlon = to.longitude - from.longitude;
+    // Regularize the longitude delta to the shorter way around the globe: a leg
+    // from +179 to -179 spans 2 degrees, not 358. Without this the samples would
+    // march the long way around and read an entirely wrong strip of cells,
+    // potentially blocking a legitimate trans-Pacific leg.
+    const double dlon = std::remainder(to.longitude - from.longitude, 360.0);
     // Degrees of track spanned; sample roughly every 0.5 degrees.
     const double span = std::max(std::abs(dlat), std::abs(dlon));
     const int steps = std::max(1, static_cast<int>(std::ceil(span / 0.5)));
     for (int i = 1; i < steps; ++i) {
       const double t = static_cast<double>(i) / steps;
-      best = std::max(
-          best, grid_.MoraAt(Coordinate{from.latitude + dlat * t, from.longitude + dlon * t}));
+      // Wrap the interpolated longitude back into [-180, 180] so a sample that
+      // crosses the antimeridian still maps to a real grid cell.
+      const double lon = std::remainder(from.longitude + dlon * t, 360.0);
+      best = std::max(best, grid_.MoraAt(Coordinate{from.latitude + dlat * t, lon}));
     }
     return best;
   }

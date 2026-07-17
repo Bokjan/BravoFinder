@@ -137,13 +137,18 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   for (size_t i = 0; i + 1 < path.vertices.size(); ++i) {
     const int u = path.vertices[i];
     const int w = path.vertices[i + 1];
+    // u->w may have parallel edges (several airways, or an airway plus a DCT).
+    // The search took the cheapest, so label the leg with the cheapest edge's
+    // airway and distance -- picking the first would risk showing a via name /
+    // distance the cost model did not actually choose.
     std::string via = "DCT";
     double dist = 0.0;
+    bool found = false;
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
-      if (e->to == w) {
+      if (e->to == w && (!found || e->distance_nm < dist)) {
         via = builder.AirwayName(e->airway_id);
         dist = e->distance_nm;
-        break;
+        found = true;
       }
     }
     route.legs.push_back(
@@ -498,8 +503,11 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
       if (plan.connections.empty()) {
         // No usable procedures: fall back to DCT links to the nearest
         // on-network waypoints. The airport stays the route endpoint; the
-        // connecting leg shows "DCT" since no procedure was selected.
-        plan.connections = ProcedureConnector::BuildDctFallback(apt, *builder_, 5);
+        // connecting leg shows "DCT" since no procedure was selected. Filter by
+        // direction: a departure needs an outbound-capable fix, an arrival an
+        // inbound-capable one (a STAR entry gate is often inbound-only).
+        plan.connections =
+            ProcedureConnector::BuildDctFallback(apt, *builder_, 5, /*arrival=*/!departure);
       }
       return plan;
     }

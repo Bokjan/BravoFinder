@@ -5,6 +5,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <memory>
+#include <new>
 #include <type_traits>
 #include <utility>
 
@@ -71,11 +72,14 @@ class SmallVec {
         inline_[i] = other.inline_[i];
       }
       data_ = inline_;
-    } else {
-      other.data_ = nullptr;
     }
+    // Leave the source a valid empty inline vector (data_ -> inline_, capacity N)
+    // so a later push_back keeps its small-buffer optimization instead of heap-
+    // allocating from a capacity of 0. In the heap case this also detaches the
+    // source from the buffer `this` now owns, so its destructor won't free it.
+    other.data_ = other.inline_;
     other.size_ = 0;
-    other.capacity_ = 0;
+    other.capacity_ = N;
   }
 
   SmallVec& operator=(SmallVec&& other) noexcept {
@@ -89,11 +93,11 @@ class SmallVec {
           inline_[i] = other.inline_[i];
         }
         data_ = inline_;
-      } else {
-        other.data_ = nullptr;
       }
+      // Reset the source to a valid empty inline vector (see the move ctor).
+      other.data_ = other.inline_;
       other.size_ = 0;
-      other.capacity_ = 0;
+      other.capacity_ = N;
     }
     return *this;
   }
@@ -136,7 +140,11 @@ class SmallVec {
 
   static T* Allocate(size_t n) {
     // align to T; malloc gives suitable alignment for the element type.
-    return static_cast<T*>(std::malloc(n * sizeof(T)));
+    T* p = static_cast<T*>(std::malloc(n * sizeof(T)));
+    if (p == nullptr) {
+      throw std::bad_alloc();  // OOM is exceptional; mirror operator new
+    }
+    return p;
   }
 
   void FreeIfHeap() {

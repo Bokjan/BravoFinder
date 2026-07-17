@@ -1,19 +1,19 @@
 #pragma once
 
 #include <algorithm>
-#include <cctype>
 #include <string>
 
 namespace bf {
 
 // Upper-case an ASCII string in place and return it. Used to normalize
 // user-supplied idents / ICAO codes / airway names before lookup, since the
-// navigation data is stored upper-case. ASCII-only by design: navigation
-// identifiers are ASCII, and a locale-independent transform keeps results
-// stable across platforms.
+// navigation data is stored upper-case. ASCII-only by design and genuinely
+// locale-independent: only 'a'..'z' are folded (std::toupper would consult the
+// current locale), so results are stable across platforms and locales.
 inline std::string ToUpper(std::string s) {
-  std::transform(s.begin(), s.end(), s.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+  std::transform(s.begin(), s.end(), s.begin(), [](char c) -> char {
+    return (c >= 'a' && c <= 'z') ? static_cast<char>(c - ('a' - 'A')) : c;
+  });
   return s;
 }
 

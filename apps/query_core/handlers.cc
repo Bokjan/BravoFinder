@@ -198,6 +198,13 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   if (request.k < 1) {
     return {JsonError("k must be a positive integer (>= 1)"), kBadRequest};
   }
+  // Cap k as well: each extra path costs a full spur A* search, so an unbounded k
+  // (e.g. 2e9) would pin a worker for a long time and let a few requests exhaust
+  // the threadpool. 100 far exceeds any real "give me alternatives" use.
+  constexpr int kMaxK = 100;
+  if (request.k > kMaxK) {
+    return {JsonError("k must not exceed 100"), kBadRequest};
+  }
   if (args.HasMember("departure_runway") && args["departure_runway"].IsString()) {
     request.departure_runway = args["departure_runway"].GetString();
   }

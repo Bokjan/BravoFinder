@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "core/domain/ident.h"
+#include "core/util/attributes.h"
 
 namespace bf {
 
@@ -37,8 +38,8 @@ struct alignas(1) FixedIdent {
   char region[kRegionCap] = {};  // 3 bytes
   // 1 + 1 + 7 + 3 = 12; alignas(1) leaves no padding.
 
-  std::string_view IdentView() const { return {ident, ident_len}; }
-  std::string_view RegionView() const { return {region, region_len}; }
+  std::string_view IdentView() const BF_LIFETIMEBOUND { return {ident, ident_len}; }
+  std::string_view RegionView() const BF_LIFETIMEBOUND { return {region, region_len}; }
 
   bool operator==(const FixedIdent& o) const {
     return ident_len == o.ident_len && region_len == o.region_len &&
