@@ -142,20 +142,28 @@ TEST_CASE("bfdb: the cache preserves waypoint kinds and airport elevations",
   CHECK(has_nonzero_elev);
 
   // Per-vertex airway-membership flags: both directions are present for every
-  // vertex, and at least one vertex is inbound-only (has_inbound && !has_outbound)
-  // -- a STAR entry gate reached only via a forward-only airway (e.g. ABBEY).
-  // This proves flags bit1 survived the round-trip and inbound-only terminals
-  // are not collapsed to off-network.
+  // vertex (the hard, data-independent invariant). Whether real data happens to
+  // contain an inbound-only vertex (has_inbound && !has_outbound -- a STAR entry
+  // gate reached only via a forward-only airway, e.g. ABBEY) is cycle-dependent:
+  // most cycles have one, but a cycle lacking any forward-only dead end would
+  // have none. So the existence check is a soft WARN, not a hard CHECK, to stay
+  // green across cycles; the data-independent round-trip of an inbound-only
+  // vertex is pinned in the unified_cache_test "inbound-only vertex flags
+  // survive the round-trip" case.
   REQUIRE(snapshot.has_outbound.size() == snapshot.coords.size());
   REQUIRE(snapshot.has_inbound.size() == snapshot.coords.size());
-  bool has_inbound_only = false;
+  size_t inbound_only_count = 0;
   for (size_t i = 0; i < snapshot.coords.size(); ++i) {
     if (snapshot.has_inbound[i] && !snapshot.has_outbound[i]) {
-      has_inbound_only = true;
-      break;
+      ++inbound_only_count;
     }
   }
-  CHECK(has_inbound_only);
+  if (inbound_only_count == 0) {
+    WARN(
+        "no inbound-only vertex in this AIRAC cycle (forward-only dead-ends "
+        "absent); the bit1 round-trip is covered by the data-independent "
+        "unified_cache_test case");
+  }
 
   std::remove(path.c_str());
 }

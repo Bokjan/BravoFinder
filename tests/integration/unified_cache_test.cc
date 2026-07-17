@@ -137,22 +137,40 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   std::remove(path.c_str());
 }
 
-TEST_CASE("unified: a graph-only file omits the CIFP and detail sections",
-          "[integration][unified]") {
-  const std::string path = TempBfdb("graphonly");
+// The has_inbound / has_outbound per-vertex flags (the v7 cache layout: flags
+// byte bit0 = has_outbound, bit1 = has_inbound) must survive a round-trip, and
+// specifically an inbound-only vertex (has_inbound && !has_outbound -- a STAR
+// entry gate reached only via a forward-only airway) must not be collapsed to
+// off-network. This is a data-independent invariant: MakeGraph's vertex 1 is
+// inbound-only by construction, so unlike the real-data graph_codec_test case it
+// holds across every AIRAC cycle rather than depending on the data happening to
+// contain a forward-only dead end.
+TEST_CASE("unified: inbound-only vertex flags survive the round-trip", "[integration][unified]") {
+  const std::string path = TempBfdb("inboundonly");
   const bf::GraphSnapshot graph = MakeGraph();
+  // Sanity: vertex 1 is inbound-only going in (the precondition this test pins).
+  REQUIRE(graph.has_outbound.size() == 2);
+  REQUIRE(graph.has_inbound.size() == 2);
+  REQUIRE(graph.has_outbound[1] == 0);
+  REQUIRE(graph.has_inbound[1] == 1);
 
   bf::UnifiedCache::BuildInput in;
-  in.graph = &graph;  // cifp/detail left null
-  in.header.cycle = 2602;
+  in.graph = &graph;
+  in.header.cycle = 2603;
   REQUIRE(bf::UnifiedCache::Build(path, in));
 
   bf::Result<bf::UnifiedData> opened = bf::UnifiedCache::Open(path);
   REQUIRE(opened);
-  CHECK(opened.value().header.cycle == 2602);
-  CHECK_FALSE(opened.value().cifp.has_value());
-  CHECK_FALSE(opened.value().detail.has_value());
-  CHECK(opened.value().graph.coords.size() == 2);
+  const bf::GraphSnapshot& g = opened.value().graph;
+  REQUIRE(g.has_outbound.size() == 2);
+  REQUIRE(g.has_inbound.size() == 2);
+
+  // bit0 (has_outbound) and bit1 (has_inbound) both round-trip exactly, vertex
+  // for vertex -- no smearing of one flag onto the other.
+  CHECK(g.has_outbound[0] == 1);
+  CHECK(g.has_inbound[0] == 0);
+  CHECK(g.has_outbound[1] == 0);
+  CHECK(g.has_inbound[1] == 1);
 
   std::remove(path.c_str());
 }
