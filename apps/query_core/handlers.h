@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -26,6 +27,10 @@ namespace bf::service {
 struct HandlerResult {
   std::string body;
   int status;
+  // Wall-clock cost of the database call this handler made, in milliseconds. Set
+  // only on a successful (2xx) response; every error path leaves it 0 via the
+  // default member initializer, since no meaningful compute happened.
+  uint32_t elapsed_ms = 0;
 };
 
 using QueryHandler =

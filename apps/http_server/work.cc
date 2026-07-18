@@ -56,7 +56,7 @@ void OnAfterWork(uv_work_t* req, int status) {
     return;  // the client left while we computed -- drop the response
   }
   if (status == 0) {
-    w->conn->WriteResponse(w->result.status, w->result.body, w->keep_alive);
+    w->conn->WriteResponse(w->result.status, w->result.body, w->keep_alive, w->result.elapsed_ms);
   } else {
     // status != 0 means the work was cancelled (we never request this). Rather
     // than leave the connection hanging until the idle timeout, close it.

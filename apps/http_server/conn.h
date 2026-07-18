@@ -84,8 +84,9 @@ class Connection : public std::enable_shared_from_this<Connection> {
 
   // Write one HTTP response (status line + headers + JSON body) and, when
   // keep_alive is set and the write succeeds, reset for the next request;
-  // otherwise close the connection after the write drains. Loop thread only.
-  void WriteResponse(int status, const std::string& body, bool keep_alive);
+  // otherwise close the connection after the write drains. A non-zero elapsed_ms
+  // adds an X-Elapsed-Ms header (the query's compute cost). Loop thread only.
+  void WriteResponse(int status, const std::string& body, bool keep_alive, uint32_t elapsed_ms = 0);
 
  private:
   Connection(uv_loop_t* loop, Router& router, const Limits& limits);

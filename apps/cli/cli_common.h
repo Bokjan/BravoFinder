@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,8 +23,9 @@ Result<NavDatabase> OpenForRead(const std::string& db_path, const std::string& d
 // procedures, forced points, and the per-leg table).
 void PrintText(const Route& route);
 
-// Print candidate routes as a JSON array.
-void PrintRoutesJson(const std::vector<Route>& routes);
+// Print candidate routes as JSON: an object {"routes":[...],"elapsed_ms":N}
+// where elapsed_ms is the query's compute cost in milliseconds.
+void PrintRoutesJson(const std::vector<Route>& routes, uint32_t elapsed_ms);
 
 // Parse an --alt spec into an inclusive flight-level range. Accepts a single
 // level ("350" -> {350, 350}) or a hyphenated range ("300-400" -> {300, 400}).

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -47,7 +48,8 @@ class McpServer {
   // never reach these because Run() does not call them.
   void SendResult(const rapidjson::Value& id, rapidjson::Value& result);
   void SendError(const rapidjson::Value& id, int code, const std::string& message);
-  void SendToolResult(const rapidjson::Value& id, const std::string& json_text, bool is_error);
+  void SendToolResult(const rapidjson::Value& id, const std::string& json_text, bool is_error,
+                      uint32_t elapsed_ms = 0);
 };
 
 }  // namespace bf::mcp

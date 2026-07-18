@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -119,7 +120,12 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
       request.level = LevelPreference::kHigh;
     }
 
+    const auto start = std::chrono::steady_clock::now();
     Result<std::vector<Route>> result = db.value().FindRoutes(request);
+    const auto elapsed_ms =
+        static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now() - start)
+                                  .count());
     if (!result) {
       std::cerr << "error: " << result.error().message << "\n";
       exit_code = EXIT_FAILURE;
@@ -128,7 +134,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
 
     const std::vector<Route>& routes = result.value();
     if (a->format == "json") {
-      PrintRoutesJson(routes);
+      PrintRoutesJson(routes, elapsed_ms);
     } else {
       for (size_t i = 0; i < routes.size(); ++i) {
         if (routes.size() > 1) {
@@ -139,6 +145,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
           std::cout << "\n";
         }
       }
+      std::cout << "Query elapsed: " << elapsed_ms << " ms\n";
     }
   });
 }

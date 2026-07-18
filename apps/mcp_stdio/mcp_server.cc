@@ -198,7 +198,7 @@ void McpServer::SendError(const rapidjson::Value& id, int code, const std::strin
 }
 
 void McpServer::SendToolResult(const rapidjson::Value& id, const std::string& json_text,
-                               bool is_error) {
+                               bool is_error, uint32_t elapsed_ms) {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
@@ -221,6 +221,16 @@ void McpServer::SendToolResult(const rapidjson::Value& id, const std::string& js
   writer.EndArray();
   writer.Key("isError");
   writer.Bool(is_error);
+  // Surface the database call's compute cost as MCP result metadata. Only a
+  // successful tool call carries a non-zero timing (error paths leave it 0), so
+  // omit the field entirely otherwise rather than reporting a misleading 0.
+  if (elapsed_ms > 0) {
+    writer.Key("_meta");
+    writer.StartObject();
+    writer.Key("elapsed_ms");
+    writer.Uint(elapsed_ms);
+    writer.EndObject();
+  }
   writer.EndObject();
   writer.EndObject();
   std::cout << buffer.GetString() << "\n";
@@ -353,8 +363,8 @@ void McpServer::HandleToolsCall(const rapidjson::Value& id, const rapidjson::Val
 
   for (const Tool& tool : tools_) {
     if (tool.name == name) {
-      auto [json, is_error] = tool.handler(args, *db.value());
-      SendToolResult(id, json, is_error);
+      ToolResult tr = tool.handler(args, *db.value());
+      SendToolResult(id, tr.json_text, tr.is_error, tr.elapsed_ms);
       return;
     }
   }

@@ -188,6 +188,22 @@ std::string BodyOf(const std::string& response) {
   return response.substr(end + 4);
 }
 
+// True if the response header block carries an X-Elapsed-Ms header; if so, its
+// numeric value is written to *value.
+bool HasElapsedHeader(const std::string& response, unsigned long* value) {
+  const size_t end = response.find("\r\n\r\n");
+  const std::string headers = response.substr(0, end == std::string::npos ? response.size() : end);
+  const std::string key = "X-Elapsed-Ms: ";
+  const size_t pos = headers.find(key);
+  if (pos == std::string::npos) {
+    return false;
+  }
+  if (value != nullptr) {
+    *value = std::stoul(headers.substr(pos + key.size()));
+  }
+  return true;
+}
+
 std::string Get(const std::string& path, bool keep_alive) {
   std::string r = "GET " + path + " HTTP/1.1\r\nHost: x\r\n";
   r += keep_alive ? "Connection: keep-alive\r\n" : "Connection: close\r\n";
@@ -271,6 +287,21 @@ TEST_CASE("http server end-to-end over a loopback socket", "[integration][http]"
               port, Post("/v1/routes", R"({"departure":"ZZ_NOPE_ZZ","arrival":"KLAX"})", ""))) ==
           422);
     CHECK(StatusOf(RoundTrip(port, Get("/v1/nope", false))) == 404);
+  }
+
+  SECTION("X-Elapsed-Ms header on success, absent on error") {
+    // A successful route reports its compute cost as an X-Elapsed-Ms header,
+    // with a sane value (well under a minute).
+    const std::string ok =
+        RoundTrip(port, Post("/v1/routes", R"({"departure":"KJFK","arrival":"KLAX","k":1})", ""));
+    REQUIRE(StatusOf(ok) == 200);
+    unsigned long ms = 0;
+    REQUIRE(HasElapsedHeader(ok, &ms));
+    CHECK(ms <= 60000);
+    // A 400 (missing arrival) carries no timing header.
+    const std::string bad = RoundTrip(port, Post("/v1/routes", R"({"departure":"KJFK"})", ""));
+    REQUIRE(StatusOf(bad) == 400);
+    CHECK_FALSE(HasElapsedHeader(bad, nullptr));
   }
 
   SECTION("oversized body is rejected with 413") {

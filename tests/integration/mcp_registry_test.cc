@@ -8,7 +8,10 @@
 #include "io/cache/bfdb_naming.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/unified_cache.h"
+#include "rapidjson/document.h"
 #include "registry.h"
+#include "test_bfdb.h"
+#include "tools.h"
 
 namespace {
 
@@ -86,6 +89,36 @@ TEST_CASE("mcp registry: unknown cycle is an error", "[integration][mcp]") {
   bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
 
   CHECK_FALSE(reg.Get(9999));
+}
+
+TEST_CASE("mcp tool result carries elapsed_ms on success and zero on error", "[integration][mcp]") {
+  // The MCP adapter must forward the shared handler's elapsed_ms into ToolResult
+  // verbatim: non-zero on a successful query, zero on any error path.
+  bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb();
+  if (!db) {
+    SKIP("navigation data not found in '" << bf::test::NavDataDir() << "'");
+  }
+  std::vector<bf::mcp::Tool> tools = bf::mcp::MakeTools();
+  const bf::mcp::Tool* find_routes = nullptr;
+  for (const bf::mcp::Tool& t : tools) {
+    if (t.name == "find_routes") {
+      find_routes = &t;
+    }
+  }
+  REQUIRE(find_routes != nullptr);
+
+  rapidjson::Document ok_args;
+  ok_args.Parse(R"({"departure":"KJFK","arrival":"KLAX","k":1})");
+  const bf::mcp::ToolResult ok = find_routes->handler(ok_args, db.value());
+  CHECK_FALSE(ok.is_error);
+  CHECK(ok.elapsed_ms > 0);
+  CHECK(ok.elapsed_ms < 10000);
+
+  rapidjson::Document err_args;
+  err_args.Parse(R"({"departure":"KJFK"})");  // missing arrival -> error path
+  const bf::mcp::ToolResult err = find_routes->handler(err_args, db.value());
+  CHECK(err.is_error);
+  CHECK(err.elapsed_ms == 0);
 }
 
 TEST_CASE("mcp registry: concurrent Get is safe and consistent", "[integration][mcp]") {

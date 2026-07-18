@@ -80,8 +80,10 @@ std::string HttpDate() {
   return std::string(buf, n);
 }
 
-// One full HTTP response with a JSON body.
-std::string BuildResponse(int status, const std::string& body, bool keep_alive) {
+// One full HTTP response with a JSON body. A non-zero elapsed_ms adds an
+// X-Elapsed-Ms header carrying the query's compute cost in milliseconds.
+std::string BuildResponse(int status, const std::string& body, bool keep_alive,
+                          uint32_t elapsed_ms = 0) {
   std::string out;
   out.reserve(body.size() + 160);
   out += "HTTP/1.1 ";
@@ -94,6 +96,10 @@ std::string BuildResponse(int status, const std::string& body, bool keep_alive) 
   out += keep_alive ? "keep-alive" : "close";
   out += "\r\nDate: ";
   out += HttpDate();
+  if (elapsed_ms > 0) {
+    out += "\r\nX-Elapsed-Ms: ";
+    out += std::to_string(elapsed_ms);
+  }
   out += "\r\n\r\n";
   out += body;
   return out;
@@ -344,7 +350,8 @@ void Connection::Dispatch() {
   router_.Handle(shared_from_this(), req);
 }
 
-void Connection::WriteResponse(int status, const std::string& body, bool keep_alive) {
+void Connection::WriteResponse(int status, const std::string& body, bool keep_alive,
+                               uint32_t elapsed_ms) {
   if (closing_) {
     return;
   }
@@ -352,7 +359,7 @@ void Connection::WriteResponse(int status, const std::string& body, bool keep_al
   // (or uv_write fails) the unique_ptr frees it; on a successful queue libuv owns
   // it and OnWriteDone deletes it, so release() the pointer there.
   auto wr = std::make_unique<WriteReq>();
-  wr->payload = BuildResponse(status, body, keep_alive);
+  wr->payload = BuildResponse(status, body, keep_alive, elapsed_ms);
   wr->conn = shared_from_this();
   wr->keep_alive = keep_alive;
   wr->req.data = wr.get();

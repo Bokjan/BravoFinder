@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <utility>
@@ -21,12 +22,20 @@
 
 namespace bf::mcp {
 
+// The result of running a tool: a JSON value (object or array) that the server
+// wraps in a single text content block, the MCP error projection of the shared
+// handler's status (status >= 400), and the database call's compute cost in
+// milliseconds (0 on any error path, mirroring HandlerResult::elapsed_ms).
+struct ToolResult {
+  std::string json_text;
+  bool is_error;
+  uint32_t elapsed_ms = 0;
+};
+
 // A tool handler: given the parsed "arguments" object and a read-only database,
-// returns {json_text, is_error}. json_text is a JSON value (object or array)
-// that the server wraps in a single text content block. is_error is the MCP
-// projection of the shared handler's status (status >= 400).
-using ToolHandler = std::function<std::pair<std::string, bool>(const rapidjson::Value& args,
-                                                               const bf::NavDatabase& db)>;
+// returns a ToolResult.
+using ToolHandler =
+    std::function<ToolResult(const rapidjson::Value& args, const bf::NavDatabase& db)>;
 
 struct Tool {
   std::string name;

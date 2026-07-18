@@ -63,6 +63,36 @@ TEST_CASE("http handlers: find_routes status mapping", "[integration][http]") {
   CHECK(Run("find_routes", R"({"departure":"ZZ_NOPE_ZZ","arrival":"KLAX"})", *db).status == 422);
 }
 
+TEST_CASE("http handlers: elapsed_ms is set on success, zero on error", "[integration][http]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  // A successful database call reports a plausible compute cost, well under a
+  // 10 s ceiling that would signal a stuck query. find_routes is reliably heavy
+  // (a full A*/Yen search), so it also clears > 0; parse_route and the lookups
+  // can legitimately finish in under a millisecond and round to 0.
+  const bf::service::HandlerResult routes =
+      Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":1})", *db);
+  REQUIRE(routes.status == 200);
+  CHECK(routes.elapsed_ms > 0);
+  CHECK(routes.elapsed_ms < 10000);
+  const bf::service::HandlerResult parsed =
+      Run("parse_route", R"({"route":"KJFK DEEZZ5 CANDR"})", *db);
+  REQUIRE(parsed.status == 200);
+  CHECK(parsed.elapsed_ms < 10000);
+  const bf::service::HandlerResult lookup = Run("lookup_airports", R"({"ids":["KJFK"]})", *db);
+  REQUIRE(lookup.status == 200);
+  CHECK(lookup.elapsed_ms < 10000);
+  // Every error path leaves elapsed_ms at 0 (no meaningful compute happened).
+  CHECK(Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":0})", *db).elapsed_ms == 0);
+  CHECK(Run("find_routes", R"({"departure":"KJFK"})", *db).elapsed_ms == 0);
+  CHECK(Run("find_routes", R"({"departure":"ZZ_NOPE_ZZ","arrival":"KLAX"})", *db).elapsed_ms == 0);
+  CHECK(Run("parse_route", R"({"route":"KJFK ZZ_NOPE9 KLAX"})", *db).elapsed_ms == 0);
+  CHECK(Run("lookup_airports", R"({"ids":["ZZ_NOPE_ZZ"]})", *db).elapsed_ms == 0);
+  CHECK(Run("lookup_airports", R"({})", *db).elapsed_ms == 0);
+}
+
 TEST_CASE("http handlers: find_routes emits full-precision coordinates", "[integration][http]") {
   // Regression guard: the route writer must run at 6 dp, not 2 -- 2 dp truncates
   // point lat/lon to ~1.1 km. A real route's points are not all 2-dp values, so

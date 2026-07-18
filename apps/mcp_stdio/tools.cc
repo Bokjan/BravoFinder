@@ -128,13 +128,13 @@ const ToolMeta kToolMeta[] = {
 };
 
 // Adapt a shared bf::service handler into the MCP ToolHandler shape: run it and
-// project its status onto is_error (status >= 400), keeping the JSON body
-// verbatim so MCP behavior is unchanged.
+// project its status onto is_error (status >= 400), keeping the JSON body and
+// the elapsed_ms timing verbatim so MCP behavior is unchanged.
 ToolHandler AdaptHandler(bf::service::QueryHandler handler) {
   return [handler = std::move(handler)](const rapidjson::Value& args,
-                                        const bf::NavDatabase& db) -> std::pair<std::string, bool> {
+                                        const bf::NavDatabase& db) -> ToolResult {
     bf::service::HandlerResult result = handler(args, db);
-    return {std::move(result.body), result.status >= 400};
+    return {std::move(result.body), result.status >= 400, result.elapsed_ms};
   };
 }
 
