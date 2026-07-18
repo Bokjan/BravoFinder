@@ -685,6 +685,45 @@ TEST_CASE("real data: ParseRoute round-trips a computed route", "[integration]")
   REQUIRE(parsed);
   CHECK(parsed.value().route_string == route_str);
   CHECK(parsed.value().total_distance_nm > 2000.0);
+
+  // ParseRoute must reconstruct the phase-split summary from the rebuilt legs,
+  // not leave it at the struct defaults. The three phases always sum to the
+  // total (case 3), and each phase distance is non-negative.
+  const bf::Route& p = parsed.value();
+  CHECK(p.dep_distance_nm >= 0.0);
+  CHECK(p.enroute_distance_nm >= 0.0);
+  CHECK(p.arr_distance_nm >= 0.0);
+  CHECK(p.dep_distance_nm + p.enroute_distance_nm + p.arr_distance_nm ==
+        Catch::Approx(p.total_distance_nm));
+
+  // When the round-tripped plan carries the literal SID/STAR connector legs, the
+  // corresponding phase distance and connection kind must reflect the procedure
+  // (case 1) -- derived from the leg's "SID"/"STAR" via keyword, since the
+  // procedure name is not recoverable from the string and route.sid/star stay
+  // empty here.
+  bool has_sid_leg = false;
+  bool has_star_leg = false;
+  for (const bf::RouteLeg& leg : p.legs) {
+    if (leg.via == "SID") {
+      has_sid_leg = true;
+    } else if (leg.via == "STAR") {
+      has_star_leg = true;
+    }
+  }
+  if (has_sid_leg) {
+    CHECK(p.dep_distance_nm > 0.0);
+    CHECK(p.dep_connection == bf::ConnectionKind::kProcedure);
+  } else {
+    CHECK(p.dep_distance_nm == 0.0);
+    CHECK(p.dep_connection == bf::ConnectionKind::kDirect);
+  }
+  if (has_star_leg) {
+    CHECK(p.arr_distance_nm > 0.0);
+    CHECK(p.arr_connection == bf::ConnectionKind::kProcedure);
+  } else {
+    CHECK(p.arr_distance_nm == 0.0);
+    CHECK(p.arr_connection == bf::ConnectionKind::kDirect);
+  }
 }
 
 TEST_CASE("real data: ParseRoute expands an airway's intermediate fixes", "[integration]") {
@@ -741,6 +780,15 @@ TEST_CASE("real data: ParseRoute accepts a pure direct airport pair", "[integrat
   CHECK(r.value().legs.front().via == "DCT");
   CHECK(r.value().route_string == "ZHHH DCT ZGGG");
   CHECK(r.value().total_distance_nm > 0.0);
+
+  // A pure DEP DCT ARR has no procedure legs: departure and arrival phase
+  // distances are zero, everything is enroute, and both connections are direct
+  // (case 2).
+  CHECK(r.value().dep_distance_nm == 0.0);
+  CHECK(r.value().arr_distance_nm == 0.0);
+  CHECK(r.value().enroute_distance_nm == Catch::Approx(r.value().total_distance_nm));
+  CHECK(r.value().dep_connection == bf::ConnectionKind::kDirect);
+  CHECK(r.value().arr_connection == bf::ConnectionKind::kDirect);
 
   // The no-fix shape is accepted only with an explicit DCT and airports at both
   // ends. A bare airport pair (no connector) and an airport->fix DCT both stay

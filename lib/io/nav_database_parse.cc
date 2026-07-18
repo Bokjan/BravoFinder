@@ -22,6 +22,30 @@ struct ResolvedFix {
   Coordinate coord;
 };
 
+// Derive the phase-split summary fields from the already-built legs, matching
+// FindRoutes semantics. The airport<->network procedure legs carry the literal
+// "SID"/"STAR" keyword in `via` (the procedure name, if any, lives in
+// route.sid/star and cannot be recovered from a bare keyword), so the split is
+// read off `via`, not off route.sid/star being non-empty. Everything else is
+// enroute. Connection is kProcedure when such a leg exists, else kDirect;
+// ParseRoute never produces the radar-vector fallback.
+void FinalizePhaseSplit(Route& route, bool dep_via_sid, bool arr_via_star) {
+  double dep = 0.0;
+  double arr = 0.0;
+  for (const RouteLeg& leg : route.legs) {
+    if (leg.via == "SID") {
+      dep += leg.distance_nm;
+    } else if (leg.via == "STAR") {
+      arr += leg.distance_nm;
+    }
+  }
+  route.dep_distance_nm = dep;
+  route.arr_distance_nm = arr;
+  route.enroute_distance_nm = std::max(0.0, route.total_distance_nm - dep - arr);
+  route.dep_connection = dep_via_sid ? ConnectionKind::kProcedure : ConnectionKind::kDirect;
+  route.arr_connection = arr_via_star ? ConnectionKind::kProcedure : ConnectionKind::kDirect;
+}
+
 }  // namespace
 
 Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
@@ -217,6 +241,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     route.legs.push_back(RouteLeg{dep_airport, arr_airport, "DCT", d, {}});
     route.total_distance_nm += d;
     route.route_string = BuildRouteString(route.points.front().ident, route.legs);
+    FinalizePhaseSplit(route, dep_via_sid, arr_via_star);
     return Result<Route>::Ok(std::move(route));
   }
 
@@ -340,6 +365,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // consecutive same-airway legs, matching FindRoutes output).
   const std::string first_point = route.points.empty() ? "" : route.points.front().ident;
   route.route_string = BuildRouteString(first_point, route.legs);
+  FinalizePhaseSplit(route, dep_via_sid, arr_via_star);
   return Result<Route>::Ok(std::move(route));
 }
 
