@@ -56,6 +56,9 @@ TEST_CASE("http handlers: find_routes status mapping", "[integration][http]") {
   CHECK(Run("find_routes", R"({"departure":"KJFK"})", *db).status == 400);
   // k < 1 is rejected before FindRoutes.
   CHECK(Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":0})", *db).status == 400);
+  // k == 15 is the upper bound (accepted); k == 16 exceeds the cap (rejected).
+  CHECK(Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":15})", *db).status == 200);
+  CHECK(Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":16})", *db).status == 400);
   // A well-formed request with an unknown endpoint is a semantic failure (422).
   CHECK(Run("find_routes", R"({"departure":"ZZ_NOPE_ZZ","arrival":"KLAX"})", *db).status == 422);
 }
