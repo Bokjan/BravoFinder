@@ -1,52 +1,26 @@
 # BravoFinder
 
-[![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases)
-[![license](https://img.shields.io/github/license/Bokjan/BravoFinder)](LICENSE)
-![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)
-![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
+[![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases) [![license](https://img.shields.io/github/license/Bokjan/BravoFinder)](LICENSE) ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
 
 A flight route finder written in modern C++, **v3 — a complete rewrite**.
 
 ## About
 
-BravoFinder builds a graph from navigation data (waypoints, navaids, airways, and
-SID/STAR/approach procedures) and finds routes between two airports. Unlike earlier
-versions, which computed a purely geographic shortest path, v3 is a **realistic /
-compliant route engine**: routes respect real-world constraints such as airway
-directionality, high/low airway levels, segment altitude bands, and terminal
-procedures.
+BravoFinder builds a graph from navigation data (waypoints, navaids, airways, and SID/STAR/approach procedures) and finds routes between two airports. Unlike earlier versions, which computed a purely geographic shortest path, v3 is a **realistic / compliant route engine**: routes respect real-world constraints such as airway directionality, high/low airway levels, segment altitude bands, and terminal procedures.
 
-Navigation data is read through a **pluggable `Loader` interface** (`lib/io/loaders/`)
-that abstracts the source format. The default (and currently only) loader parses
-X-Plane 12 native `.dat` files; a future loader could read a Little Navmap SQLite
-database or another format without changing the route engine. The loader name is
-recorded as `source_loader` provenance in every `.bfdb` cache header.
+Navigation data is read through a **pluggable `Loader` interface** (`lib/io/loaders/`) that abstracts the source format. The default (and currently only) loader parses X-Plane 12 native `.dat` files; a future loader could read a Little Navmap SQLite database or another format without changing the route engine. The loader name is recorded as `source_loader` provenance in every `.bfdb` cache header.
 
 ## Status
 
-The tool loads navigation data through a pluggable source loader (default: X-Plane 12),
-builds a directed graph honoring airway
-directionality and high/low levels, and finds routes between two airports (or
-waypoints) with A* and Yen K-shortest. Airports connect to the enroute network
-through their real SID/STAR procedures (parsed from ARINC 424 / CIFP), falling back
-to a direct link where no procedure data exists. For example, `KJFK KLAX` resolves
-to a filed-flight-plan-style route such as `KJFK SID TOWIN ... PGS STAR KLAX`
-of ~2160 NM (the literal `SID`/`STAR` connect the airports to the enroute network;
-the actual procedure names appear in the route's `sid`/`star` fields).
+The tool loads navigation data through a pluggable source loader (default: X-Plane 12), builds a directed graph honoring airway directionality and high/low levels, and finds routes between two airports (or waypoints) with A* and Yen K-shortest. Airports connect to the enroute network through their real SID/STAR procedures (parsed from ARINC 424 / CIFP), falling back to a direct link where no procedure data exists. For example, `KJFK KLAX` resolves to a filed-flight-plan-style route such as `KJFK SID TOWIN ... PGS STAR KLAX` of ~2160 NM (the literal `SID`/`STAR` connect the airports to the enroute network; the actual procedure names appear in the route's `sid`/`star` fields).
 
 A single loaded database is safe to query concurrently from multiple threads.
 
-The engine is exposed through three front-ends (see [Usage](#usage)): the `bf`
-CLI, an MCP stdio server (`bf-mcp-stdio`) for LLM clients, and an HTTP+JSON
-server (`bf-http`) for network callers. The latter two share one query layer
-(`apps/query_core`, namespace `bf::service`).
+The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` CLI, an MCP stdio server (`bf-mcp-stdio`) for LLM clients, and an HTTP+JSON server (`bf-http`) for network callers. The latter two share one query layer (`apps/query_core`, namespace `bf::service`).
 
 ## Building
 
-Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11,
-RapidJSON, plus libuv and llhttp for the HTTP server) are fetched automatically
-via FetchContent.
+Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11, RapidJSON, plus libuv and llhttp for the HTTP server) are fetched automatically via FetchContent.
 
 ```bash
 cmake --preset debug              # or: release
@@ -79,20 +53,16 @@ cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 
 ### Using the library (SDK)
 
-The route engine ships as a self-contained static library. Two ways to consume
-it, both under the single target name `bf::bravofinder3`:
+The route engine ships as a self-contained static library. Two ways to consume it, both under the single target name `bf::bravofinder3`:
 
-**Pre-built SDK** — download a `bravofinder-sdk-*` archive from a
-[release](https://github.com/Bokjan/BravoFinder/releases), unpack it, and:
+**Pre-built SDK** — download a `bravofinder-sdk-*` archive from a [release](https://github.com/Bokjan/BravoFinder/releases), unpack it, and:
 
 ```cmake
 find_package(bravofinder3 REQUIRED)
 target_link_libraries(my_app PRIVATE bf::bravofinder3)
 ```
 
-The static archive (`libbravofinder3.a` / `bravofinder3.lib`) folds in the SQLite
-amalgamation, so no separate sqlite dependency is needed. On MSVC the SDK uses the
-default dynamic CRT (`/MD`); match that in the consuming project.
+The static archive (`libbravofinder3.a` / `bravofinder3.lib`) folds in the SQLite amalgamation, so no separate sqlite dependency is needed. On MSVC the SDK uses the default dynamic CRT (`/MD`); match that in the consuming project.
 
 **From source (FetchContent)**:
 
@@ -106,23 +76,15 @@ FetchContent_MakeAvailable(BravoFinder)
 target_link_libraries(my_app PRIVATE bf::bravofinder3)
 ```
 
-The public entry point is `bf::NavDatabase` (`#include "io/nav_database.h"`); headers
-are included as `core/...` / `io/...` rooted at `bf/`.
+The public entry point is `bf::NavDatabase` (`#include "io/nav_database.h"`); headers are included as `core/...` / `io/...` rooted at `bf/`.
 
 ## Usage
 
 ### MCP server (`bf-mcp-stdio`)
 
-BravoFinder also ships a local MCP server that exposes `bf route` and `bf query`
-as MCP tools over stdio, so an LLM client can ask for routes and look up
-navigation data directly. It is a thin, zero-dependency (beyond the project's
-own library) stdio JSON-RPC server.
+BravoFinder also ships a local MCP server that exposes `bf route` and `bf query` as MCP tools over stdio, so an LLM client can ask for routes and look up navigation data directly. It is a thin, zero-dependency (beyond the project's own library) stdio JSON-RPC server.
 
-It is pointed at a **directory** of `.bfdb` caches (not a single file) and can
-serve multiple AIRAC cycles from it: each cycle's database is opened lazily on
-first use and cached. Every tool takes an optional `cycle` argument (omit for
-the newest), and a `list_cycles` tool enumerates what is available. A
-single-cycle deployment is just a directory holding one cache.
+It is pointed at a **directory** of `.bfdb` caches (not a single file) and can serve multiple AIRAC cycles from it: each cycle's database is opened lazily on first use and cached. Every tool takes an optional `cycle` argument (omit for the newest), and a `list_cycles` tool enumerates what is available. A single-cycle deployment is just a directory holding one cache.
 
 Build it alongside the CLI:
 
@@ -131,8 +93,7 @@ cmake --preset release && cmake --build --preset release   # or: debug
 # binary: build/release/apps/mcp_stdio/bf-mcp-stdio
 ```
 
-Point it at a directory and run it (it fails fast at startup if the directory
-holds no `nav_<cycle>.bfdb` cache):
+Point it at a directory and run it (it fails fast at startup if the directory holds no `nav_<cycle>.bfdb` cache):
 
 ```bash
 # The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
@@ -140,30 +101,15 @@ BRAVOFINDER_NAVDATA=navdata bf-mcp-stdio
 bf-mcp-stdio --db-dir /path/to/caches
 ```
 
-Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the
-`lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways` /
-`lookup_navaid_detail` / `lookup_holds` batch lookups plus `lookup_procedure_legs`
-(a named procedure's per-leg detail; mirroring `bf query`), and `list_cycles`. See
-[apps/mcp_stdio/README.md](apps/mcp_stdio/README.md) for the full tool reference,
-argument semantics, and client configuration.
+Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the `lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways` / `lookup_navaid_detail` / `lookup_holds` batch lookups plus `lookup_procedure_legs` (a named procedure's per-leg detail; mirroring `bf query`), and `list_cycles`. See [apps/mcp_stdio/README.md](apps/mcp_stdio/README.md) for the full tool reference, argument semantics, and client configuration.
 
 `bf build` (cache creation) remains a CLI concern and is not exposed as a tool.
 
 ### HTTP server (`bf-http`)
 
-BravoFinder also ships an HTTP+JSON query server for an internal (e.g. Go)
-gateway to call over the network. It exposes the same route-finding and
-navigation-data lookups as the MCP server, but as REST-style endpoints. It is a
-hand-rolled transport over [libuv](https://github.com/libuv/libuv) (async I/O +
-a worker threadpool) and [llhttp](https://github.com/nodejs/llhttp) (Node's HTTP
-parser): a single event-loop thread does all non-blocking I/O, and each route
-computation is offloaded to the threadpool, so one loop scales to many
-connections.
+BravoFinder also ships an HTTP+JSON query server for an internal (e.g. Go) gateway to call over the network. It exposes the same route-finding and navigation-data lookups as the MCP server, but as REST-style endpoints. It is a hand-rolled transport over [libuv](https://github.com/libuv/libuv) (async I/O + a worker threadpool) and [llhttp](https://github.com/nodejs/llhttp) (Node's HTTP parser): a single event-loop thread does all non-blocking I/O, and each route computation is offloaded to the threadpool, so one loop scales to many connections.
 
-Like the MCP server, it is pointed at a **directory** of `.bfdb` caches and can
-serve multiple AIRAC cycles (query endpoints accept an optional `?cycle=2601`,
-defaulting to the newest). It fails fast at startup if the directory holds no
-cache.
+Like the MCP server, it is pointed at a **directory** of `.bfdb` caches and can serve multiple AIRAC cycles (query endpoints accept an optional `?cycle=2601`, defaulting to the newest). It fails fast at startup if the directory holds no cache.
 
 Build and run it:
 
@@ -177,8 +123,7 @@ bf-http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
 # --io-timeout SEC (header/body read + idle keep-alive).
 ```
 
-Endpoints (all query endpoints are `POST` with a JSON body; a batch lookup takes
-`{"ids":[...]}`, a single lookup is a one-element array):
+Endpoints (all query endpoints are `POST` with a JSON body; a batch lookup takes `{"ids":[...]}`, a single lookup is a one-element array):
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -189,14 +134,7 @@ Endpoints (all query endpoints are `POST` with a JSON body; a batch lookup takes
 | GET | `/v1/cycles` | list the servable AIRAC cycles |
 | GET | `/healthz` `/readyz` | liveness / readiness probes |
 
-Errors return `{"error":"..."}` with an HTTP status: **400** for a malformed
-request (bad JSON, missing/invalid field, bad `?cycle=`), **404** when nothing
-matched (all ids missing, or an unknown path), and **422** when a well-formed
-request cannot be satisfied (no route, a bad route token). Request bodies over
-`--max-body` get **413**; `Transfer-Encoding: chunked` is refused. See
-[apps/http_server/README.md](apps/http_server/README.md) for the full per-endpoint
-request/response contract, and [docs/http-service.zh-CN.md](docs/http-service.zh-CN.md)
-for the design.
+Errors return `{"error":"..."}` with an HTTP status: **400** for a malformed request (bad JSON, missing/invalid field, bad `?cycle=`), **404** when nothing matched (all ids missing, or an unknown path), and **422** when a well-formed request cannot be satisfied (no route, a bad route token). Request bodies over `--max-body` get **413**; `Transfer-Encoding: chunked` is refused. See [apps/http_server/README.md](apps/http_server/README.md) for the full per-endpoint request/response contract, and [docs/http-service.zh-CN.md](docs/http-service.zh-CN.md) for the design.
 
 `bf build` (cache creation) remains a CLI concern and is not exposed here.
 
@@ -276,38 +214,20 @@ bf query hold --db navdata/nav_2601.bfdb AE701
 bf --version
 ```
 
-Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an
-airport has procedure data, the route names the SID and STAR used in its `sid`/
-`star` fields (and the interchangeable procedures that share the same connection
-fix); in the route string and the leg list they show as the literal `SID`/`STAR`
-connectors.
+Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an airport has procedure data, the route names the SID and STAR used in its `sid`/ `star` fields (and the interchangeable procedures that share the same connection fix); in the route string and the leg list they show as the literal `SID`/`STAR` connectors.
 
-The `--format json` route output carries, alongside the filed route string and
-per-phase distances, an ordered `points[]` array (each `{ident, lat, lon}`) and a
-running `cumulative_nm` on every leg. `points` has one more entry than `legs`
-(N points, N-1 legs); the destination of leg *i* is `points[i+1]`, and the last
-`cumulative_nm` equals `total_distance_nm`.
+The `--format json` route output carries, alongside the filed route string and per-phase distances, an ordered `points[]` array (each `{ident, lat, lon}`) and a running `cumulative_nm` on every leg. `points` has one more entry than `legs` (N points, N-1 legs); the destination of leg *i* is `points[i+1]`, and the last `cumulative_nm` equals `total_distance_nm`.
 
-The `.bfdb` cache is a portable, little-endian binary snapshot. One unified file
-holds three sections sharing a global string pool: the route graph, the
-per-airport CIFP procedures (loaded on demand), and the radio-navaid attributes
-and holding patterns for the `navaid_detail` / `hold` lookups. The canonical name
-is `nav_<cycle>.bfdb`, encoding the AIRAC cycle so a directory can hold several
-cycles. It is derived from Navigraph/Jeppesen data and, like the source data,
-must not be redistributed (it is git-ignored).
+The `.bfdb` cache is a portable, little-endian binary snapshot. One unified file holds three sections sharing a global string pool: the route graph, the per-airport CIFP procedures (loaded on demand), and the radio-navaid attributes and holding patterns for the `navaid_detail` / `hold` lookups. The canonical name is `nav_<cycle>.bfdb`, encoding the AIRAC cycle so a directory can hold several cycles. It is derived from Navigraph/Jeppesen data and, like the source data, must not be redistributed (it is git-ignored).
 
 ## Navigation Data
 
-Navigation data is **not** included and must be supplied by the user. It is
-copyrighted (Navigraph / Jeppesen), licensed for recreational simulation use only,
-and must not be redistributed. Place your local data under `navdata/` (git-ignored).
+Navigation data is **not** included and must be supplied by the user. It is copyrighted (Navigraph / Jeppesen), licensed for recreational simulation use only, and must not be redistributed. Place your local data under `navdata/` (git-ignored).
 
 ## Documentation
 
-In-depth technical articles (in Chinese) live under [docs/](docs/README.md) —
-start with the routing-algorithm primer and follow the index from there.
+In-depth technical articles (in Chinese) live under [docs/](docs/README.md) — start with the routing-algorithm primer and follow the index from there.
 
 ## License
 
-[MIT](LICENSE). Third-party dependencies: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
-Contributing conventions: see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+[MIT](LICENSE). Third-party dependencies: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Contributing conventions: see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
