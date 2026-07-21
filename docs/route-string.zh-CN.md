@@ -99,6 +99,6 @@ if (legs[i].via == "DCT") {
 
 - **纯函数**:`BuildRouteString(first_point, legs)` 原地改写每个 leg 的 `via` 并填 `concurrent_airways`，无副作用、易测。属 `bf_core`。
 - **vector 而非 set 求交集**：每组并线最多 ~10 条，线性 `Intersect` 比 `std::set` 的树结构更轻 （`SplitDesignators` 用 `-` 拆分——真实 ATS 航路名是「字母+数字」无内部连字符，`-` 是无歧义分隔符）。
-- **JSON 作库 API**：序列化在 header-only 模板 `bf::WriteRouteJson`(`route_json.h`)里，靠 RapidJSON 风格 Writer 的鸭子接口，库用户自带 rapidjson 即可用，`bf3` 零新增依赖。
+- **JSON 作库 API**：序列化在 header-only 模板 `bf::WriteRouteJson`(`route_json.h`)里，靠 RapidJSON 风格 Writer 的鸭子接口，库用户自带 rapidjson 即可用，`bravofinder` 零新增依赖。
 
 单测覆盖折叠全场景(`route_string_test.cc`)与零依赖 JSON API(`route_json_test.cc` 用不链 rapidjson 的 StubWriter 驱动)。

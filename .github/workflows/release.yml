@@ -112,7 +112,7 @@ jobs:
         run: ctest --preset ${{ matrix.preset }} -j4 --timeout 300
 
       - name: Install SDK to staging
-        # staging/ gets libbravofinder3.a + public headers + cmake config + docs.
+        # staging/ gets libbravofinder.a + public headers + cmake config + docs.
         # The CLI/MCP executables are NOT installed (the binary archive collects
         # them from the build tree instead).
         run: cmake --install build/${{ matrix.preset }} --prefix staging

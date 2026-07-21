@@ -36,9 +36,9 @@ Build only what you need with `--target`:
 | `bf_mcp_stdio` | MCP stdio server (`apps/mcp_stdio/`) |
 | `bf_mcp_lib`   | MCP server library (static) |
 | `bf_http` | HTTP query server (`apps/http_server/`) |
-| `bf_query_core` | Shared query layer: registry + handlers, `bf::service` (static) |
+| `bf_query_lib` | Shared query layer: registry + handlers + typed entries, `bf::service` (static) |
 | `bf_tests` | Test runner |
-| `bf3` | The unified static library (`lib/`, alias `bf::bravofinder3`) |
+| `bravofinder` | The unified static library (`lib/`, alias `bf::bravofinder`) |
 
 ```bash
 cmake --build --preset debug --target bf_mcp_stdio    # just the MCP server
@@ -53,16 +53,16 @@ cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 
 ### Using the library (SDK)
 
-The route engine ships as a self-contained static library. Two ways to consume it, both under the single target name `bf::bravofinder3`:
+The route engine ships as a self-contained static library. Two ways to consume it, both under the single target name `bf::bravofinder`:
 
 **Pre-built SDK** — download a `bravofinder-sdk-*` archive from a [release](https://github.com/Bokjan/BravoFinder/releases), unpack it, and:
 
 ```cmake
-find_package(bravofinder3 REQUIRED)
-target_link_libraries(my_app PRIVATE bf::bravofinder3)
+find_package(bravofinder REQUIRED)
+target_link_libraries(my_app PRIVATE bf::bravofinder)
 ```
 
-The static archive (`libbravofinder3.a` / `bravofinder3.lib`) folds in the SQLite amalgamation, so no separate sqlite dependency is needed. On MSVC the SDK uses the default dynamic CRT (`/MD`); match that in the consuming project.
+The static archive (`libbravofinder.a` / `bravofinder.lib`) folds in the SQLite amalgamation, so no separate sqlite dependency is needed. On MSVC the SDK uses the default dynamic CRT (`/MD`); match that in the consuming project.
 
 **From source (FetchContent)**:
 
@@ -71,9 +71,9 @@ include(FetchContent)
 FetchContent_Declare(
   BravoFinder
   GIT_REPOSITORY https://github.com/Bokjan/BravoFinder.git
-  GIT_TAG v3.7.2)
+  GIT_TAG v3)
 FetchContent_MakeAvailable(BravoFinder)
-target_link_libraries(my_app PRIVATE bf::bravofinder3)
+target_link_libraries(my_app PRIVATE bf::bravofinder)
 ```
 
 The public entry point is `bf::NavDatabase` (`#include "io/nav_database.h"`); headers are included as `core/...` / `io/...` rooted at `bf/`.
