@@ -83,20 +83,16 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
       result = bf::service::LookupProceduresMixed(db.value(), selectors, fmt);
     }
 
-    // Exit non-zero only when every requested id was missing (a wholly failed
-    // lookup, status 404), so scripts can detect a wholly failed lookup; a
-    // partial hit still succeeds.
-    if (result.status >= 400) {
-      std::cerr << result.body;
-      if (fmt == bf::service::OutputFormat::kJson) {
-        std::cerr << "\n";
-      }
-      exit_code = EXIT_FAILURE;
-      return;
-    }
+    // The lookup body (matches / "not found" lines / null array) always goes to
+    // stdout, parallel to the input, so scripts can capture it uniformly. Exit
+    // non-zero only when every requested id was missing (status 404); a partial
+    // hit still succeeds.
     std::cout << result.body;
     if (fmt == bf::service::OutputFormat::kJson) {
       std::cout << "\n";
+    }
+    if (result.status >= 400) {
+      exit_code = EXIT_FAILURE;
     }
   });
 }

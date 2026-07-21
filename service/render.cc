@@ -122,6 +122,16 @@ void WriteRouteText(std::ostream& os, const bf::Route& route) {
   }
 }
 
+// One airport's procedure summaries as text (shared by RenderProcedures and the
+// summary branch of RenderProceduresMixed).
+void WriteProceduresSummaryText(std::ostream& os, const bf::AirportProcedures& ap) {
+  os << ap.icao << ": " << ap.procedures.size() << " procedures\n";
+  for (const bf::ProcedureSummary& p : ap.procedures) {
+    os << "  " << bf::ToString(p.type) << " " << p.name << "." << p.transition
+       << (p.runway.empty() ? "" : "  rwy " + p.runway) << "\n";
+  }
+}
+
 }  // namespace
 
 std::string RenderRoutes(OutputFormat fmt, const std::vector<bf::Route>& routes,
@@ -230,12 +240,7 @@ std::string RenderProcedures(OutputFormat fmt, const std::vector<std::string>& i
       os << ids[i] << ": not found\n";
       continue;
     }
-    const bf::AirportProcedures& ap = *results[i];
-    os << ap.icao << ": " << ap.procedures.size() << " procedures\n";
-    for (const bf::ProcedureSummary& p : ap.procedures) {
-      os << "  " << bf::ToString(p.type) << " " << p.name << "." << p.transition
-         << (p.runway.empty() ? "" : "  rwy " + p.runway) << "\n";
-    }
+    WriteProceduresSummaryText(os, *results[i]);
   }
   return os.str();
 }
@@ -383,6 +388,40 @@ std::string RenderProcedureDetail(OutputFormat fmt, const bf::AirportProcedureDe
         os << "  " << leg.speed_limit_kt << " kt";
       }
       os << "\n";
+    }
+  }
+  return os.str();
+}
+
+// ---- Mixed procedure selectors (ported from cmd_query.cc RunQuery) ----------
+
+std::string RenderProceduresMixed(
+    OutputFormat fmt, const std::vector<std::string>& labels,
+    const std::vector<std::optional<bf::AirportProcedures>>& summaries,
+    const std::vector<std::optional<bf::AirportProcedureDetail>>& details) {
+  if (fmt == OutputFormat::kJson) {
+    JsonBuf buf;
+    buf.writer().StartArray();
+    for (size_t i = 0; i < labels.size(); ++i) {
+      if (summaries[i]) {
+        bf::WriteProceduresJson(buf.writer(), *summaries[i]);
+      } else if (details[i]) {
+        bf::WriteProcedureDetailJson(buf.writer(), *details[i]);
+      } else {
+        buf.writer().Null();
+      }
+    }
+    buf.writer().EndArray();
+    return buf.str();
+  }
+  std::ostringstream os;
+  for (size_t i = 0; i < labels.size(); ++i) {
+    if (summaries[i]) {
+      WriteProceduresSummaryText(os, *summaries[i]);
+    } else if (details[i]) {
+      os << RenderProcedureDetail(fmt, *details[i]);
+    } else {
+      os << labels[i] << ": not found\n";
     }
   }
   return os.str();

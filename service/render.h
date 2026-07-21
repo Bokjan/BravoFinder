@@ -55,6 +55,17 @@ std::string RenderHolds(OutputFormat fmt, const std::vector<std::string>& ids,
 // JSON: the procedure-detail object. Text: the per-transition / per-leg block.
 std::string RenderProcedureDetail(OutputFormat fmt, const bf::AirportProcedureDetail& d);
 
+// ---- Mixed procedure selectors (CLI `query procedure`) ----------------------
+// Parallel vectors: for each selector exactly one of summaries[i] / details[i]
+// is set (a bare airport => summary; an "airport/procedure" => detail); both
+// nullopt => a miss, labeled by labels[i]. JSON: one array, heterogeneous
+// elements (summary object / detail object / null). Text: per-selector blocks
+// (summary list, per-leg detail, or "<label>: not found").
+std::string RenderProceduresMixed(
+    OutputFormat fmt, const std::vector<std::string>& labels,
+    const std::vector<std::optional<bf::AirportProcedures>>& summaries,
+    const std::vector<std::optional<bf::AirportProcedureDetail>>& details);
+
 // ---- Error payload ----------------------------------------------------------
 // JSON: {"error":"<message>"}. Text: "error: <message>\n".
 std::string RenderError(OutputFormat fmt, const std::string& message);

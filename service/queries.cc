@@ -8,18 +8,13 @@
 
 #include "queries.h"
 
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
-
+#include <algorithm>
 #include <chrono>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
 
-#include "core/query/query_json.h"
 #include "core/routing/route.h"
-#include "core/routing/route_json.h"
 #include "io/nav_database.h"
 #include "render.h"
 
@@ -76,13 +71,8 @@ HandlerResult RunGroupedLookup(const bf::NavDatabase& db, const std::vector<std:
   const auto start = std::chrono::steady_clock::now();
   std::vector<std::vector<Info>> results = lookup(db, ids);
   const uint32_t elapsed = ElapsedMs(start);
-  bool all_empty = true;
-  for (const auto& group : results) {
-    if (!group.empty()) {
-      all_empty = false;
-      break;
-    }
-  }
+  const bool all_empty =
+      std::all_of(results.begin(), results.end(), [](const auto& group) { return group.empty(); });
   if (all_empty) {
     return {render(fmt, ids, results), kNotFound, 0};
   }
@@ -97,13 +87,8 @@ HandlerResult RunOptionalLookup(const bf::NavDatabase& db, const std::vector<std
   const auto start = std::chrono::steady_clock::now();
   std::vector<std::optional<Info>> results = lookup(db, ids);
   const uint32_t elapsed = ElapsedMs(start);
-  bool all_missing = true;
-  for (const auto& opt : results) {
-    if (opt) {
-      all_missing = false;
-      break;
-    }
-  }
+  const bool all_missing =
+      std::none_of(results.begin(), results.end(), [](const auto& opt) { return opt.has_value(); });
   if (all_missing) {
     return {render(fmt, ids, results), kNotFound, 0};
   }
@@ -185,15 +170,6 @@ HandlerResult LookupProcedureLegs(const bf::NavDatabase& db, const std::string& 
 
 namespace {
 
-// Render one summary result as text (mirrors RenderProcedures' per-entry text).
-void WriteProceduresSummaryText(std::ostream& os, const bf::AirportProcedures& ap) {
-  os << ap.icao << ": " << ap.procedures.size() << " procedures\n";
-  for (const bf::ProcedureSummary& p : ap.procedures) {
-    os << "  " << bf::ToString(p.type) << " " << p.name << "." << p.transition
-       << (p.runway.empty() ? "" : "  rwy " + p.runway) << "\n";
-  }
-}
-
 // The label for a selector in a "not found" line: "KJFK" or "KJFK/DEEZZ5".
 std::string SelectorLabel(const ProcedureSelector& s) {
   return s.procedure.empty() ? s.airport : s.airport + "/" + s.procedure;
@@ -206,64 +182,49 @@ HandlerResult LookupProceduresMixed(const bf::NavDatabase& db,
                                     OutputFormat fmt) {
   const auto start = std::chrono::steady_clock::now();
 
-  // Two result streams: summaries (optional<AirportProcedures>) and details
-  // (optional<AirportProcedureDetail>), each parallel to `selectors` and
-  // nullopt for the selectors of the other kind. One pass, one engine call per
-  // selector.
+  // Two result streams parallel to `selectors`: summaries (a bare airport) and
+  // details (an "airport/procedure" pair); each selector fills exactly one, the
+  // other stays nullopt. The bare-airport selectors are gathered and looked up
+  // in a single batched LookupProcedures call, then scattered back by index;
+  // detail selectors have no batch API and are looked up one at a time.
   std::vector<std::optional<bf::AirportProcedures>> summaries(selectors.size());
   std::vector<std::optional<bf::AirportProcedureDetail>> details(selectors.size());
+  std::vector<std::string> summary_airports;
+  std::vector<size_t> summary_indices;
   for (size_t i = 0; i < selectors.size(); ++i) {
     if (selectors[i].procedure.empty()) {
-      summaries[i] = std::move(db.LookupProcedures({selectors[i].airport})[0]);
+      summary_airports.push_back(selectors[i].airport);
+      summary_indices.push_back(i);
     } else {
       details[i] = db.LookupProcedureDetail(selectors[i].airport, selectors[i].procedure);
     }
   }
+  if (!summary_airports.empty()) {
+    std::vector<std::optional<bf::AirportProcedures>> looked =
+        db.LookupProcedures(summary_airports);
+    for (size_t j = 0; j < summary_indices.size(); ++j) {
+      summaries[summary_indices[j]] = std::move(looked[j]);
+    }
+  }
   const uint32_t elapsed = ElapsedMs(start);
 
-  bool all_missed = true;
-  for (size_t i = 0; i < selectors.size(); ++i) {
-    if (summaries[i] || details[i]) {
-      all_missed = false;
-      break;
-    }
+  const bool any_summary = std::any_of(summaries.begin(), summaries.end(),
+                                       [](const auto& opt) { return opt.has_value(); });
+  const bool any_detail =
+      std::any_of(details.begin(), details.end(), [](const auto& opt) { return opt.has_value(); });
+  const bool all_missed = !any_summary && !any_detail;
+
+  std::vector<std::string> labels;
+  labels.reserve(selectors.size());
+  for (const ProcedureSelector& s : selectors) {
+    labels.push_back(SelectorLabel(s));
   }
 
-  if (fmt == OutputFormat::kJson) {
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    writer.SetMaxDecimalPlaces(6);
-    writer.StartArray();
-    for (size_t i = 0; i < selectors.size(); ++i) {
-      if (summaries[i]) {
-        bf::WriteProceduresJson(writer, *summaries[i]);
-      } else if (details[i]) {
-        bf::WriteProcedureDetailJson(writer, *details[i]);
-      } else {
-        writer.Null();
-      }
-    }
-    writer.EndArray();
-    if (all_missed) {
-      return {buffer.GetString(), kNotFound, 0};
-    }
-    return {buffer.GetString(), kOk, elapsed};
-  }
-
-  std::ostringstream os;
-  for (size_t i = 0; i < selectors.size(); ++i) {
-    if (summaries[i]) {
-      WriteProceduresSummaryText(os, *summaries[i]);
-    } else if (details[i]) {
-      os << RenderProcedureDetail(fmt, *details[i]);
-    } else {
-      os << SelectorLabel(selectors[i]) << ": not found\n";
-    }
-  }
+  std::string body = RenderProceduresMixed(fmt, labels, summaries, details);
   if (all_missed) {
-    return {os.str(), kNotFound, 0};
+    return {std::move(body), kNotFound, 0};
   }
-  return {os.str(), kOk, elapsed};
+  return {std::move(body), kOk, elapsed};
 }
 
 }  // namespace bf::service
