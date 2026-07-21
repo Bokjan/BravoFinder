@@ -16,7 +16,7 @@ The tool loads navigation data through a pluggable source loader (default: X-Pla
 
 A single loaded database is safe to query concurrently from multiple threads.
 
-The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` CLI, an MCP stdio server (`bf-mcp-stdio`) for LLM clients, and an HTTP+JSON server (`bf-http`) for network callers. The latter two share one query layer (`apps/query_core`, namespace `bf::service`).
+The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` CLI, an MCP stdio server (`bf-mcp`) for LLM clients, and an HTTP+JSON server (`bf-http`) for network callers. The latter two share one service layer (`service/`, namespace `bf::service`).
 
 ## Building
 
@@ -33,15 +33,15 @@ Build only what you need with `--target`:
 | Target | What it builds |
 |---|---|
 | `bf` | CLI tool (`apps/cli/`) |
-| `bf_mcp_stdio` | MCP stdio server (`apps/mcp_stdio/`) |
+| `bf_mcp` | MCP stdio server (`apps/mcp/`) |
 | `bf_mcp_lib`   | MCP server library (static) |
-| `bf_http` | HTTP query server (`apps/http_server/`) |
-| `bf_query_lib` | Shared query layer: registry + handlers + typed entries, `bf::service` (static) |
+| `bf_http` | HTTP query server (`apps/http/`) |
+| `bf_service_lib` | Shared service layer: registry + handlers + typed entries, `bf::service` (static) |
 | `bf_tests` | Test runner |
 | `bravofinder` | The unified static library (`lib/`, alias `bf::bravofinder`) |
 
 ```bash
-cmake --build --preset debug --target bf_mcp_stdio    # just the MCP server
+cmake --build --preset debug --target bf_mcp    # just the MCP server
 cmake --build --preset debug --target bf bf_http      # CLI + HTTP server
 ```
 
@@ -80,7 +80,7 @@ The public entry point is `bf::NavDatabase` (`#include "io/nav_database.h"`); he
 
 ## Usage
 
-### MCP server (`bf-mcp-stdio`)
+### MCP server (`bf-mcp`)
 
 BravoFinder also ships a local MCP server that exposes `bf route` and `bf query` as MCP tools over stdio, so an LLM client can ask for routes and look up navigation data directly. It is a thin, zero-dependency (beyond the project's own library) stdio JSON-RPC server.
 
@@ -90,18 +90,18 @@ Build it alongside the CLI:
 
 ```bash
 cmake --preset release && cmake --build --preset release   # or: debug
-# binary: build/release/apps/mcp_stdio/bf-mcp-stdio
+# binary: build/release/apps/mcp/bf-mcp
 ```
 
 Point it at a directory and run it (it fails fast at startup if the directory holds no `nav_<cycle>.bfdb` cache):
 
 ```bash
 # The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
-BRAVOFINDER_NAVDATA=navdata bf-mcp-stdio
-bf-mcp-stdio --db-dir /path/to/caches
+BRAVOFINDER_NAVDATA=navdata bf-mcp
+bf-mcp --db-dir /path/to/caches
 ```
 
-Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the `lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways` / `lookup_navaid_detail` / `lookup_holds` batch lookups plus `lookup_procedure_legs` (a named procedure's per-leg detail; mirroring `bf query`), and `list_cycles`. See [apps/mcp_stdio/README.md](apps/mcp_stdio/README.md) for the full tool reference, argument semantics, and client configuration.
+Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the `lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways` / `lookup_navaid_detail` / `lookup_holds` batch lookups plus `lookup_procedure_legs` (a named procedure's per-leg detail; mirroring `bf query`), and `list_cycles`. See [apps/mcp/README.md](apps/mcp/README.md) for the full tool reference, argument semantics, and client configuration.
 
 `bf build` (cache creation) remains a CLI concern and is not exposed as a tool.
 
@@ -115,7 +115,7 @@ Build and run it:
 
 ```bash
 cmake --preset release && cmake --build --preset release   # or: debug
-# binary: build/release/apps/http_server/bf-http
+# binary: build/release/apps/http/bf-http
 
 # The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
 bf-http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
@@ -134,7 +134,7 @@ Endpoints (all query endpoints are `POST` with a JSON body; a batch lookup takes
 | GET | `/v1/cycles` | list the servable AIRAC cycles |
 | GET | `/healthz` `/readyz` | liveness / readiness probes |
 
-Errors return `{"error":"..."}` with an HTTP status: **400** for a malformed request (bad JSON, missing/invalid field, bad `?cycle=`), **404** when nothing matched (all ids missing, or an unknown path), and **422** when a well-formed request cannot be satisfied (no route, a bad route token). Request bodies over `--max-body` get **413**; `Transfer-Encoding: chunked` is refused. See [apps/http_server/README.md](apps/http_server/README.md) for the full per-endpoint request/response contract, and [docs/http-service.zh-CN.md](docs/http-service.zh-CN.md) for the design.
+Errors return `{"error":"..."}` with an HTTP status: **400** for a malformed request (bad JSON, missing/invalid field, bad `?cycle=`), **404** when nothing matched (all ids missing, or an unknown path), and **422** when a well-formed request cannot be satisfied (no route, a bad route token). Request bodies over `--max-body` get **413**; `Transfer-Encoding: chunked` is refused. See [apps/http/README.md](apps/http/README.md) for the full per-endpoint request/response contract, and [docs/http-service.zh-CN.md](docs/http-service.zh-CN.md) for the design.
 
 `bf build` (cache creation) remains a CLI concern and is not exposed here.
 

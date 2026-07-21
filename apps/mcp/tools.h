@@ -1,8 +1,8 @@
-// tools.h — the MCP tool abstraction for bf-mcp-stdio.
+// tools.h — the MCP tool abstraction for bf-mcp.
 //
 // A Tool is fully self-describing: it carries its MCP name, a human/LLM-facing
 // description, its JSON-Schema input descriptor, and the handler that implements
-// it. The handler logic itself lives in bf::service (apps/query_core), shared
+// it. The handler logic itself lives in bf::service (service/), shared
 // with the HTTP transport; MakeTools() attaches the MCP-specific description and
 // JSON-Schema to each shared handler by name and adapts its HandlerResult to the
 // {json_text, is_error} shape the stdio server writes. The server owns the tool

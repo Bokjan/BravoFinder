@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.14.0
+        VERSION 3.15.0
         DESCRIPTION "A realistic / compliant flight route engine"
         LANGUAGES C CXX)
 
@@ -98,7 +98,7 @@ set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 
 # libuv (event-loop async I/O + a built-in worker threadpool) and llhttp (Node's
 # HTTP/1.1 parser): the two C libraries behind the hand-rolled HTTP query server
-# (apps/http_server). Both are proper CMake projects with native MSVC support;
+# (apps/http). Both are proper CMake projects with native MSVC support;
 # libuv abstracts epoll/kqueue/IOCP under one API. We build only the static
 # libraries, no tests/benchmarks. As C libraries they are untouched by the
 # project's C++ -Werror (CMAKE_C_FLAGS is unset, exactly like the SQLite
@@ -139,10 +139,10 @@ endforeach()
 # Subdirectories
 # ---------------------------------------------------------------------------
 add_subdirectory(lib)
-add_subdirectory(apps/query_core)
+add_subdirectory(service)
 add_subdirectory(apps/cli)
-add_subdirectory(apps/mcp_stdio)
-add_subdirectory(apps/http_server)
+add_subdirectory(apps/mcp)
+add_subdirectory(apps/http)
 
 if(BRAVOFINDER_BUILD_BENCH)
   add_subdirectory(bench)

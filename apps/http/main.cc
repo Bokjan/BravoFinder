@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
   }
   bf::SetEnv("UV_THREADPOOL_SIZE", std::to_string(worker_threads));
 
-  // Build the registry (fail-fast, matching bf-mcp-stdio).
+  // Build the registry (fail-fast, matching bf-mcp).
   bf::Result<bf::BfdbInventory> inventory = bf::BfdbInventory::Scan(db_dir);
   if (!inventory) {
     std::cerr << "error: " << inventory.error().message << "\n";
@@ -125,7 +125,7 @@ int main(int argc, char** argv) {
   // (listener, live connections, signal watchers) and run the loop again: the
   // pending uv_work_t requests keep it alive until they finish, so this final run
   // delivers their completions and every handle's close callback before we exit.
-  // Mirrors the teardown idiom in http_server_test.cc.
+  // Mirrors the teardown idiom in http_test.cc.
   uv_walk(
       &loop,
       [](uv_handle_t* h, void*) {

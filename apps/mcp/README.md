@@ -1,4 +1,4 @@
-# bf-mcp-stdio
+# bf-mcp
 
 BravoFinder's local MCP server: it exposes the `bf route` and `bf query` capabilities as MCP tools over stdio for LLM clients. This file is written for **agents / configuration assistants**: the first half is how to run the server and wire it into an MCP client; the second half is a tool reference.
 
@@ -28,11 +28,11 @@ cmake --preset release && cmake --build --preset release
 cmake --preset debug   && cmake --build --preset debug
 ```
 
-Output path (CMake target `bf_mcp_stdio`, external name `bf-mcp-stdio`):
+Output path (CMake target `bf_mcp`, external name `bf-mcp`):
 
 ```
-build/release/apps/mcp_stdio/bf-mcp-stdio
-build/debug/apps/mcp_stdio/bf-mcp-stdio
+build/release/apps/mcp/bf-mcp
+build/debug/apps/mcp/bf-mcp
 ```
 
 ## Startup and cache location
@@ -48,13 +48,13 @@ The directory is resolved in this order:
 ```bash
 # Simplest: navdata/ must contain at least one nav_<cycle>.bfdb, located
 # via BRAVOFINDER_NAVDATA.
-BRAVOFINDER_NAVDATA=navdata bf-mcp-stdio
+BRAVOFINDER_NAVDATA=navdata bf-mcp
 
 # Explicit directory holding one or more caches.
-bf-mcp-stdio --db-dir /path/to/caches
+bf-mcp --db-dir /path/to/caches
 ```
 
-> Caches are produced by `bf build` (see the repo-root README). `bf-mcp-stdio` itself does **not** expose `build` — creating caches is a CLI / deployment concern.
+> Caches are produced by `bf build` (see the repo-root README). `bf-mcp` itself does **not** expose `build` — creating caches is a CLI / deployment concern.
 
 ## Wiring into an MCP client
 
@@ -64,7 +64,7 @@ In the client's MCP server config, point `command` at the compiled binary and pa
 {
   "mcpServers": {
     "bravofinder": {
-      "command": "/abs/path/to/bf-mcp-stdio",
+      "command": "/abs/path/to/bf-mcp",
       "args": ["--db-dir", "/path/to/caches"]
     }
   }
@@ -77,7 +77,7 @@ Using an environment variable instead (most clients support an `env` field):
 {
   "mcpServers": {
     "bravofinder": {
-      "command": "/abs/path/to/bf-mcp-stdio",
+      "command": "/abs/path/to/bf-mcp",
       "env": { "BRAVOFINDER_NAVDATA": "/path/to/navdata" }
     }
   }

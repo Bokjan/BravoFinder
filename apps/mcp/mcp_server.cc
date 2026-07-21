@@ -1,4 +1,4 @@
-// mcp_server.cc — the stdio JSON-RPC transport for bf-mcp-stdio.
+// mcp_server.cc — the stdio JSON-RPC transport for bf-mcp.
 //
 // This file is the protocol layer only: it reads JSON-RPC requests from stdin,
 // dispatches the three methods MCP needs (initialize / tools/list / tools/call),
@@ -243,7 +243,7 @@ void McpServer::HandleInitialize(const rapidjson::Value& id) {
   auto& alloc = result.GetAllocator();
   result.AddMember("protocolVersion", rapidjson::Value(kProtocolVersion, alloc), alloc);
   rapidjson::Value server_info(rapidjson::kObjectType);
-  server_info.AddMember("name", rapidjson::Value("bf-mcp-stdio", alloc), alloc);
+  server_info.AddMember("name", rapidjson::Value("bf-mcp", alloc), alloc);
   server_info.AddMember("version", rapidjson::Value(kBravoFinderVersion, alloc), alloc);
   result.AddMember("serverInfo", server_info, alloc);
   rapidjson::Value capabilities(rapidjson::kObjectType);

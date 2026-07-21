@@ -1,4 +1,4 @@
-// bf-mcp-stdio: a local stdio MCP server exposing BravoFinder's route-finding
+// bf-mcp: a local stdio MCP server exposing BravoFinder's route-finding
 // and navigation-data lookup as MCP tools.
 //
 // This file is only the entry point: it scans a directory of `.bfdb` caches

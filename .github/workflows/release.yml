@@ -121,8 +121,8 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           strip build/${{ matrix.preset }}/apps/cli/bf
-          strip build/${{ matrix.preset }}/apps/mcp_stdio/bf-mcp-stdio
-          strip build/${{ matrix.preset }}/apps/http_server/bf-http
+          strip build/${{ matrix.preset }}/apps/mcp/bf-mcp
+          strip build/${{ matrix.preset }}/apps/http/bf-http
 
       - name: Stage binary archive contents
         shell: bash
@@ -130,12 +130,12 @@ jobs:
           mkdir -p pkg/bin pkg/share/doc/BravoFinder
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp build/${{ matrix.preset }}/apps/cli/Release/bf.exe pkg/bin/
-            cp build/${{ matrix.preset }}/apps/mcp_stdio/Release/bf-mcp-stdio.exe pkg/bin/
-            cp build/${{ matrix.preset }}/apps/http_server/Release/bf-http.exe pkg/bin/
+            cp build/${{ matrix.preset }}/apps/mcp/Release/bf-mcp.exe pkg/bin/
+            cp build/${{ matrix.preset }}/apps/http/Release/bf-http.exe pkg/bin/
           else
             cp build/${{ matrix.preset }}/apps/cli/bf pkg/bin/
-            cp build/${{ matrix.preset }}/apps/mcp_stdio/bf-mcp-stdio pkg/bin/
-            cp build/${{ matrix.preset }}/apps/http_server/bf-http pkg/bin/
+            cp build/${{ matrix.preset }}/apps/mcp/bf-mcp pkg/bin/
+            cp build/${{ matrix.preset }}/apps/http/bf-http pkg/bin/
           fi
           # bf-http statically links libuv + llhttp (MIT), so the archive must
           # carry their license text; THIRD_PARTY_LICENSES.md covers every dep.

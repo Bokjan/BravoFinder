@@ -12,7 +12,7 @@ BravoFinder's HTTP query server: it exposes the `bf route` and `bf query` capabi
 
 ```bash
 cmake --preset release && cmake --build --preset release
-# binary: build/release/apps/http_server/bf-http
+# binary: build/release/apps/http/bf-http
 
 # The directory is --db-dir, else BRAVOFINDER_NAVDATA, else navdata/.
 bf-http --db-dir /path/to/caches --host 0.0.0.0 --port 8080

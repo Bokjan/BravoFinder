@@ -11,9 +11,9 @@
 - 进程隔离：C++ 崩溃不连坐 Go 网关，Go 保持 `CGO_ENABLED=0`。
 - 消费侧要强类型对象时，Go 的 `encoding/json` 反序列化即得——比 cgo 手写 C-struct 镜像省事得多。
 
-## 复用：中性 query_core / `bf::service`
+## 复用：中性 service 层 / `bf::service`
 
-查询逻辑不属于任何一种传输。九个 handler（`find_routes` / `parse_route` / 各批量 lookup）+ 多周期 `NavDatabaseRegistry` 都在 **`apps/query_core`（命名空间 `bf::service`）**里，MCP 与 HTTP **平级依赖**它，没有 `http → mcp` 的别扭依赖。
+查询逻辑不属于任何一种传输。九个 handler（`find_routes` / `parse_route` / 各批量 lookup）+ 多周期 `NavDatabaseRegistry` 都在 **顶层 `service/`（命名空间 `bf::service`，target `bf_service_lib`）**里，MCP 与 HTTP **平级依赖**它，没有 `http → mcp` 的别扭依赖。它是 app 层库（带 rapidjson），与 `lib/` 引擎分开，保住引擎无 JSON/网络依赖。
 
 handler 返回 `HandlerResult{body, status}`（HTTP 风格状态码）。两种传输各取所需：MCP 只看 `is_error = (status >= 400)`；HTTP 直接用 status。新增一个查询能力 = 在 `bf::service` 加一个 handler，两端自动受益。
 
@@ -45,7 +45,7 @@ loop 线程：连接仍存活则写响应，否则丢弃结果
 - `after_work` 回到 loop 线程后先查 `IsAlive()`：连接已关就**丢弃响应**，不写。
 - `self_` 只在两个 handle（tcp + timer）都关完后释放，对象随最后一个在途引用消失而析构。
 
-集成测试专门覆盖"计算途中断开不崩"（`tests/integration/http_server_test.cc`），并跑 tsan。
+集成测试专门覆盖"计算途中断开不崩"（`tests/integration/http_test.cc`），并跑 tsan。
 
 ### 手搓 HTTP 的安全硬化
 

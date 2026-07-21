@@ -1,4 +1,4 @@
-// http_server_test.cc — end-to-end coverage of the bf-http transport: a real
+// http_test.cc — end-to-end coverage of the bf-http transport: a real
 // libuv server on a loopback port, driven over an actual socket, exercising the
 // hardening paths llhttp does not handle. This is where the "does the whole
 // thing behave" checks live (see docs/http-service): success shapes, the

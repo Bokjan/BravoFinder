@@ -1,6 +1,6 @@
-// tools.cc — the MCP capabilities exposed by bf-mcp-stdio.
+// tools.cc — the MCP capabilities exposed by bf-mcp.
 //
-// The query logic itself lives in bf::service (apps/query_core), shared with the
+// The query logic itself lives in bf::service (service/), shared with the
 // HTTP transport. This file owns only the MCP-specific dressing: each tool's
 // human/LLM-facing description and its JSON-Schema input descriptor. MakeTools()
 // pulls the shared handlers by name, attaches that dressing, and adapts each
