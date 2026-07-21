@@ -11,7 +11,7 @@ target_link_libraries(bf_mcp_lib PUBLIC bf_service_lib)
 target_include_directories(bf_mcp_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(bf_mcp main.cc)
-target_link_libraries(bf_mcp PRIVATE bf_mcp_lib)
+target_link_libraries(bf_mcp PRIVATE bf_mcp_lib CLI11::CLI11)
 
 # External-facing name uses a hyphen (MCP ecosystem convention); the CMake
 # target keeps the snake_case name required by Google Style.

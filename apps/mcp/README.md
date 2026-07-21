@@ -54,6 +54,8 @@ BRAVOFINDER_NAVDATA=navdata bf-mcp
 bf-mcp --db-dir /path/to/caches
 ```
 
+`bf-mcp` also honors `--version`, which prints the program version and exits before scanning any caches.
+
 > Caches are produced by `bf build` (see the repo-root README). `bf-mcp` itself does **not** expose `build` — creating caches is a CLI / deployment concern.
 
 ## Wiring into an MCP client

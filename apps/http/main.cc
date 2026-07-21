@@ -19,6 +19,7 @@
 
 #include "conn.h"
 #include "core/env.h"
+#include "core/version.h"
 #include "io/cache/bfdb_inventory.h"
 #include "registry.h"
 #include "router.h"
@@ -58,6 +59,7 @@ int main(int argc, char** argv) {
   app.add_option("--io-timeout", io_timeout_sec,
                  "Header/body read and idle keep-alive timeout, in seconds")
       ->capture_default_str();
+  app.set_version_flag("--version", bf::kBravoFinderVersion);
   CLI11_PARSE(app, argc, argv);
 
   // libuv reads UV_THREADPOOL_SIZE once, the first time the pool is used, so set

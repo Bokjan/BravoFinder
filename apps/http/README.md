@@ -18,7 +18,7 @@ cmake --preset release && cmake --build --preset release
 bf-http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
 ```
 
-Flags: `--db-dir DIR`, `--host` (default `0.0.0.0`), `--port` (default `8080`), `--worker-threads N` (libuv threadpool size, default = hardware concurrency), `--max-body BYTES` (request body cap, default 1 MiB), `--io-timeout SEC` (header/body read + idle keep-alive timeout, default 30). It fails fast (non-zero exit, reason on stderr) if the directory holds no usable `nav_<cycle>.bfdb`.
+Flags: `--db-dir DIR`, `--host` (default `0.0.0.0`), `--port` (default `8080`), `--worker-threads N` (libuv threadpool size, default = hardware concurrency), `--max-body BYTES` (request body cap, default 1 MiB), `--io-timeout SEC` (header/body read + idle keep-alive timeout, default 30), and `--version` (prints the program version and exits). It fails fast (non-zero exit, reason on stderr) if the directory holds no usable `nav_<cycle>.bfdb`.
 
 ## Conventions
 
