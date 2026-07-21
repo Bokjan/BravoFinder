@@ -40,7 +40,7 @@ void WriteCacheAt(const std::string& path, uint32_t cycle) {
   bf::UnifiedCache::BuildInput in;
   in.graph = &g;
   in.header.cycle = cycle;
-  in.header.program_semver = "3.3.0";
+  in.header.program_version = "3.3.0";
   in.header.source_loader = "test";
   REQUIRE(bf::UnifiedCache::Build(path, in));
 }

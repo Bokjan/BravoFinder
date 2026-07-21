@@ -96,7 +96,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   hw.U32(kFormatVersion);
   hw.U32(kSectionCount);
   hw.U32(input.header.cycle);
-  hw.Str(input.header.program_semver);
+  hw.Str(input.header.program_version);
   hw.Str(input.header.source_loader);
   hw.Str(input.header.data_dir);
   hw.U32(static_cast<uint32_t>(pool_blob.size()));
@@ -169,7 +169,7 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
   r.U32();  // section_count -- not needed to read the header fields
   UnifiedHeader header;
   header.cycle = r.U32();
-  header.program_semver = r.Str();
+  header.program_version = r.Str();
   header.source_loader = r.Str();
   header.data_dir = r.Str();
   if (!r.ok()) {
@@ -250,7 +250,7 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   }
 
   UnifiedData out;
-  if (!readU32(out.header.cycle) || !readStr(out.header.program_semver) ||
+  if (!readU32(out.header.cycle) || !readStr(out.header.program_version) ||
       !readStr(out.header.source_loader) || !readStr(out.header.data_dir)) {
     return bad("corrupt .bfdb header");
   }

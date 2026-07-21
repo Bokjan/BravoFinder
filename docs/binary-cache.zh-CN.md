@@ -81,7 +81,7 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 
 ```
 [file header]   magic "BFDB", format_version, section_count, cycle,
-                program_semver, source_loader, data_dir, pool_len
+                program_version, source_loader, data_dir, pool_len
 [section table] 固定 3 项，每项 (type U32, offset U64, length U64)；
                 offset==length==0 表示该段缺席
 [global pool]   pool_len 字节，三段共用（见第 6 节）
@@ -127,9 +127,9 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 
 缓存格式会演进，必须能干净拒绝不兼容的旧文件而非崩溃。三层版本：
 
-1. **程序 semver**（CMake `project VERSION` → `lib/core/version.h` 的 `kBravoFinderVersion` → `bf --version`）；
+1. **程序 version**（CMake `project VERSION` → `lib/core/version.h` 的 `kBravoFinderVersion` → `bf --version`）；
 2. **容器 `format_version`**（magic 「BFDB」，当前 = 4），机器校验，不符走 `Result::Err(kFormatMismatch)`，提示重跑 `bf build`。**只此一个版本号**管全部布局—— 统一容器一次性产出三段，不存在「只改 graph 段但 CIFP 段保持旧版」的场景，故不设 per-section 版本号（那是过度设计）；
-3. **provenance**：程序 semver + source_loader + AIRAC cycle 写进容器头。
+3. **provenance**：程序 version + source_loader + AIRAC cycle 写进容器头。
 
 > 注：`build`（X-Plane `.dat` 头行的 `build YYYYMMDD`）已从格式中删除——它是 X-Plane 专有字段， Navigraph 通用元数据（`cycle_info.txt`/`cycle.json`）只有 `cycle` 和 `revision`，其余格式 （iFMS、Little Navmap、CustomData）均无 `build`。统一格式只保留 `cycle` 作主键，`cycle=0` 表示无 AIRAC 出处。
 

@@ -88,7 +88,7 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   in.cifp = &cifp;
   in.detail = &detail;
   in.header.cycle = 2601;
-  in.header.program_semver = "3.3.0";
+  in.header.program_version = "3.3.0";
   in.header.source_loader = "xplane12";
   in.header.data_dir = "/data/navdata";
   REQUIRE(bf::UnifiedCache::Build(path, in));
@@ -99,7 +99,7 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
 
   // Header
   CHECK(u.header.cycle == 2601);
-  CHECK(u.header.program_semver == "3.3.0");
+  CHECK(u.header.program_version == "3.3.0");
   CHECK(u.header.source_loader == "xplane12");
   CHECK(u.header.data_dir == "/data/navdata");
 

@@ -134,7 +134,7 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
   input.cifp = &cifp_procedures;
   input.detail = detail_archive_.has_value() ? &detail_archive_.value() : nullptr;
   input.header.cycle = cycle_;
-  input.header.program_semver = kBravoFinderVersion;
+  input.header.program_version = kBravoFinderVersion;
   input.header.source_loader = loader_->name();
   input.header.data_dir = source_dir_;
 

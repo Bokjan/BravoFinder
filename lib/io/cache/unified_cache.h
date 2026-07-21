@@ -19,10 +19,10 @@ namespace bf {
 // caches (see bfdb_inventory.h). The filename is only a hint; this header is
 // authoritative.
 struct UnifiedHeader {
-  uint32_t cycle = 0;          // AIRAC cycle, e.g. 2601; 0 means no provenance
-  std::string program_semver;  // bf version that built this cache
-  std::string source_loader;   // loader that produced the data, e.g. "xplane12"
-  std::string data_dir;        // the data dir used at build time (route default)
+  uint32_t cycle = 0;           // AIRAC cycle, e.g. 2601; 0 means no provenance
+  std::string program_version;  // bf version that built this cache
+  std::string source_loader;    // loader that produced the data, e.g. "xplane12"
+  std::string data_dir;         // the data dir used at build time (route default)
 };
 
 // The decoded contents of a unified `.bfdb`: the graph snapshot, an optional
@@ -44,7 +44,7 @@ struct UnifiedData {
 //
 // On-disk layout:
 //   [file header]  magic "BFDB", format_version, section_count, cycle,
-//                  program_semver, source_loader, data_dir, pool_len
+//                  program_version, source_loader, data_dir, pool_len
 //   [section table]  section_count * (type U32, offset U64, length U64);
 //                    offset/length == 0 means the section is absent
 //   [global string pool]  pool_len bytes, shared by all sections

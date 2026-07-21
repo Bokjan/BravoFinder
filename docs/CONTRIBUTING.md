@@ -98,7 +98,7 @@ build: wire up Catch2 and CLI11 via FetchContent
 ## 3. Branching and Versioning
 
 - **Branching**: single-developer workflow; commit directly to the `v3` branch, keeping a linear history; no feature branches. (The old version is preserved on the `v2` branch.)
-- **Versioning**: follows [SemVer](https://semver.org/) (MAJOR.MINOR.PATCH). The current version is `3.0.0` (first release); subsequent releases are tagged with git tags (e.g. `v3.0.0`).
+- **Versioning**: the version number is `MAJOR.MINOR.PATCH` in shape, but the policy is **not** strict SemVer. While v3 is under active development (interfaces not yet frozen, no external consumers pinned to a stable API), MAJOR stays fixed at `3` absent a major shift in the project; a large new feature or a breaking fix bumps MINOR; any other code change, bugfix, or tweak bumps PATCH. Releases are tagged with git tags (e.g. `v3.15.1`).
 - **CHANGELOG**: not maintained separately for now; relies on commit history; generated at formal release time.
 
 ---

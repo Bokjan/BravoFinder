@@ -40,10 +40,10 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 
 ## Version discipline (three layers)
 
-- ① Program semver (CMake `project VERSION` → `lib/core/version.h.in`'s `kBravoFinderVersion` → `bf --version`).
+- ① Program version (CMake `project VERSION` → `lib/core/version.h.in`'s `kBravoFinderVersion` → `bf --version`). Shape is MAJOR.MINOR.PATCH but the policy is **not** strict SemVer: v3 is in active development with interfaces unfrozen, so MAJOR stays pinned at 3 (absent a major shift), a large new feature or a breaking fix bumps MINOR, and any other code change / bugfix / tweak bumps PATCH.
 - ② Unified container `format_version` (one single version, magic "BFDB"; mismatch → `Result::Err(kFormatMismatch)`). Three sections (graph/cifp/detail) share one file and one version; no per-section version.
-- ③ Program semver + source_loader + AIRAC cycle are written into the container header as provenance (`build` removed — it was an X-Plane-only field).
-- **Cache disk layout change → bump container `format_version`; release behavior change → bump program semver.** Read-side / internal-only changes do not change the layout and do not bump.
+- ③ Program version + source_loader + AIRAC cycle are written into the container header as provenance (`build` removed — it was an X-Plane-only field).
+- **Cache disk layout change → bump container `format_version`; release behavior change → bump program version.** Read-side / internal-only changes do not change the layout and do not bump.
 
 ## Testing
 

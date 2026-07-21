@@ -1,12 +1,12 @@
 #pragma once
 
 // Generated from version.h.in by CMake; do not edit the generated copy.
-// The single source of truth for the program's semantic version is the
+// The single source of truth for the program's version is the
 // project(BravoFinder VERSION ...) declaration in the top-level CMakeLists.txt.
 
 namespace bf {
 
-// Program semantic version, e.g. "3.0.0". Surfaced via `bf --version` and
+// Program version, e.g. "3.0.0". Surfaced via `bf --version` and
 // stamped into cache headers so a cache records which build produced it.
 inline constexpr const char* kBravoFinderVersion = "@PROJECT_VERSION@";
 
