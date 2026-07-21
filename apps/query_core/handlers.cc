@@ -1,33 +1,32 @@
-// handlers.cc — the transport-neutral query handlers.
+// handlers.cc — the JSON-args adapter layer over the typed query entries.
 //
-// Each handler receives the request arguments and a read-only NavDatabase and
-// returns a HandlerResult {json_body, status}. The logic (argument parsing,
-// database calls, JSON serialization) is shared verbatim by every transport;
-// only the status code differs from a plain 200 on failure. Adding a handler
-// means adding one entry to MakeHandlers().
+// Each handler parses the request "arguments" object (the wire shape the MCP and
+// HTTP transports ship) into typed values and delegates to a queries.h entry
+// with OutputFormat::kJson. The engine call, rendering, and status mapping live
+// in queries.cc / render.cc, shared with the CLI. Adding a handler means adding
+// one entry to MakeHandlers().
 
 #include "handlers.h"
 
-#include <chrono>
 #include <optional>
 #include <string>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "core/query/query_json.h"
 #include "core/routing/route.h"
-#include "core/routing/route_json.h"
 #include "core/routing/route_request.h"
+#include "queries.h"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "render.h"
 
 namespace bf::service {
 
 // Build `{"error":"<message>"}` via RapidJSON's Writer so the message is
-// auto-escaped; hand-rolling it is unsafe (see JsonError in the header).
+// auto-escaped; hand-rolling it is unsafe (see JsonError in the header). Shared
+// by the adapters here and by render.cc's RenderError.
 std::string JsonError(const std::string& message) {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -40,82 +39,10 @@ std::string JsonError(const std::string& message) {
 
 namespace {
 
-// HTTP-style status codes the handlers report (see HandlerResult in the header
-// for the 400/404/422 semantics).
-constexpr int kOk = 200;
+// HTTP-style status codes the adapters report on a bad request (see
+// HandlerResult in the header for the 400/404/422 semantics; 404/422 are
+// produced inside the typed entries).
 constexpr int kBadRequest = 400;
-constexpr int kNotFound = 404;
-constexpr int kUnprocessable = 422;
-
-// Serialize a vector<optional<Info>> (parallel to ids) as a JSON array, with
-// null for not-found entries, matching the CLI batch-lookup semantics.
-template <class Info, class Fn>
-std::string SerializeLookup(const std::vector<std::optional<Info>>& results, Fn write_one) {
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  writer.SetMaxDecimalPlaces(6);
-  writer.StartArray();
-  for (const auto& opt : results) {
-    if (!opt) {
-      writer.Null();
-    } else {
-      write_one(writer, *opt);
-    }
-  }
-  writer.EndArray();
-  return buffer.GetString();
-}
-
-// Common tail for the lookup handlers: serialize results and report 404 when
-// every id was missing (a wholly-failed lookup is not-found; a partial hit is
-// 200). `elapsed` is the lookup's compute cost, carried only on a 200 (a 404
-// leaves elapsed_ms 0 like every other error path).
-template <class Info, class Fn>
-HandlerResult RunLookup(const std::vector<std::optional<Info>>& results, uint32_t elapsed,
-                        Fn write_one) {
-  std::string json = SerializeLookup(results, write_one);
-  bool all_missing = true;
-  for (const auto& opt : results) {
-    if (opt) {
-      all_missing = false;
-      break;
-    }
-  }
-  if (all_missing) {
-    return {std::move(json), kNotFound};
-  }
-  return {std::move(json), kOk, elapsed};
-}
-
-// A grouped lookup returns a group per id (an ident is reused across regions),
-// so its result shape is vector<vector<Info>> rather than the optional-vector
-// the other lookups use. Serialize as a JSON array parallel to `ids`, where each
-// element is itself an array of the matches for that id (empty when unknown).
-// `elapsed` is carried only on a 200; a 404 (every group empty) leaves it 0.
-template <class Info, class Fn>
-HandlerResult RunGroupedLookup(const std::vector<std::vector<Info>>& results, uint32_t elapsed,
-                               Fn write_one) {
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  writer.SetMaxDecimalPlaces(6);
-  writer.StartArray();
-  bool all_empty = true;
-  for (const auto& group : results) {
-    writer.StartArray();
-    for (const Info& x : group) {
-      write_one(writer, x);
-    }
-    writer.EndArray();
-    if (!group.empty()) {
-      all_empty = false;
-    }
-  }
-  writer.EndArray();
-  if (all_empty) {
-    return {buffer.GetString(), kNotFound};
-  }
-  return {buffer.GetString(), kOk, elapsed};
-}
 
 // Parse a string-array argument. Returns nullopt if missing or malformed.
 std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args, const char* key) {
@@ -134,53 +61,21 @@ std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args
   return ids;
 }
 
-// Build a batch-lookup handler from a lookup function. The function takes the
-// database and an id list and returns the parallel optional vector.
-template <class Info, class Fn>
-QueryHandler MakeLookupHandler(Fn lookup) {
-  return [lookup](const rapidjson::Value& args, const NavDatabase& db) -> HandlerResult {
+// Build a batch-lookup handler from a typed LookupX entry: parse the ids array
+// (400 on a malformed/missing list), then delegate to the entry in JSON.
+template <class Fn>
+QueryHandler MakeLookupAdapter(Fn fn) {
+  return [fn](const rapidjson::Value& args, const NavDatabase& db) -> HandlerResult {
     auto ids = ParseIdList(args, "ids");
     if (!ids) {
       return {JsonError("ids (array of strings) is required"), kBadRequest};
     }
-    const auto start = std::chrono::steady_clock::now();
-    auto results = lookup(db, *ids);
-    const auto elapsed =
-        static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  std::chrono::steady_clock::now() - start)
-                                  .count());
-    return RunLookup(results, elapsed, [](auto& w, const Info& x) {
-      if constexpr (std::is_same_v<Info, bf::AirportInfo>) {
-        bf::WriteAirportJson(w, x);
-      } else if constexpr (std::is_same_v<Info, bf::AirportProcedures>) {
-        bf::WriteProceduresJson(w, x);
-      } else if constexpr (std::is_same_v<Info, bf::AirwayInfo>) {
-        bf::WriteAirwayJson(w, x);
-      }
-    });
+    return fn(db, *ids, OutputFormat::kJson);
   };
 }
 
-// A grouped-lookup handler: an id maps to a group of matches (vector<vector<Info>>)
-// rather than a single optional. Shares id-list parsing with the other lookups.
-template <class Info, class Fn, class WriteFn>
-QueryHandler MakeGroupedLookupHandler(Fn lookup, WriteFn write_one) {
-  return [lookup, write_one](const rapidjson::Value& args, const NavDatabase& db) -> HandlerResult {
-    auto ids = ParseIdList(args, "ids");
-    if (!ids) {
-      return {JsonError("ids (array of strings) is required"), kBadRequest};
-    }
-    const auto start = std::chrono::steady_clock::now();
-    auto results = lookup(db, *ids);
-    const auto elapsed =
-        static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  std::chrono::steady_clock::now() - start)
-                                  .count());
-    return RunGroupedLookup<Info>(results, elapsed, write_one);
-  };
-}
-
-// The find_routes handler.
+// The find_routes handler: parse the args object into a RouteRequest (with the
+// server-side validation the typed entry does not redo), then delegate.
 HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase& db) {
   bf::RouteRequest request;
   if (!args.HasMember("departure") || !args["departure"].IsString() || !args.HasMember("arrival") ||
@@ -222,7 +117,9 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   }
   // Cap k as well: each extra path costs a full spur A* search, so an unbounded k
   // (e.g. 2e9) would pin a worker for a long time and let a few requests exhaust
-  // the threadpool. 15 far exceeds any real "give me alternatives" use.
+  // the threadpool. 15 far exceeds any real "give me alternatives" use. (The CLI
+  // does not enforce this cap -- it is a server-protection concern -- so the cap
+  // lives here in the adapter, not in the typed entry.)
   constexpr int kMaxK = 15;
   if (request.k > kMaxK) {
     return {JsonError("k must not exceed 15"), kBadRequest};
@@ -252,29 +149,7 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     request.forced_points = std::move(*v);
   }
 
-  const auto start = std::chrono::steady_clock::now();
-  bf::Result<std::vector<bf::Route>> result = db.FindRoutes(request);
-  const auto elapsed = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                 std::chrono::steady_clock::now() - start)
-                                                 .count());
-  if (!result) {
-    // A failed route computation is a semantic failure (422): the request was
-    // well-formed but no route satisfies it, or an endpoint is unknown. The
-    // message may contain user-controlled strings (unknown departure, a bad
-    // forced point token), so emit it through the Writer for auto-escaping.
-    return {JsonError(result.error().message), kUnprocessable};
-  }
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  // 6 dp so the point coordinates (lat/lon) are not truncated to ~1.1 km; the
-  // distance fields just gain a few harmless extra digits.
-  writer.SetMaxDecimalPlaces(6);
-  writer.StartArray();
-  for (const bf::Route& route : result.value()) {
-    bf::WriteRouteJson(writer, route);
-  }
-  writer.EndArray();
-  return {buffer.GetString(), kOk, elapsed};
+  return FindRoutes(db, request, OutputFormat::kJson);
 }
 
 // The lookup_procedure_legs handler: per-leg detail of one named procedure.
@@ -283,22 +158,8 @@ HandlerResult LookupProcedureLegsHandler(const rapidjson::Value& args, const Nav
       !args["procedure"].IsString()) {
     return {JsonError("airport and procedure are required"), kBadRequest};
   }
-  const auto start = std::chrono::steady_clock::now();
-  std::optional<bf::AirportProcedureDetail> detail =
-      db.LookupProcedureDetail(args["airport"].GetString(), args["procedure"].GetString());
-  const auto elapsed = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                 std::chrono::steady_clock::now() - start)
-                                                 .count());
-  if (!detail) {
-    // Unknown airport, no CIFP data, or no procedure of that name: nothing
-    // matched, so 404 rather than an empty success payload.
-    return {JsonError("no procedure of that name at that airport"), kNotFound};
-  }
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  writer.SetMaxDecimalPlaces(6);
-  bf::WriteProcedureDetailJson(writer, *detail);
-  return {buffer.GetString(), kOk, elapsed};
+  return LookupProcedureLegs(db, args["airport"].GetString(), args["procedure"].GetString(),
+                             OutputFormat::kJson);
 }
 
 // The parse_route handler: validate & expand a filed route string.
@@ -306,23 +167,7 @@ HandlerResult ParseRouteHandler(const rapidjson::Value& args, const NavDatabase&
   if (!args.HasMember("route") || !args["route"].IsString()) {
     return {JsonError("route (string) is required"), kBadRequest};
   }
-  const auto start = std::chrono::steady_clock::now();
-  bf::Result<bf::Route> result = db.ParseRoute(args["route"].GetString());
-  const auto elapsed = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                 std::chrono::steady_clock::now() - start)
-                                                 .count());
-  if (!result) {
-    // A parse failure is a semantic failure (422): the string was given but
-    // does not form a valid route. The message names the offending token
-    // (user-controlled), so escape it.
-    return {JsonError(result.error().message), kUnprocessable};
-  }
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  // 6 dp so the point coordinates are not truncated (see FindRoutesHandler).
-  writer.SetMaxDecimalPlaces(6);
-  bf::WriteRouteJson(writer, result.value());
-  return {buffer.GetString(), kOk, elapsed};
+  return ParseRoute(db, args["route"].GetString(), OutputFormat::kJson);
 }
 
 }  // namespace
@@ -336,42 +181,13 @@ std::vector<NamedHandler> MakeHandlers() {
 
   handlers.push_back({"find_routes", FindRoutesHandler});
   handlers.push_back({"parse_route", ParseRouteHandler});
-  handlers.push_back(
-      {"lookup_waypoints",
-       MakeGroupedLookupHandler<bf::WaypointInfo>(
-           [](const NavDatabase& db, const std::vector<std::string>& ids) {
-             return db.LookupWaypoints(ids);
-           },
-           [](auto& w, const bf::WaypointInfo& x) { bf::WriteWaypointJson(w, x); })});
-  handlers.push_back(
-      {"lookup_airports", MakeLookupHandler<bf::AirportInfo>(
-                              [](const NavDatabase& db, const std::vector<std::string>& ids) {
-                                return db.LookupAirports(ids);
-                              })});
-  handlers.push_back(
-      {"lookup_procedures", MakeLookupHandler<bf::AirportProcedures>(
-                                [](const NavDatabase& db, const std::vector<std::string>& ids) {
-                                  return db.LookupProcedures(ids);
-                                })});
+  handlers.push_back({"lookup_waypoints", MakeLookupAdapter(LookupWaypoints)});
+  handlers.push_back({"lookup_airports", MakeLookupAdapter(LookupAirports)});
+  handlers.push_back({"lookup_procedures", MakeLookupAdapter(LookupProcedures)});
   handlers.push_back({"lookup_procedure_legs", LookupProcedureLegsHandler});
-  handlers.push_back(
-      {"lookup_airways", MakeLookupHandler<bf::AirwayInfo>(
-                             [](const NavDatabase& db, const std::vector<std::string>& ids) {
-                               return db.LookupAirways(ids);
-                             })});
-  handlers.push_back(
-      {"lookup_navaid_detail",
-       MakeGroupedLookupHandler<bf::NavaidDetailInfo>(
-           [](const NavDatabase& db, const std::vector<std::string>& ids) {
-             return db.LookupNavaidDetails(ids);
-           },
-           [](auto& w, const bf::NavaidDetailInfo& x) { bf::WriteNavaidDetailJson(w, x); })});
-  handlers.push_back(
-      {"lookup_holds", MakeGroupedLookupHandler<bf::HoldInfo>(
-                           [](const NavDatabase& db, const std::vector<std::string>& ids) {
-                             return db.LookupHolds(ids);
-                           },
-                           [](auto& w, const bf::HoldInfo& x) { bf::WriteHoldJson(w, x); })});
+  handlers.push_back({"lookup_airways", MakeLookupAdapter(LookupAirways)});
+  handlers.push_back({"lookup_navaid_detail", MakeLookupAdapter(LookupNavaidDetails)});
+  handlers.push_back({"lookup_holds", MakeLookupAdapter(LookupHolds)});
 
   return handlers;
 }

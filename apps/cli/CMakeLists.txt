@@ -1,4 +1,8 @@
-# The bf command-line tool.
+# The bf command-line tool. A thin front-end over the shared query layer
+# (bf_query_lib): it parses CLI flags, opens one NavDatabase, and delegates to a
+# typed bf::service entry point that runs the engine call and renders the result
+# in the requested format. The same entry points serve the MCP and HTTP
+# transports; the CLI is their peer, not a separate query implementation.
 add_executable(bf
                main.cc
                cli_common.cc
@@ -7,14 +11,7 @@ add_executable(bf
                cmd_query.cc
                cmd_parse_route.cc)
 
-target_link_libraries(bf PRIVATE bf::bravofinder CLI11::CLI11 rapidjson::rapidjson)
-
-# rapidjson 1.1.0 (the latest release, 2016) computes `nullPtr + offset` when its
-# internal stack is first used, which UBSan's pointer-overflow check flags inside
-# the header. The behavior is benign and there is no newer tagged release to move
-# to, so narrow off just that one sub-check for this target; ASan and the rest of
-# UBSan stay enabled. A no-op where the sanitizers are not active (release).
-# GCC/Clang only; MSVC does not recognise this flag.
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(bf PRIVATE -fno-sanitize=pointer-overflow)
-endif()
+# bf_query_lib carries bf::bravofinder, rapidjson, and the rapidjson
+# pointer-overflow UBSan exemption as PUBLIC usage requirements, so they
+# propagate here; CLI11 is for argument parsing.
+target_link_libraries(bf PRIVATE bf_query_lib CLI11::CLI11)

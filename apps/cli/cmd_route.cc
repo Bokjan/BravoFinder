@@ -1,4 +1,3 @@
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -9,9 +8,9 @@
 
 #include "cli_common.h"
 #include "commands.h"
-#include "core/routing/route.h"
 #include "core/routing/route_request.h"
-#include "io/nav_database.h"
+#include "queries.h"
+#include "render.h"
 
 namespace bf::cli {
 
@@ -120,32 +119,28 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
       request.level = LevelPreference::kHigh;
     }
 
-    const auto start = std::chrono::steady_clock::now();
-    Result<std::vector<Route>> result = db.value().FindRoutes(request);
-    const auto elapsed_ms =
-        static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  std::chrono::steady_clock::now() - start)
-                                  .count());
-    if (!result) {
-      std::cerr << "error: " << result.error().message << "\n";
+    // Delegate to the shared query layer: it runs FindRoutes, renders in the
+    // requested format, and returns a body + HTTP-style status (+ elapsed_ms,
+    // which the text renderer folds into the body). The CLI is a thin front-end
+    // over the same path the MCP / HTTP transports use.
+    const bf::service::OutputFormat fmt =
+        a->format == "json" ? bf::service::OutputFormat::kJson : bf::service::OutputFormat::kText;
+    const bf::service::HandlerResult result = bf::service::FindRoutes(db.value(), request, fmt);
+    if (result.status >= 400) {
+      std::cerr << result.body;
+      if (fmt == bf::service::OutputFormat::kJson) {
+        std::cerr << "\n";
+      }
       exit_code = EXIT_FAILURE;
       return;
     }
-
-    const std::vector<Route>& routes = result.value();
-    if (a->format == "json") {
-      PrintRoutesJson(routes, elapsed_ms);
+    if (fmt == bf::service::OutputFormat::kJson) {
+      // The query layer renders a bare routes array (the transport shape); the
+      // CLI wraps it with the elapsed_ms envelope it has shipped since v3.13.0.
+      std::cout << "{\"routes\":" << result.body << ",\"elapsed_ms\":" << result.elapsed_ms
+                << "}\n";
     } else {
-      for (size_t i = 0; i < routes.size(); ++i) {
-        if (routes.size() > 1) {
-          std::cout << "=== Route " << (i + 1) << " of " << routes.size() << " ===\n";
-        }
-        PrintText(routes[i]);
-        if (i + 1 < routes.size()) {
-          std::cout << "\n";
-        }
-      }
-      std::cout << "Query elapsed: " << elapsed_ms << " ms\n";
+      std::cout << result.body;
     }
   });
 }

@@ -1,4 +1,3 @@
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -7,8 +6,8 @@
 
 #include "cli_common.h"
 #include "commands.h"
-#include "core/routing/route.h"
-#include "io/nav_database.h"
+#include "queries.h"
+#include "render.h"
 
 namespace bf::cli {
 
@@ -41,22 +40,25 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
       exit_code = EXIT_FAILURE;
       return;
     }
-    const auto start = std::chrono::steady_clock::now();
-    Result<Route> result = db.value().ParseRoute(a->route_str);
-    const auto elapsed_ms =
-        static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  std::chrono::steady_clock::now() - start)
-                                  .count());
-    if (!result) {
-      std::cerr << "error: " << result.error().message << "\n";
+    const bf::service::OutputFormat fmt =
+        a->format == "json" ? bf::service::OutputFormat::kJson : bf::service::OutputFormat::kText;
+    const bf::service::HandlerResult result =
+        bf::service::ParseRoute(db.value(), a->route_str, fmt);
+    if (result.status >= 400) {
+      std::cerr << result.body;
+      if (fmt == bf::service::OutputFormat::kJson) {
+        std::cerr << "\n";
+      }
       exit_code = EXIT_FAILURE;
       return;
     }
-    if (a->format == "json") {
-      PrintRoutesJson({result.value()}, elapsed_ms);
+    if (fmt == bf::service::OutputFormat::kJson) {
+      // The query layer renders a bare routes array (the transport shape); the
+      // CLI wraps it with the elapsed_ms envelope it has shipped since v3.13.0.
+      std::cout << "{\"routes\":" << result.body << ",\"elapsed_ms\":" << result.elapsed_ms
+                << "}\n";
     } else {
-      PrintText(result.value());
-      std::cout << "Query elapsed: " << elapsed_ms << " ms\n";
+      std::cout << result.body;
     }
   });
 }

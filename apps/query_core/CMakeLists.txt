@@ -3,7 +3,7 @@
 # query handlers (find_routes / parse_route / the batch lookups), returning a
 # JSON body plus an HTTP-style status. None of the consumers depend on each
 # other; all depend here.
-add_library(bf_query_lib STATIC handlers.cc registry.cc)
+add_library(bf_query_lib STATIC handlers.cc queries.cc render.cc registry.cc)
 target_link_libraries(bf_query_lib PUBLIC bf::bravofinder rapidjson::rapidjson)
 target_include_directories(bf_query_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

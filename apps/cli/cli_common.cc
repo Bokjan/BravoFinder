@@ -1,14 +1,6 @@
 #include "cli_common.h"
 
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
-
 #include <charconv>
-#include <iomanip>
-#include <iostream>
-
-#include "core/routing/route_json.h"
-#include "core/routing/route_metrics.h"
 
 namespace bf::cli {
 
@@ -19,107 +11,6 @@ Result<NavDatabase> OpenForRead(const std::string& db_path, const std::string& d
   }
   return NavDatabase::OpenCached(db_path,
                                  cifp_load == "eager" ? CifpLoad::kEager : CifpLoad::kOnDemand);
-}
-
-void PrintText(const Route& route) {
-  std::cout << route.route_string << "\n\n";
-  std::cout << std::fixed << std::setprecision(1);
-  std::cout << "Total distance: " << route.total_distance_nm << " NM";
-  // Break the total down by phase (dep procedure / enroute / arr procedure).
-  std::cout << "  (dep " << route.dep_distance_nm << " + enroute " << route.enroute_distance_nm
-            << " + arr " << route.arr_distance_nm << ")\n";
-
-  // Surface the terminal procedures, if any, and the interchangeable choices
-  // that share the same connection fix. A radar-vectored departure/arrival has
-  // no named procedure but is called out so it does not look like missing data.
-  if (route.dep_connection == ConnectionKind::kRadarVectors) {
-    std::cout << "SID: RADAR VECTORS\n";
-  } else if (!route.sid.empty()) {
-    std::cout << "SID: " << route.sid;
-    if (!route.dep_runway.empty()) {
-      std::cout << " (rwy " << route.dep_runway << ")";
-    }
-    if (route.sid_options.size() > 1) {
-      std::cout << " [options: ";
-      for (size_t i = 0; i < route.sid_options.size(); ++i) {
-        std::cout << route.sid_options[i] << (i + 1 < route.sid_options.size() ? ", " : "");
-      }
-      std::cout << "]";
-    }
-    std::cout << "\n";
-  }
-  if (route.arr_connection == ConnectionKind::kRadarVectors) {
-    std::cout << "STAR: RADAR VECTORS\n";
-  } else if (!route.star.empty()) {
-    std::cout << "STAR: " << route.star;
-    if (!route.arr_runway.empty()) {
-      std::cout << " (rwy " << route.arr_runway << ")";
-    }
-    if (route.star_options.size() > 1) {
-      std::cout << " [options: ";
-      for (size_t i = 0; i < route.star_options.size(); ++i) {
-        std::cout << route.star_options[i] << (i + 1 < route.star_options.size() ? ", " : "");
-      }
-      std::cout << "]";
-    }
-    std::cout << "\n";
-  }
-
-  if (!route.forced_points.empty()) {
-    std::cout << "Via: ";
-    for (size_t i = 0; i < route.forced_points.size(); ++i) {
-      std::cout << route.forced_points[i] << (i + 1 < route.forced_points.size() ? ", " : "");
-    }
-    std::cout << "\n";
-  }
-
-  std::cout << "\nFrom\tTo\tVia\tDist(NM)\tCumul(NM)\tLat\tLon\n";
-  const std::vector<double> cumulative = CumulativeDistances(route.legs);
-  for (size_t i = 0; i < route.legs.size(); ++i) {
-    const RouteLeg& leg = route.legs[i];
-    // On a concurrency leg, note the other airways sharing it after the chosen
-    // one, e.g. "Y592 (concurrent: A593, Y592)".
-    std::string via = leg.via;
-    if (!leg.concurrent_airways.empty()) {
-      via += " (concurrent: ";
-      for (size_t j = 0; j < leg.concurrent_airways.size(); ++j) {
-        via += leg.concurrent_airways[j];
-        via += (j + 1 < leg.concurrent_airways.size() ? ", " : ")");
-      }
-    }
-    std::cout << leg.from << '\t' << leg.to << '\t' << via << '\t' << leg.distance_nm << '\t'
-              << cumulative[i] << '\t';
-    // Coordinates of the leg's "to" point. points is parallel to legs with one
-    // extra entry (N points, N-1 legs), so the destination of leg i is
-    // points[i+1]; guard the size in case a route was built without points.
-    if (i + 1 < route.points.size()) {
-      std::cout << std::setprecision(6) << route.points[i + 1].coord.latitude << '\t'
-                << route.points[i + 1].coord.longitude << std::setprecision(1);
-    } else {
-      std::cout << '\t';
-    }
-    std::cout << '\n';
-  }
-}
-
-void PrintRoutesJson(const std::vector<Route>& routes, uint32_t elapsed_ms) {
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  // 6 dp so the point coordinates (lat/lon) are not truncated to ~1.1 km; the
-  // distance fields gain a few harmless extra digits. Matches the MCP/HTTP
-  // handlers, which share WriteRouteJson.
-  writer.SetMaxDecimalPlaces(6);
-  writer.StartObject();
-  writer.Key("routes");
-  writer.StartArray();
-  for (const Route& route : routes) {
-    WriteRouteJson(writer, route);
-  }
-  writer.EndArray();
-  writer.Key("elapsed_ms");
-  writer.Uint(elapsed_ms);
-  writer.EndObject();
-  std::cout << buffer.GetString() << "\n";
 }
 
 std::optional<FlRange> ParseAltSpec(const std::string& spec) {

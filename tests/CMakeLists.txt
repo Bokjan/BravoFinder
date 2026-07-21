@@ -19,6 +19,7 @@ add_executable(bf_tests
                unit/dfd_magvar_test.cc
                unit/bfdb_naming_test.cc
                unit/nav_detail_codec_test.cc
+               unit/query_render_test.cc
                integration/route_integration_test.cc
                integration/query_test.cc
                integration/dfd_loader_test.cc
