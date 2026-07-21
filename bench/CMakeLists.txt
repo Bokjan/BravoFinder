@@ -2,8 +2,8 @@
 # reproducing the numbers in docs/performance.zh-CN.md, not a shipped artifact.
 # Enable explicitly:  cmake --preset release -DBRAVOFINDER_BUILD_BENCH=ON
 add_executable(bf_route_bench route_bench.cc)
-target_link_libraries(bf_route_bench PRIVATE bf::bravofinder3)
+target_link_libraries(bf_route_bench PRIVATE bf::bravofinder)
 
 # Lookup-index microbenchmark for issue #3 (unordered_map vs sorted vector).
 add_executable(bf_lookup_index_bench lookup_index_bench.cc)
-target_link_libraries(bf_lookup_index_bench PRIVATE bf::bravofinder3)
+target_link_libraries(bf_lookup_index_bench PRIVATE bf::bravofinder)

@@ -86,13 +86,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(sqlite3)
 
 # SQLite amalgamation (read-only, used by the DFD loaders). Compiled directly as
-# a bf3 source (lib/CMakeLists.txt adds ${_sqlite3_dir}/sqlite3.c), so the shipped
-# libbravofinder3.a is self-contained -- sqlite3.o lives in the archive with no
-# external bf::sqlite3 dependency leaking into the export set. (A separate OBJECT
-# lib linked via $<TARGET_OBJECTS:> does NOT fold its objects into a static
-# archive: they are only pulled in at final executable link, leaving the archive
-# with undefined sqlite3 symbols.) Third-party-C warnings and SQLITE_* defines
-# are scoped to sqlite3.c via set_source_files_properties in lib/CMakeLists.txt.
+# a bravofinder source (lib/CMakeLists.txt adds ${_sqlite3_dir}/sqlite3.c), so
+# the shipped libbravofinder.a is self-contained -- sqlite3.o lives in the
+# archive with no external bf::sqlite3 dependency leaking into the export set.
+# (A separate OBJECT lib linked via $<TARGET_OBJECTS:> does NOT fold its objects
+# into a static archive: they are only pulled in at final executable link,
+# leaving the archive with undefined sqlite3 symbols.) Third-party-C warnings and
+# SQLITE_* defines are scoped to sqlite3.c via set_source_files_properties in
+# lib/CMakeLists.txt.
 set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 
 # libuv (event-loop async I/O + a built-in worker threadpool) and llhttp (Node's
@@ -158,15 +159,15 @@ endif()
 if(BRAVOFINDER_INSTALL)
   include(CMakePackageConfigHelpers)
   configure_package_config_file(
-    cmake/bravofinder3Config.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/bravofinder3Config.cmake
-    INSTALL_DESTINATION lib/cmake/bravofinder3)
-  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bravofinder3Config.cmake
-          DESTINATION lib/cmake/bravofinder3)
-  install(EXPORT BravoFinderTargets
-          FILE BravoFinderTargets.cmake
+    cmake/bravofinderConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/bravofinderConfig.cmake
+    INSTALL_DESTINATION lib/cmake/bravofinder)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bravofinderConfig.cmake
+          DESTINATION lib/cmake/bravofinder)
+  install(EXPORT bravofinderTargets
+          FILE bravofinderTargets.cmake
           NAMESPACE bf::
-          DESTINATION lib/cmake/bravofinder3)
+          DESTINATION lib/cmake/bravofinder)
   install(FILES LICENSE THIRD_PARTY_LICENSES.md
           DESTINATION share/doc/BravoFinder)
 endif()

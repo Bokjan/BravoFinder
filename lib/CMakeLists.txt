@@ -1,12 +1,13 @@
 # BravoFinder unified library: the graph + A* search (formerly core/) and the
-# I/O layer (formerly io/) merged into a single static target bf3. Headers are
-# included as "core/..." / "io/..." so the include root is this directory (lib/).
+# I/O layer (formerly io/) merged into a single static target bravofinder.
+# Headers are included as "core/..." / "io/..." so the include root is this
+# directory (lib/).
 #
-# sqlite3.c (the SQLite amalgamation) is compiled directly as a bf3 source so the
-# shipped libbravofinder3.a is self-contained: sqlite3.o lives in the archive and
-# no external bf::sqlite3 dependency leaks into the export set. (A separate OBJECT
-# lib linked via $<TARGET_OBJECTS:> does NOT fold its objects into a static
-# archive -- they are only pulled in at final executable link.)
+# sqlite3.c (the SQLite amalgamation) is compiled directly as a bravofinder
+# source so the shipped libbravofinder.a is self-contained: sqlite3.o lives in
+# the archive and no external bf::sqlite3 dependency leaks into the export set.
+# (A separate OBJECT lib linked via $<TARGET_OBJECTS:> does NOT fold its objects
+# into a static archive -- they are only pulled in at final executable link.)
 #
 # BRAVOFINDER_BENCH_VARIANT swaps the two search source files (and their headers)
 # for a historical snapshot vendored under bench/variants/<v>/, so the benchmark
@@ -14,7 +15,7 @@
 # Empty (the default) builds the current tree unchanged; it is only ever set in a
 # throwaway build tree by bench/decompose.sh, never in a normal build.
 set(BRAVOFINDER_BENCH_VARIANT "" CACHE STRING
-    "Build bf3 against a vendored search variant: baseline | memoize | lawler | workspace")
+    "Build bravofinder against a vendored search variant: baseline | memoize | lawler | workspace")
 
 if(BRAVOFINDER_BENCH_VARIANT STREQUAL "")
   set(_bf_astar core/graph/astar.cc)
@@ -29,7 +30,7 @@ else()
   set(_bf_yen   ${_bf_variant_dir}/core/graph/yen_kshortest.cc)
 endif()
 
-add_library(bf3 STATIC
+add_library(bravofinder STATIC
   core/domain/coordinate.cc
   core/domain/procedure.cc
   ${_bf_astar}
@@ -58,11 +59,11 @@ add_library(bf3 STATIC
 
 # When a variant is selected, its headers must win over lib/core/graph/*.h. A
 # BEFORE include dir mirroring the "core/graph/" path shadows the two headers
-# only. PRIVATE (not PUBLIC): the shadow is for compiling bf3's own variant
-# sources; it must not leak into bf3's INTERFACE_INCLUDE_DIRECTORIES, or the
-# export/install machinery rejects the source-tree-prefixed path.
+# only. PRIVATE (not PUBLIC): the shadow is for compiling bravofinder's own
+# variant sources; it must not leak into bravofinder's INTERFACE_INCLUDE_DIRECTORIES,
+# or the export/install machinery rejects the source-tree-prefixed path.
 if(NOT BRAVOFINDER_BENCH_VARIANT STREQUAL "")
-  target_include_directories(bf3 BEFORE PRIVATE ${_bf_variant_dir})
+  target_include_directories(bravofinder BEFORE PRIVATE ${_bf_variant_dir})
 endif()
 
 # Generate version.h from the project version (single source of truth). It lands
@@ -73,16 +74,16 @@ configure_file(core/version.h.in
 # Include root is lib/ (build) so "#include core/..." and "#include io/..."
 # resolve; the binary dir exposes the generated core/version.h. Install-tree
 # include root is include/bf/ (see the install block below).
-target_include_directories(bf3 PUBLIC
+target_include_directories(bravofinder PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<INSTALL_INTERFACE:include/bf>)
 
-target_compile_features(bf3 PUBLIC cxx_std_20)
+target_compile_features(bravofinder PUBLIC cxx_std_20)
 
 # Scope the SQLite amalgamation's third-party-C options to sqlite3.c alone so
-# bf3's own flags stay clean. -w silences all warnings (GCC/Clang; MSVC's C
-# compile carries no /WX, so warnings are non-fatal there). SQLITE_* match the
+# bravofinder's own flags stay clean. -w silences all warnings (GCC/Clang; MSVC's
+# C compile carries no /WX, so warnings are non-fatal there). SQLITE_* match the
 # former standalone bf_sqlite3 target: load extension is never used; threadsafe=1
 # (serialized default) plus per-connection SQLITE_OPEN_NOMUTEX (thread_local
 # connections, never shared across threads) gives correct, lock-free reads.
@@ -90,16 +91,16 @@ set_source_files_properties(${_sqlite3_dir}/sqlite3.c PROPERTIES
   COMPILE_OPTIONS "$<$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>>:-w>"
   COMPILE_DEFINITIONS "SQLITE_OMIT_LOAD_EXTENSION;SQLITE_THREADSAFE=1")
 
-# bf3's own compile of sqlite_util.cc pulls in <sqlite3.h> (via sqlite_util.h);
-# this PRIVATE include (never in INSTALL_INTERFACE) points at the amalgamation
-# dir. sqlite3.c itself reaches sqlite3.h the same way.
-target_include_directories(bf3 PRIVATE ${_sqlite3_dir})
+# bravofinder's own compile of sqlite_util.cc pulls in <sqlite3.h> (via
+# sqlite_util.h); this PRIVATE include (never in INSTALL_INTERFACE) points at the
+# amalgamation dir. sqlite3.c itself reaches sqlite3.h the same way.
+target_include_directories(bravofinder PRIVATE ${_sqlite3_dir})
 
-# External-facing alias. Consumers (apps, tests, bench) link bf::bravofinder3.
-# EXPORT_NAME = the imported target name (bf::bravofinder3); OUTPUT_NAME = the
-# archive file name (libbravofinder3.a on GCC/Clang, bravofinder3.lib on MSVC).
-set_target_properties(bf3 PROPERTIES EXPORT_NAME bravofinder3 OUTPUT_NAME bravofinder3)
-add_library(bf::bravofinder3 ALIAS bf3)
+# External-facing alias. Consumers (apps, tests, bench) link bf::bravofinder.
+# EXPORT_NAME = the imported target name (bf::bravofinder); OUTPUT_NAME = the
+# archive file name (libbravofinder.a on GCC/Clang, bravofinder.lib on MSVC).
+set_target_properties(bravofinder PROPERTIES EXPORT_NAME bravofinder OUTPUT_NAME bravofinder)
+add_library(bf::bravofinder ALIAS bravofinder)
 
 # ---------- Install / export (SDK distribution) --------------------------------
 # Public header allowlist: the FULL transitive include graph of nav_database.h
@@ -110,7 +111,7 @@ add_library(bf::bravofinder3 ALIAS bf3)
 # beyond this milestone. Verified: none pulls in <sqlite3.h> (sqlite_util.h is
 # NOT in the graph), so the SDK needs no sqlite3 headers.
 if(BRAVOFINDER_INSTALL)
-  install(TARGETS bf3 EXPORT BravoFinderTargets
+  install(TARGETS bravofinder EXPORT bravofinderTargets
           ARCHIVE DESTINATION lib)
 
   install(FILES core/result.h                          DESTINATION include/bf/core)

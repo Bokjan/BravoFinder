@@ -7,7 +7,7 @@ add_executable(bf
                cmd_query.cc
                cmd_parse_route.cc)
 
-target_link_libraries(bf PRIVATE bf::bravofinder3 CLI11::CLI11 rapidjson::rapidjson)
+target_link_libraries(bf PRIVATE bf::bravofinder CLI11::CLI11 rapidjson::rapidjson)
 
 # rapidjson 1.1.0 (the latest release, 2016) computes `nullPtr + offset` when its
 # internal stack is first used, which UBSan's pointer-overflow check flags inside
