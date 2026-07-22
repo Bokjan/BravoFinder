@@ -57,6 +57,22 @@ TEST_CASE("MoraGrid: non-finite coordinates return 0 (no UB)", "[mora_grid]") {
   CHECK(g.MoraAt(Coordinate{1.0e18, 0.0}) == 0);  // out of int range guard
 }
 
+TEST_CASE("MoraGrid: overwriting a cell keeps the populated count consistent", "[mora_grid]") {
+  MoraGrid g;
+  g.SetCell(10, 20, 100);
+  CHECK_FALSE(g.Empty());
+  // Overwriting one populated cell with another non-zero value must not change
+  // the count (still exactly one populated cell).
+  g.SetCell(10, 20, 200);
+  CHECK(g.MoraAt(Coordinate{10.0, 20.0}) == 200);
+  CHECK_FALSE(g.Empty());
+  // Clearing the only populated cell back to 0 must decrement the count so the
+  // grid reports empty again (the invariant FromCells relies on).
+  g.SetCell(10, 20, 0);
+  CHECK(g.MoraAt(Coordinate{10.0, 20.0}) == 0);
+  CHECK(g.Empty());
+}
+
 TEST_CASE("MoraGrid: FromCells rejects a wrong-sized array", "[mora_grid]") {
   std::vector<int16_t> too_small(10, 5);
   const MoraGrid g = MoraGrid::FromCells(std::move(too_small));

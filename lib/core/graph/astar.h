@@ -137,7 +137,12 @@ class MultiGoalHeuristic {
  private:
   const NavGraph& graph_;
   const std::vector<SeededEndpoint>& goals_;
-  mutable std::vector<double> cache_;  // -1 = not yet computed
+  // -1 = not yet computed. Written lazily from the const operator(), so it is
+  // NOT thread-safe: this relies on a single instance being used by one search
+  // (or one single-threaded Yen run) at a time, per the concurrency note above.
+  // Parallelizing the spur searches would share this table across threads and
+  // must add synchronization (or switch to a per-thread cache) first.
+  mutable std::vector<double> cache_;
 };
 
 // Multi-source, multi-goal A*: find the cheapest path that starts at any of

@@ -25,15 +25,22 @@ class MoraGrid {
   // integer (lat, lon). Out-of-range indices are ignored.
   void SetCell(int lat, int lon, int16_t mora_fl) {
     const int idx = Index(lat, lon);
-    if (idx >= 0) {
-      // Count a cell only on its first population so a repeated SetCell on the
-      // same cell does not inflate the count; this matches FromCells, which
-      // counts non-zero cells.
-      if (cells_[idx] == 0) {
-        ++populated_;
-      }
-      cells_[idx] = mora_fl;
+    if (idx < 0) {
+      return;
     }
+    // Keep populated_ in step with the non-zero cell count (the invariant
+    // FromCells relies on, and Empty() reads): a first population increments,
+    // and clearing a populated cell back to 0 decrements. No current loader
+    // writes 0 (they guard with value > 0), but SetCell honors the contract
+    // regardless.
+    const bool was_populated = cells_[idx] != 0;
+    const bool now_populated = mora_fl != 0;
+    if (!was_populated && now_populated) {
+      ++populated_;
+    } else if (was_populated && !now_populated) {
+      --populated_;
+    }
+    cells_[idx] = mora_fl;
   }
 
   // The MORA flight level at a position, or 0 if unknown / out of range.

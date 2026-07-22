@@ -237,7 +237,10 @@ class StringPool {
 // Resolve a (offset, len) reference against a loaded pool blob. Sets `ok` false
 // and returns empty if the reference is out of range.
 inline std::string ResolveRef(const std::string& blob, uint32_t offset, uint32_t len, bool& ok) {
-  if (static_cast<size_t>(offset) + len > blob.size()) {
+  // Overflow-safe bounds check: offset + len can wrap when size_t is 32-bit, so
+  // subtract instead of add. offset <= size is checked first, so size - offset
+  // never underflows.
+  if (offset > blob.size() || len > blob.size() - offset) {
     ok = false;
     return {};
   }
@@ -248,7 +251,7 @@ inline std::string ResolveRef(const std::string& blob, uint32_t offset, uint32_t
 // buffer), so the pool blob need not be copied out first.
 inline std::string ResolveRef(const char* pool, size_t pool_len, uint32_t offset, uint32_t len,
                               bool& ok) {
-  if (static_cast<size_t>(offset) + len > pool_len) {
+  if (offset > pool_len || len > pool_len - offset) {
     ok = false;
     return {};
   }
