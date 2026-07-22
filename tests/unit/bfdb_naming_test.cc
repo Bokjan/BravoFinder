@@ -17,6 +17,15 @@ TEST_CASE("naming: ParseBfdbName round-trips a canonical name", "[unit][naming]"
   CHECK(*parsed == 2601);
 }
 
+TEST_CASE("naming: ParseBfdbName round-trips the zero-cycle sentinel", "[unit][naming]") {
+  // FormatBfdbName(0) -> "nav.bfdb" must parse back to 0, or a provenance-less
+  // cache would be written under a name inventory discovery then drops.
+  CHECK(bf::FormatBfdbName(0) == "nav.bfdb");
+  auto parsed = bf::ParseBfdbName("nav.bfdb");
+  REQUIRE(parsed);
+  CHECK(*parsed == 0);
+}
+
 TEST_CASE("naming: ParseBfdbName inspects only the filename component", "[unit][naming]") {
   auto parsed = bf::ParseBfdbName("/some/dir/nav_2601.bfdb");
   REQUIRE(parsed);
@@ -24,7 +33,6 @@ TEST_CASE("naming: ParseBfdbName inspects only the filename component", "[unit][
 }
 
 TEST_CASE("naming: ParseBfdbName rejects non-matching names", "[unit][naming]") {
-  CHECK_FALSE(bf::ParseBfdbName("nav.bfdb"));                // legacy fallback name, no cycle
   CHECK_FALSE(bf::ParseBfdbName("nav_.bfdb"));               // empty cycle segment
   CHECK_FALSE(bf::ParseBfdbName("nav_ab.bfdb"));             // non-numeric
   CHECK_FALSE(bf::ParseBfdbName("nav_2601.txt"));            // wrong extension

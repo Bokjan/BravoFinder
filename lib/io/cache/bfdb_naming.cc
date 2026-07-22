@@ -16,6 +16,13 @@ std::optional<uint32_t> ParseBfdbName(std::string_view path) {
   // bare name.
   const std::string name = std::filesystem::path(path).filename().string();
 
+  // The zero-cycle sentinel (data with no parsed AIRAC provenance) is written by
+  // FormatBfdbName as the legacy "nav.bfdb". Accept it so Format/Parse stay
+  // symmetric and inventory discovery does not silently drop such a cache.
+  if (name == "nav.bfdb") {
+    return 0;
+  }
+
   // Require the exact shape "nav_<digits>.bfdb".
   constexpr std::string_view kPrefix = "nav_";
   constexpr std::string_view kSuffix = ".bfdb";

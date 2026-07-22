@@ -26,9 +26,11 @@ namespace bf {
 std::string FormatBfdbName(uint32_t cycle);
 
 // Best-effort parse of a "nav_<cycle>.bfdb" filename back into its cycle.
-// Returns nullopt when the name does not match the pattern. Accepts a bare
-// filename or a path (only the filename component is inspected). This is a hint
-// only; the header is authoritative.
+// Returns nullopt when the name does not match the pattern. The legacy
+// "nav.bfdb" (the zero-cycle sentinel produced by FormatBfdbName(0)) parses back
+// to 0, so the two functions round-trip. Accepts a bare filename or a path (only
+// the filename component is inspected). This is a hint only; the header is
+// authoritative.
 std::optional<uint32_t> ParseBfdbName(std::string_view path);
 
 }  // namespace bf
