@@ -257,6 +257,51 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
   if (!r.ok()) {
     return bad("corrupt .bfdb graph section");
   }
+  // A well-formed section is consumed exactly; leftover bytes mean a count was
+  // under-read (a corrupt/half-written same-version file), so reject it.
+  if (r.remaining() != 0) {
+    return bad("corrupt .bfdb: graph section has trailing bytes");
+  }
+
+  // Semantic validation of the CSR structure and in-record references. The
+  // byte-level fuses above bound the section SIZE, but not the VALUES inside it:
+  // a bit-flip or half-write in a same-format-version file can pass every check
+  // so far and then, on the A*/Yen hot path, read out of bounds -- the NavGraph
+  // accessors (CoordOf/EdgesBegin/EdgesEnd) and GraphBuilder::AirwayName all use
+  // raw unchecked indexing. Validate here so a corrupt cache fails through Result
+  // (kCacheCorrupt) instead of undefined behavior.
+  //
+  // CSR offsets must start at 0, end at the edge count, and be non-decreasing;
+  // that also transitively bounds every offset to [0, e], keeping EdgesBegin/End
+  // in range.
+  if (snapshot.offsets.front() != 0 || snapshot.offsets.back() != static_cast<int>(e)) {
+    return bad("corrupt .bfdb: CSR offsets do not span [0, edge count]");
+  }
+  for (uint32_t i = 0; i < v; ++i) {
+    if (snapshot.offsets[i] > snapshot.offsets[i + 1]) {
+      return bad("corrupt .bfdb: CSR offsets are not monotonic");
+    }
+  }
+  // Each edge's target vertex, airway-name index, and level enum must be in range
+  // (airway_id == 0 is DCT, but it still indexes airway_names[0], so a file with
+  // edges must carry at least that name).
+  for (const GraphEdge& ed : snapshot.edges) {
+    if (ed.to < 0 || static_cast<uint32_t>(ed.to) >= v) {
+      return bad("corrupt .bfdb: edge target vertex out of range");
+    }
+    if (ed.airway_id >= airway_count) {
+      return bad("corrupt .bfdb: edge airway-name index out of range");
+    }
+    if (static_cast<uint8_t>(ed.level) > static_cast<uint8_t>(AirwayLevel::kBoth)) {
+      return bad("corrupt .bfdb: edge airway level out of range");
+    }
+  }
+  // Per-vertex kind enum must be a valid WaypointKind.
+  for (const WaypointKind k : snapshot.kinds) {
+    if (static_cast<uint8_t>(k) > static_cast<uint8_t>(WaypointKind::kOther)) {
+      return bad("corrupt .bfdb: vertex kind out of range");
+    }
+  }
 
   // Resolve all string references against the global pool.
   bool refs_ok = true;

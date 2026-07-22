@@ -1,3 +1,5 @@
+#include "io/cache/graph_codec.h"
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
@@ -6,9 +8,14 @@
 #include <string>
 #include <vector>
 
+#include "core/domain/coordinate.h"
+#include "core/domain/fixed_ident.h"
+#include "core/domain/waypoint.h"
 #include "core/env.h"
+#include "core/graph/nav_graph.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
+#include "io/cache/byte_io.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/unified_cache.h"
 #include "io/nav_database.h"
@@ -48,7 +55,115 @@ std::string BuildCache(const std::string& tag) {
   return path;
 }
 
+// A minimal but structurally valid graph snapshot: two vertices, one DCT edge
+// 0->1, one airway name (index 0), an empty MSA list, and a default (all-zero)
+// MORA grid. Every field is in range, so Decode of its encoding must succeed;
+// the corruption cases below break exactly one field each.
+bf::GraphSnapshot MakeValidSnapshot() {
+  bf::GraphSnapshot s;
+  s.first_airport_vertex = 2;  // no airport vertices -> no elevation records
+  s.coords = {bf::Coordinate{40.0, -73.0}, bf::Coordinate{34.0, -118.0}};
+  s.offsets = {0, 1, 1};  // vertex 0 has edge [0,1); vertex 1 has none
+  bf::GraphEdge edge;
+  edge.to = 1;
+  edge.distance_nm = 10.0f;
+  edge.airway_id = 0;  // DCT
+  edge.level = bf::AirwayLevel::kLow;
+  s.edges = {edge};
+  s.has_outbound = {1, 0};
+  s.has_inbound = {0, 1};
+  s.idents = {bf::FixedIdent::FromParts("AAAAA", "K1"), bf::FixedIdent::FromParts("BBBBB", "K2")};
+  s.kinds = {bf::WaypointKind::kFix, bf::WaypointKind::kFix};
+  s.airway_names = {"DCT"};
+  return s;
+}
+
+// Encode a snapshot to its section body + the shared string-pool blob. REQUIREs
+// the encode to succeed (the corruption cases all keep array sizes consistent,
+// which is all Encode validates).
+void EncodeSnapshot(const bf::GraphSnapshot& s, std::string* body, std::string* pool_blob) {
+  bf::ByteWriter w(*body);
+  bf::StringPool pool;
+  REQUIRE(bf::GraphCodec::Encode(s, w, pool));
+  *pool_blob = pool.blob();
+}
+
 }  // namespace
+
+TEST_CASE("graph decode: a semantically corrupt section is rejected, not read out of bounds",
+          "[unit][bfdb]") {
+  // Control: the valid snapshot round-trips through Encode/Decode.
+  {
+    std::string body, pool;
+    EncodeSnapshot(MakeValidSnapshot(), &body, &pool);
+    bf::Result<bf::GraphSnapshot> r =
+        bf::GraphCodec::Decode(body.data(), body.size(), pool.data(), pool.size());
+    REQUIRE(r);
+    CHECK(r.value().coords.size() == 2);
+  }
+
+  // Each case corrupts exactly one field of an otherwise valid snapshot; Decode
+  // must fail through Result (kCacheCorrupt), never index the graph out of range.
+  auto expect_corrupt = [](const bf::GraphSnapshot& s) {
+    std::string body, pool;
+    EncodeSnapshot(s, &body, &pool);
+    bf::Result<bf::GraphSnapshot> r =
+        bf::GraphCodec::Decode(body.data(), body.size(), pool.data(), pool.size());
+    CHECK_FALSE(r);
+    if (!r) {
+      CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
+    }
+  };
+
+  SECTION("edge target vertex out of range") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges[0].to = 5;  // >= vertex count (2)
+    expect_corrupt(s);
+  }
+  SECTION("edge target vertex negative") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges[0].to = -1;
+    expect_corrupt(s);
+  }
+  SECTION("edge airway-name index out of range") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges[0].airway_id = 7;  // >= airway_names count (1)
+    expect_corrupt(s);
+  }
+  SECTION("edge airway level enum out of range") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges[0].level = static_cast<bf::AirwayLevel>(99);
+    expect_corrupt(s);
+  }
+  SECTION("vertex kind enum out of range") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.kinds[0] = static_cast<bf::WaypointKind>(99);
+    expect_corrupt(s);
+  }
+  SECTION("CSR offsets do not end at the edge count") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.offsets = {0, 1, 5};  // back != e (1)
+    expect_corrupt(s);
+  }
+  SECTION("CSR offsets are not monotonic") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges.clear();        // e = 0, so back must be 0 to span correctly
+    s.offsets = {0, 2, 0};  // spans [0,0] at the ends but dips downward: not monotonic
+    expect_corrupt(s);
+  }
+
+  SECTION("trailing bytes after a valid section") {
+    std::string body, pool;
+    EncodeSnapshot(MakeValidSnapshot(), &body, &pool);
+    body.push_back('\0');  // one extra byte the decoder should not have to read
+    bf::Result<bf::GraphSnapshot> r =
+        bf::GraphCodec::Decode(body.data(), body.size(), pool.data(), pool.size());
+    CHECK_FALSE(r);
+    if (!r) {
+      CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
+    }
+  }
+}
 
 TEST_CASE("bfdb: a cached route matches the freshly built route", "[integration][bfdb]") {
   const std::string dir = EnsureXPlane12();
