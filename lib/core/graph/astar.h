@@ -33,6 +33,16 @@ struct SearchOptions {
   std::function<bool(int from, int to)> edge_blocked;
 };
 
+// Among the parallel edges from `from` to `to`, return the one the search would
+// have traversed: the cheapest ALLOWED edge by effective cost (distance_nm + soft
+// penalties), evaluating `options.constraints` exactly as A* relaxation and Yen's
+// path re-costing do. Returns nullptr if there is no such edge (none exists, or
+// every parallel edge is blocked). Because every constraint is a deterministic
+// function of the edge, this reproduces the search's choice, so a route's leg
+// labels (airway, distance) match the path the search actually cost -- not the
+// merely shortest-by-distance parallel edge.
+const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options);
+
 // Find the shortest path from `start` to `goal` using A* with an admissible
 // great-circle heuristic. Soft penalties only add cost, so the geographic
 // heuristic remains a lower bound and the result is optimal under the effective

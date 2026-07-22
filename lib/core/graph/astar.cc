@@ -38,6 +38,26 @@ bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coor
 
 }  // namespace
 
+const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options) {
+  const GraphEdge* best = nullptr;
+  double best_cost = kInfinity;
+  for (const GraphEdge* e = graph.EdgesBegin(from); e != graph.EdgesEnd(from); ++e) {
+    if (e->to != to) {
+      continue;
+    }
+    double extra_cost = 0.0;
+    if (!EdgeAllowed(options, *e, graph.CoordOf(from), graph.CoordOf(to), extra_cost)) {
+      continue;  // blocked on this parallel edge; try the next
+    }
+    const double total = e->distance_nm + extra_cost;
+    if (total < best_cost) {
+      best_cost = total;
+      best = e;
+    }
+  }
+  return best;
+}
+
 void SearchWorkspace::Reset(int n) {
   // Grow to fit the graph; never shrink. The value arrays are not re-initialized
   // -- the generation stamp makes stale slots read as their initial value, so a

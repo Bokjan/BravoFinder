@@ -104,7 +104,8 @@ bool FilterConnectionsByName(std::vector<Connection>& connections, const std::st
 // and are embedded in the route string like a filed flight plan.
 Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const ShortestPath& path,
                 const std::string& dep_label, const std::string& arr_label, const std::string& sid,
-                const std::string& star, double dep_seed, double arr_seed) {
+                const std::string& star, double dep_seed, double arr_seed,
+                const SearchOptions& options) {
   Route route;
   route.total_distance_nm = path.distance_nm;
   if (path.vertices.empty()) {
@@ -138,18 +139,18 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
     const int u = path.vertices[i];
     const int w = path.vertices[i + 1];
     // u->w may have parallel edges (several airways, or an airway plus a DCT).
-    // The search took the cheapest, so label the leg with the cheapest edge's
-    // airway and distance -- picking the first would risk showing a via name /
-    // distance the cost model did not actually choose.
+    // Label the leg with the edge the search actually traversed -- the cheapest
+    // ALLOWED edge by effective cost (distance + soft penalties) -- via the shared
+    // SelectEdge helper, so the via name and distance match the path's cost and
+    // total_distance_nm. Picking the shortest-by-distance edge (the previous
+    // behavior) could show a via/distance the cost model did not choose when a
+    // constraint (level preference, randomization) made a longer edge cheaper.
+    const GraphEdge* e = SelectEdge(graph, u, w, options);
     std::string via = "DCT";
     double dist = 0.0;
-    bool found = false;
-    for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
-      if (e->to == w && (!found || e->distance_nm < dist)) {
-        via = builder.AirwayName(e->airway_id);
-        dist = e->distance_nm;
-        found = true;
-      }
+    if (e != nullptr) {
+      via = builder.AirwayName(e->airway_id);
+      dist = e->distance_nm;
     }
     route.legs.push_back(
         RouteLeg{builder.IdentOf(u).ident, builder.IdentOf(w).ident, via, dist, {}});
@@ -703,7 +704,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     SelectProcedures(arr, arr_fix, star_name, arr_rwy, star_options);
 
     Route route = MakeRoute(*builder_, graph, p, dep.airport_icao, arr.airport_icao, sid_name,
-                            star_name, dep_seed, arr_seed);
+                            star_name, dep_seed, arr_seed, options);
     route.sid = sid_name;
     route.dep_runway = dep_rwy;
     route.sid_options = sid_options;

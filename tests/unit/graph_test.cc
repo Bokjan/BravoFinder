@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "core/constraints/altitude_constraints.h"
 #include "core/graph/astar.h"
+#include "core/routing/route_request.h"
 #include "io/graph_builder.h"
 
 using Catch::Matchers::WithinRel;
@@ -200,6 +202,71 @@ TEST_CASE("VerticesByIdent returns every region match for a reused ident", "[gra
 
   // An unknown ident resolves to nothing.
   CHECK(builder.VerticesByIdent("NOPE").empty());
+}
+
+// Two parallel airways A->B, one low and one high, share both endpoints and so
+// have identical geographic distance. SelectEdge must return the edge the search
+// would have relaxed cheapest -- with a high-level preference, the HIGH edge --
+// not whichever parallel edge happens to come first in the edge list. This is
+// the guarantee MakeRoute relies on to label a leg's via/airway consistently
+// with the path's cost model (regression for M5).
+TEST_CASE("SelectEdge returns the cost-model edge among parallel airways", "[graph]") {
+  bf::NavData d;
+  auto wp = [](const char* id, double lon) {
+    return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{0.0, lon}, bf::WaypointKind::kFix};
+  };
+  d.waypoints = {wp("AAA", 0.0), wp("BBB", 1.0)};
+  auto seg = [](const char* name, bf::AirwayLevel level) {
+    bf::AirwaySegment s;
+    s.name = name;
+    s.direction = bf::AirwayDirection::kBoth;
+    s.level = level;
+    return s;
+  };
+  // Low airway V1 listed first, high airway J1 second.
+  d.airways = {
+      {bf::Ident("AAA", "ZZ"), bf::Ident("BBB", "ZZ"), seg("V1", bf::AirwayLevel::kLow)},
+      {bf::Ident("AAA", "ZZ"), bf::Ident("BBB", "ZZ"), seg("J1", bf::AirwayLevel::kHigh)},
+  };
+  bf::GraphBuilder builder(d);
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int b = builder.VerticesByIdent("BBB")[0];
+  REQUIRE(a >= 0);
+  REQUIRE(b >= 0);
+
+  // Two parallel edges must exist (the builder keeps concurrent airways).
+  int parallel = 0;
+  for (const bf::GraphEdge* e = builder.graph().EdgesBegin(a); e != builder.graph().EdgesEnd(a);
+       ++e) {
+    if (e->to == b) {
+      ++parallel;
+    }
+  }
+  REQUIRE(parallel == 2);
+
+  // No preference: any allowed edge is fine, but one must be returned.
+  const bf::GraphEdge* any = bf::SelectEdge(builder.graph(), a, b, bf::SearchOptions{});
+  REQUIRE(any != nullptr);
+
+  // High-level preference: the low edge is penalized, so the high edge is cheaper
+  // by effective cost and must be the one SelectEdge returns.
+  bf::RouteRequest req;
+  req.level = bf::LevelPreference::kHigh;
+  const bf::LevelPreferenceConstraint level_pref;
+  bf::SearchOptions opts;
+  opts.request = &req;
+  opts.constraints = {&level_pref};
+  const bf::GraphEdge* hi = bf::SelectEdge(builder.graph(), a, b, opts);
+  REQUIRE(hi != nullptr);
+  CHECK(hi->level == bf::AirwayLevel::kHigh);
+  CHECK(builder.AirwayName(hi->airway_id) == "J1");
+
+  // Symmetrically, a low-level preference selects the low edge.
+  req.level = bf::LevelPreference::kLow;
+  const bf::GraphEdge* lo = bf::SelectEdge(builder.graph(), a, b, opts);
+  REQUIRE(lo != nullptr);
+  CHECK(lo->level == bf::AirwayLevel::kLow);
+  CHECK(builder.AirwayName(lo->airway_id) == "V1");
 }
 
 }  // namespace
