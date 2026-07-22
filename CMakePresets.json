@@ -120,7 +120,7 @@
     },
     {
       "name": "unit",
-      "displayName": "Unit only (debug, no [integration] cases, pure logic)",
+      "displayName": "Unit only (debug, excludes [integration]-labeled cases, pure logic)",
       "configurePreset": "debug",
       "output": {
         "outputOnFailure": true
@@ -130,7 +130,7 @@
       },
       "filter": {
         "exclude": {
-          "name": "^bfdb:|^cifp section:|^query:|^real data:"
+          "label": "integration"
         }
       }
     },

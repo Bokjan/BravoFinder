@@ -64,6 +64,17 @@ elseif(CMAKE_CXX_FLAGS MATCHES "-fsanitize" AND IS_ABSOLUTE "${_asan_lib}")
 endif()
 
 catch_discover_tests(bf_tests
+                     TEST_SPEC "~[integration]"
                      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-                     PROPERTIES SKIP_RETURN_CODE 4
+                     PROPERTIES SKIP_RETURN_CODE 4 LABELS unit
+                     DISCOVERY_MODE PRE_TEST)
+# Split the suite by the [integration] tag into two CTest label groups so presets
+# select by semantics (LABELS unit / integration) instead of matching test-name
+# prefixes, which silently let ~30 integration cases leak into the "unit" set.
+# Catch2 3.5.4 has no ADD_TAGS_AS_LABELS, so we label per discovery call; the two
+# TEST_SPECs are disjoint, so every case is registered exactly once.
+catch_discover_tests(bf_tests
+                     TEST_SPEC "[integration]"
+                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                     PROPERTIES SKIP_RETURN_CODE 4 LABELS integration
                      DISCOVERY_MODE PRE_TEST)
