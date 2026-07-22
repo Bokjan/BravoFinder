@@ -2,17 +2,17 @@
 
 [![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases) [![license](https://img.shields.io/github/license/Bokjan/BravoFinder)](LICENSE) ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
 
-A flight route finder written in modern C++, **v3 — a complete rewrite**.
+A flight route finder written in modern C++ (v3).
 
 ## About
 
 BravoFinder builds a graph from navigation data (waypoints, navaids, airways, and SID/STAR/approach procedures) and finds routes between two airports. Unlike earlier versions, which computed a purely geographic shortest path, v3 is a **realistic / compliant route engine**: routes respect real-world constraints such as airway directionality, high/low airway levels, segment altitude bands, and terminal procedures.
 
-Navigation data is read through a **pluggable `Loader` interface** (`lib/io/loaders/`) that abstracts the source format. The default (and currently only) loader parses X-Plane 12 native `.dat` files; a future loader could read a Little Navmap SQLite database or another format without changing the route engine. The loader name is recorded as `source_loader` provenance in every `.bfdb` cache header.
+Navigation data is read through a **pluggable `Loader` interface** (`lib/io/loaders/`) that abstracts the source format. Three loaders ship today: `xplane12` (the default — X-Plane 12 native `.dat`), and `dfd1` / `dfd2` for the DFD SQLite databases shipped by RealTraffic / SimToolkitPro / PMDG MSFS and Inibuilds A350 respectively. Adding a format means adding a loader; the route engine is untouched. The selected loader is recorded as `source_loader` provenance in every `.bfdb` cache header.
 
 ## Status
 
-The tool loads navigation data through a pluggable source loader (default: X-Plane 12), builds a directed graph honoring airway directionality and high/low levels, and finds routes between two airports (or waypoints) with A* and Yen K-shortest. Airports connect to the enroute network through their real SID/STAR procedures (parsed from ARINC 424 / CIFP), falling back to a direct link where no procedure data exists. For example, `KJFK KLAX` resolves to a filed-flight-plan-style route such as `KJFK SID TOWIN ... PGS STAR KLAX` of ~2160 NM (the literal `SID`/`STAR` connect the airports to the enroute network; the actual procedure names appear in the route's `sid`/`star` fields).
+The tool builds a directed graph honoring airway directionality and high/low levels, and finds routes between two airports (or waypoints) with A* and Yen K-shortest. Airports connect to the enroute network through their real SID/STAR procedures (parsed from ARINC 424 / CIFP), falling back to a direct link where no procedure data exists. For example, `KJFK KLAX` resolves to a filed-flight-plan-style route such as `KJFK SID TOWIN ... PGS STAR KLAX` of ~2160 NM (the literal `SID`/`STAR` connect the airports to the enroute network; the actual procedure names appear in the route's `sid`/`star` fields).
 
 A single loaded database is safe to query concurrently from multiple threads.
 
@@ -147,7 +147,7 @@ Errors return `{"error":"..."}` with an HTTP status: **400** for a malformed req
 # detail, so deployment needs only that file, not the CIFP/ directory.
 bf build navdata                    # writes navdata/nav_<cycle>.bfdb
 bf build /path/to/xplane -o my.bfdb # explicit name: writes my.bfdb
-bf build navdata --loader xplane12  # select source loader (default; only one today)
+bf build navdata --loader xplane12  # select source loader: xplane12 | dfd1 | dfd2 (default xplane12)
 
 # Find a route (reads navigation data from ./navdata by default)
 bf route KJFK KLAX
@@ -174,6 +174,7 @@ bf route KJFK KLAX --level high -k 3
 
 # Restrict the departure/arrival runway used for SID/STAR selection
 bf route KJFK KLAX --rwy-dep RW31L
+bf route KJFK KLAX --rwy-arr RW25L
 
 # Select a specific SID/STAR by name (bare name matches any transition;
 # NAME.TRANSITION pins the transition). An unknown name is a clean error.
@@ -214,7 +215,7 @@ bf query hold --db navdata/nav_2601.bfdb AE701
 bf --version
 ```
 
-Endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an airport has procedure data, the route names the SID and STAR used in its `sid`/ `star` fields (and the interchangeable procedures that share the same connection fix); in the route string and the leg list they show as the literal `SID`/`STAR` connectors.
+Route endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an airport has procedure data, the route names the SID and STAR used in its `sid`/ `star` fields (and the interchangeable procedures that share the same connection fix); in the route string and the leg list they show as the literal `SID`/`STAR` connectors.
 
 The `--format json` route output carries, alongside the filed route string and per-phase distances, an ordered `points[]` array (each `{ident, lat, lon}`) and a running `cumulative_nm` on every leg. `points` has one more entry than `legs` (N points, N-1 legs); the destination of leg *i* is `points[i+1]`, and the last `cumulative_nm` equals `total_distance_nm`.
 
