@@ -31,6 +31,12 @@ bool ForEachDataRow(const std::string& path, RowFn parse_row) {
   std::string line;
   bool in_data = false;
   while (std::getline(in, line)) {
+    // Tolerate CRLF line endings: std::getline only strips '\n', leaving a
+    // trailing '\r' that would make the literal "99" terminator check below
+    // (and any other exact-match parsing) fail. cifp_parser.cc does the same.
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
     if (!in_data) {
       // Header ends at the line containing the "Version" token.
       if (line.find("Version") != std::string::npos) {
