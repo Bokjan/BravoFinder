@@ -54,7 +54,7 @@ X-Plane 数据的解析 + 建图有固定成本（ARINC 424 解析尤重）。`b
 | 5 | 51.40 | 24.82 | 20.54 | 11.96 | **4.30×** |
 | 10 | 103.92 | 44.42 | 30.21 | 13.20 | **7.87×** |
 
-（单位 ms/search；本机 50 轮 × 10 对 = 500 次/档取平均。绝对值随机器浮动，看同表内相对倍率。）
+（单位 ms/search；本机 30 轮 × 10 对 = 300 次/档取平均。绝对值随机器浮动，看同表内相对倍率。）
 
 读这张表：
 
@@ -134,7 +134,7 @@ for i in 1 2 3 4 5; do /usr/bin/time -p bf route KJFK KLAX --db /tmp/nav.bfdb >/
 /usr/bin/time -v bf route KJFK KLAX --db /tmp/nav.bfdb --cifp-load eager >/dev/null
 ```
 
-纯搜索的分解用进程内微基准 `bench/route_bench.cc`（`OpenCached` 一次 + 循环 `FindRoutes` 10 城市对 × 30 轮，`steady_clock` 只包 `FindRoutes`）。三版对照的算法源码 （`lib/core/graph/astar.*` + `yen_kshortest.*`）已固化在 `bench/variants/{baseline,memoize,lawler}/`， `bench/decompose.sh` 用 `-DBRAVOFINDER_BENCH_VARIANT` 分别编译对照二进制，无需 checkout git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编译微基准（把 `lib/core/`+`lib/io/` 的 。cc 与基准一起编，需 `-I build/<preset>/core` 找生成的 `version.h`），跑一轮后 `gprof <bin> gmon.out`。基准工具默认不入构建（`BRAVOFINDER_BUILD_BENCH=OFF`），复现步骤见 `bench/README.md`。
+纯搜索的分解用进程内微基准 `bench/route_bench.cc`（`OpenCached` 一次 + 循环 `FindRoutes` 10 城市对 × 30 轮，`steady_clock` 只包 `FindRoutes`）。四版对照的算法源码 （`lib/core/graph/astar.*` + `yen_kshortest.*`）已固化在 `bench/variants/{baseline,memoize,lawler,workspace}/`， `bench/decompose.sh` 用 `-DBRAVOFINDER_BENCH_VARIANT` 分别编译对照二进制，无需 checkout git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编译微基准（把 `lib/core/`+`lib/io/` 的 。cc 与基准一起编，需 `-I build/<preset>/core` 找生成的 `version.h`），跑一轮后 `gprof <bin> gmon.out`。基准工具默认不入构建（`BRAVOFINDER_BUILD_BENCH=OFF`），复现步骤见 `bench/README.md`。
 
 ## 8. 小结
 

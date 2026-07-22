@@ -36,7 +36,7 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 - On-demand: `procedure_cache_` is guarded by `cache_mutex_` (double-checked locking), only locking map lookup/insert, never disk I/O; append-only + `unique_ptr` values → returned pointers are stable across rehash.
 - Eager: `FetchAll` fills the cache at `Open` time then **freezes** it; `ProceduresFor` does lock-free reads (no insert = no rehash = no race).
 - **Eager mode is "frozen, lock-free reads" — it is not missing locks. Do not flag it in audits.**
-- After touching concurrency-related code, **must pass the tsan preset**: `ctest --preset tsan`.
+- After touching concurrency-related code, **must pass the tsan preset**: `ctest --preset tsan -j 32`.
 
 ## Version discipline (three layers)
 
@@ -59,21 +59,21 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 cmake --preset debug      # Debug + ASan/UBSan + warnings-as-errors
 cmake --preset release    # Release -O2
 cmake --preset tsan       # ThreadSanitizer (concurrency verification)
-cmake --build --preset <debug|release|tsan>
-ctest --preset <debug|release|tsan>
+cmake --build --preset <debug|release|tsan> -j 32
+ctest --preset <debug|release|tsan> -j 32
 ```
-On Windows MSVC, `windows-debug` / `windows-release` presets are available (no sanitizers; used in CI). Dependencies are pure CMake + FetchContent (Catch2 v3 / CLI11 / RapidJSON; + libuv / llhttp for the HTTP server); no vendoring, no vcpkg.
+On Windows MSVC, `windows-debug` / `windows-release` presets are available (no sanitizers; used in CI). Dependencies are pure CMake + FetchContent (Catch2 v3 / CLI11 / RapidJSON / SQLite; + libuv / llhttp for the HTTP server); no vendoring, no vcpkg.
 
 ### Pick test scope by change (saves time; see Testing section for the principle)
 
 ctest runs each case in its own process. Cache round-trip tests (`bfdb:` / `cifp section:`, 11 cases) each take 20–40s and dominate wall-clock time — only run them when **the cache disk layout / serialization** changed. For day-to-day work, pick by scope:
 ```
-ctest --preset unit    # pure logic unit tests (~1.4s): algorithm/constraint/pure-function changes only
-ctest --preset quick   # exclude cache tests (~12s): routing/query/constraint changes but cache layout untouched
-ctest --preset debug   # full suite (~56s): cache layout/serialization changed, or pre-release
-ctest --preset tsan    # must run after any concurrency-related change (Contract B)
+ctest --preset unit -j 32    # pure logic only (~0.7s): excludes ALL [integration]-labeled cases; algorithm/constraint/pure-function changes
+ctest --preset quick -j 32   # exclude cache tests (~12s): routing/query/constraint changes but cache layout untouched
+ctest --preset debug -j 32   # full suite (~56s): cache layout/serialization changed, or pre-release
+ctest --preset tsan -j 32    # must run after any concurrency-related change (Contract B)
 ```
-(unit/quick are based on the debug config, with ASan/UBSan; they just use `filter` to exclude the slow cache tests.)
+(unit/quick are based on the debug config, with ASan/UBSan. `unit` excludes cases by CTest label — the suite is registered as two groups, `LABELS unit` / `LABELS integration`, split on the Catch2 `[integration]` tag — so no integration case leaks in; `quick` excludes only the slow cache round-trip tests by name.)
 
 ## Git
 

@@ -44,9 +44,9 @@ cmake --preset release -DBRAVOFINDER_BUILD_BENCH=ON && cmake --build --preset re
 
 The optional third argument is a cruise altitude filter (`"300-400"` for a band, `"350"` for a single level). It turns on the altitude-band and MORA constraints on every search; comparing a run with it against a run without isolates the net cost of altitude-filtered routing. Omit it for the unconstrained shortest-path numbers in `docs/performance.zh-CN.md`.
 
-### 3a. Optimization decomposition (baseline / +memoize / +Lawler)
+### 3a. Optimization decomposition (baseline / +memoize / +Lawler / +workspace)
 
-The three variants differ only in the search layer (`core/graph/astar.*` + `core/graph/yen_kshortest.*`). The exact source of each is vendored, and checked in, under `bench/variants/<variant>/` -- so this needs no `git checkout` of historical commits (short hashes drift, and checking files out of history dirties the working tree and index). `bench/decompose.sh` points a separate build tree at each variant via `-DBRAVOFINDER_BENCH_VARIANT` and runs `route_bench` against the same cache:
+The four variants differ only in the search layer (`core/graph/astar.*` + `core/graph/yen_kshortest.*`). The exact source of each is vendored, and checked in, under `bench/variants/<variant>/` -- so this needs no `git checkout` of historical commits (short hashes drift, and checking files out of history dirties the working tree and index). `bench/decompose.sh` points a separate build tree at each variant via `-DBRAVOFINDER_BENCH_VARIANT` and runs `route_bench` against the same cache:
 
 ```bash
 ./bench/decompose.sh /tmp/nav.bfdb        # 30 rounds by default
@@ -57,7 +57,8 @@ The variants and their provenance:
 
 - `baseline` -- Yen with no heuristic memoization and no Lawler (commit `2918c86`).
 - `memoize` -- multi-goal heuristic memoized across spur searches (commit `ee3afb4`).
-- `lawler` -- Lawler's optimization on top; algorithm-equivalent to the current HEAD (commit `f7a42c9`, which differs from HEAD only by later clang-format).
+- `lawler` -- Lawler's optimization on top (from commit `f7a42c9`, differing only by later clang-format); algorithm-equivalent to HEAD (same routes and costs).
+- `workspace` -- a generation-stamped `SearchWorkspace` reused across spur searches, avoiding a per-search allocation + O(V) reinitialization; the current HEAD. A pure performance change: results are identical to `lawler`.
 
 Each build lands in its own `build/bench-<variant>/`; the main source tree and `build/release/` are never touched. To time a single variant directly:
 

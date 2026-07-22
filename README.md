@@ -20,7 +20,7 @@ The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` C
 
 ## Building
 
-Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11, RapidJSON, plus libuv and llhttp for the HTTP server) are fetched automatically via FetchContent.
+Requires a C++20 compiler and CMake (3.21+). Dependencies (Catch2, CLI11, RapidJSON, SQLite, plus libuv and llhttp for the HTTP server) are fetched automatically via FetchContent.
 
 ```bash
 cmake --preset debug              # or: release
@@ -141,7 +141,7 @@ Errors return `{"error":"..."}` with an HTTP status: **400** for a malformed req
 ### CLI (`bf`)
 
 ```bash
-# Build a binary cache once per AIRAC cycle for fast startup (~1.5s -> ~50ms).
+# Build a binary cache once per AIRAC cycle for fast startup (~2.3s -> ~0.2s).
 # The default name encodes the cycle so a directory of caches can hold several
 # AIRACs. One unified .bfdb holds the graph, the CIFP procedures, and the navaid
 # detail, so deployment needs only that file, not the CIFP/ directory.
