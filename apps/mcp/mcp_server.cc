@@ -317,7 +317,11 @@ void McpServer::HandleListCycles(const rapidjson::Value& id) {
     writer.EndObject();
   }
   writer.EndArray();
-  SendToolResult(id, buffer.GetString(), inv.empty());
+  // An empty cycle list is a valid result, not a tool error: report success.
+  // (In practice the server fail-fasts on an empty inventory at startup, so the
+  // registry is never empty here, but the flag must reflect semantics either
+  // way rather than conflate "no cycles" with "the call failed".)
+  SendToolResult(id, buffer.GetString(), /*is_error=*/false);
 }
 
 void McpServer::HandleToolsCall(const rapidjson::Value& id, const rapidjson::Value& params) {

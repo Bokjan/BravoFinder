@@ -96,6 +96,14 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
       if (min_fl > max_fl) {
         return {JsonError("min_fl must not exceed max_fl"), kBadRequest};
       }
+      // Flight levels are non-negative (hundreds of feet). A negative bound is
+      // physically meaningless and would make the altitude-band and MORA
+      // constraints reject every edge with recorded data, silently yielding
+      // "no route" rather than an error. Reject it up front. (min_fl <= max_fl
+      // is already enforced, so this bounds both.)
+      if (min_fl < 0) {
+        return {JsonError("min_fl and max_fl must be non-negative"), kBadRequest};
+      }
       request.altitude = bf::FlRange{min_fl, max_fl};
     }
   }
