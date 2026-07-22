@@ -38,6 +38,9 @@ namespace {
 // Fixed header hardening caps (body size / timeout are CLI-tunable via Limits).
 constexpr size_t kMaxHeaderBytes = 32 * 1024;
 constexpr int kMaxHeaderCount = 100;
+// The request line's URL (path + query) is not a header, so it is capped
+// separately; 8 KiB is generous for any real path + query string.
+constexpr size_t kMaxUrlBytes = 8 * 1024;
 
 const char* ReasonPhrase(int status) {
   switch (status) {
@@ -51,6 +54,8 @@ const char* ReasonPhrase(int status) {
       return "Request Timeout";
     case 413:
       return "Payload Too Large";
+    case 414:
+      return "URI Too Long";
     case 422:
       return "Unprocessable Entity";
     case 431:
@@ -137,6 +142,7 @@ std::shared_ptr<Connection> Connection::Create(uv_loop_t* loop, Router& router,
 
 void Connection::SetupParser(Connection& conn) {
   llhttp_settings_init(&conn.settings_);
+  conn.settings_.on_message_begin = OnMessageBegin;
   conn.settings_.on_url = OnUrl;
   conn.settings_.on_header_field = OnHeaderField;
   conn.settings_.on_header_value = OnHeaderValue;
@@ -200,6 +206,7 @@ void Connection::ResetForNextRequest() {
   request_ready_ = false;
   keep_alive_ = false;
   awaiting_response_ = false;
+  pipelined_ = false;
   reject_status_ = 0;
   reject_message_.clear();
   RestartTimer();
@@ -237,6 +244,19 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
     return;
   }
   if (conn->request_ready_) {
+    // We do not pipeline. If bytes remained in this buffer after the request
+    // completed -- a fully-parsed second request (llhttp does not honor the
+    // message-complete pause when the trailing bytes form a valid request, so
+    // OnMessageBegin catches it) or trailing bytes llhttp paused before -- we
+    // cannot process them, so answer this request and close rather than silently
+    // dropping them (the next uv_read would overwrite read_buf_ and lose them).
+    // The client sees Connection: close and reissues on a fresh connection.
+    const char* stop = llhttp_get_error_pos(&conn->parser_);
+    const size_t consumed =
+        stop != nullptr ? static_cast<size_t>(stop - buf->base) : static_cast<size_t>(nread);
+    if (conn->pipelined_ || consumed < static_cast<size_t>(nread)) {
+      conn->keep_alive_ = false;
+    }
     conn->awaiting_response_ = true;
     conn->Dispatch();
     return;
@@ -255,9 +275,39 @@ void Connection::OnTimeout(uv_timer_t* t) {
   conn->StartClose();
 }
 
-int Connection::OnUrl(llhttp_t* p, const char* at, size_t len) {
-  static_cast<Connection*>(p->data)->url_.append(at, len);
+int Connection::OnMessageBegin(llhttp_t* p) {
+  auto* conn = static_cast<Connection*>(p->data);
+  if (conn->request_ready_) {
+    // A second request is starting in the same buffer (llhttp kept parsing past
+    // the message-complete pause because the trailing bytes are a valid request).
+    // We do not pipeline: stop here -- before this request's on_url, so url_ stays
+    // the first request's -- and flag it so OnRead answers the first, then closes.
+    conn->pipelined_ = true;
+    return -1;
+  }
   return 0;
+}
+
+int Connection::OnUrl(llhttp_t* p, const char* at, size_t len) {
+  auto* conn = static_cast<Connection*>(p->data);
+  conn->url_.append(at, len);
+  // Cap the request-line URL incrementally: without this a multi-megabyte
+  // "GET /AAAA..." grows url_ unbounded before the message even completes.
+  if (conn->url_.size() > kMaxUrlBytes) {
+    conn->reject_status_ = 414;
+    conn->reject_message_ = "request URI too long";
+    return -1;
+  }
+  return 0;
+}
+
+// Running header size = finalized pairs + the field/value currently arriving.
+// Enforced on every chunk so a single oversized field or value trips the cap
+// before it can grow unbounded -- llhttp only signals a completed pair (via
+// FinishHeaderPair), not each chunk, so the per-pair check alone lets one giant
+// value balloon memory before it is ever counted.
+bool Connection::HeaderBudgetExceeded() const {
+  return header_bytes_ + cur_field_.size() + cur_value_.size() > kMaxHeaderBytes;
 }
 
 void Connection::FinishHeaderPair() {
@@ -289,6 +339,10 @@ int Connection::OnHeaderField(llhttp_t* p, const char* at, size_t len) {
     conn->FinishHeaderPair();  // a new field means the previous pair is complete
   }
   conn->cur_field_.append(at, len);
+  if (conn->reject_status_ == 0 && conn->HeaderBudgetExceeded()) {
+    conn->reject_status_ = 431;
+    conn->reject_message_ = "request headers too large";
+  }
   return conn->reject_status_ != 0 ? -1 : 0;
 }
 
@@ -296,7 +350,11 @@ int Connection::OnHeaderValue(llhttp_t* p, const char* at, size_t len) {
   auto* conn = static_cast<Connection*>(p->data);
   conn->reading_value_ = true;
   conn->cur_value_.append(at, len);
-  return 0;
+  if (conn->reject_status_ == 0 && conn->HeaderBudgetExceeded()) {
+    conn->reject_status_ = 431;
+    conn->reject_message_ = "request headers too large";
+  }
+  return conn->reject_status_ != 0 ? -1 : 0;
 }
 
 int Connection::OnHeadersComplete(llhttp_t* p) {

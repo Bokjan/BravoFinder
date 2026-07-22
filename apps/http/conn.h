@@ -108,6 +108,7 @@ class Connection : public std::enable_shared_from_this<Connection> {
 
   // llhttp settings wiring + the static trampolines it calls back into.
   static void SetupParser(Connection& conn);
+  static int OnMessageBegin(llhttp_t* p);
   static int OnUrl(llhttp_t* p, const char* at, size_t len);
   static int OnHeaderField(llhttp_t* p, const char* at, size_t len);
   static int OnHeaderValue(llhttp_t* p, const char* at, size_t len);
@@ -125,6 +126,11 @@ class Connection : public std::enable_shared_from_this<Connection> {
   // Record the just-finished header field/value pair: enforce the header caps
   // and note a Transfer-Encoding header (which we reject).
   void FinishHeaderPair();
+
+  // Whether the accumulated headers (finalized pairs + the field/value currently
+  // arriving) have exceeded the byte cap. Checked on every chunk so an oversized
+  // single field or value is rejected before it can grow unbounded.
+  bool HeaderBudgetExceeded() const;
 
   uv_tcp_t handle_{};
   uv_timer_t timer_{};
@@ -154,6 +160,7 @@ class Connection : public std::enable_shared_from_this<Connection> {
   bool request_ready_ = false;
   bool keep_alive_ = false;
   bool awaiting_response_ = false;  // request dispatched; ignore further input bytes
+  bool pipelined_ = false;          // a second request began in the same buffer; close after reply
   int reject_status_ = 0;           // non-zero => a hardening limit tripped; response + close
   std::string reject_message_;      // human-readable reason paired with reject_status_
 

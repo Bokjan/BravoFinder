@@ -16,6 +16,12 @@ namespace bf::http {
 
 namespace {
 
+// Maximum in-flight offloaded work items before new requests are shed with 503.
+// libuv's default threadpool is 4 threads, so this allows a deep-but-bounded
+// queue; each item pins a Connection (with its 64 KiB read buffer) + args
+// Document, so the cap also bounds worst-case memory under a request flood.
+constexpr int kMaxInflightWork = 256;
+
 // The HTTP path each shared handler is exposed under (see docs/http-service).
 // Keyed by the stable bf::service handler name.
 struct Route {
@@ -100,10 +106,14 @@ void Router::Handle(std::shared_ptr<Connection> conn, const HttpRequest& req) {
   // Readiness: opening the latest cycle may do disk I/O, so offload it; 503 if
   // it cannot be resolved.
   if (req.method == "GET" && req.path == "/readyz") {
+    if (inflight_.load(std::memory_order_relaxed) >= kMaxInflightWork) {
+      conn->WriteResponse(503, bf::service::JsonError("server busy"), req.keep_alive);
+      return;
+    }
     rapidjson::Document empty;
     empty.SetObject();
     QueueQuery(std::move(conn), loop_, registry_, ReadyHandler, std::move(empty), std::nullopt,
-               req.keep_alive, 503);
+               req.keep_alive, 503, inflight_);
     return;
   }
 
@@ -111,6 +121,11 @@ void Router::Handle(std::shared_ptr<Connection> conn, const HttpRequest& req) {
   auto it = routes_.find(req.path);
   if (req.method != "POST" || it == routes_.end()) {
     conn->WriteResponse(404, bf::service::JsonError("not found"), req.keep_alive);
+    return;
+  }
+  // Shed load before doing any per-request work if the offload queue is full.
+  if (inflight_.load(std::memory_order_relaxed) >= kMaxInflightWork) {
+    conn->WriteResponse(503, bf::service::JsonError("server busy"), req.keep_alive);
     return;
   }
   // ?cycle=NNNN selects the database; malformed cycle is a 400 before any work.
@@ -139,7 +154,7 @@ void Router::Handle(std::shared_ptr<Connection> conn, const HttpRequest& req) {
   }
   // Offload: an unknown/unserved cycle is the client's error (400).
   QueueQuery(std::move(conn), loop_, registry_, it->second, std::move(args), cycle, req.keep_alive,
-             400);
+             400, inflight_);
 }
 
 std::string Router::SerializeCycles() const {

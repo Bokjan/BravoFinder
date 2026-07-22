@@ -26,6 +26,7 @@ struct WorkRequest {
   std::optional<uint32_t> cycle;
   bool keep_alive = false;
   int cycle_error_status = 400;
+  std::atomic<int>* inflight = nullptr;  // decremented once, in the completion cb
   bf::service::HandlerResult result{};
 };
 
@@ -52,6 +53,7 @@ void OnWork(uv_work_t* req) {
 // the work item (dropping its connection reference).
 void OnAfterWork(uv_work_t* req, int status) {
   std::unique_ptr<WorkRequest> w(static_cast<WorkRequest*>(req->data));
+  w->inflight->fetch_sub(1, std::memory_order_relaxed);
   if (!w->conn->IsAlive()) {
     return;  // the client left while we computed -- drop the response
   }
@@ -69,7 +71,7 @@ void OnAfterWork(uv_work_t* req, int status) {
 void QueueQuery(std::shared_ptr<Connection> conn, uv_loop_t* loop,
                 bf::service::NavDatabaseRegistry& registry, bf::service::QueryHandler handler,
                 rapidjson::Document args, std::optional<uint32_t> cycle, bool keep_alive,
-                int cycle_error_status) {
+                int cycle_error_status, std::atomic<int>& inflight) {
   auto* w = new WorkRequest();
   w->conn = std::move(conn);
   w->registry = &registry;
@@ -78,15 +80,19 @@ void QueueQuery(std::shared_ptr<Connection> conn, uv_loop_t* loop,
   w->cycle = cycle;
   w->keep_alive = keep_alive;
   w->cycle_error_status = cycle_error_status;
+  w->inflight = &inflight;
   w->req.data = w;
   const int r = uv_queue_work(loop, &w->req, OnWork, OnAfterWork);
   if (r != 0) {
-    // The threadpool queue is unavailable: answer 503 inline and clean up.
+    // The threadpool queue is unavailable: answer 503 inline and clean up. No
+    // increment happened, so nothing to undo.
     if (w->conn->IsAlive()) {
       w->conn->WriteResponse(503, bf::service::JsonError("server busy"), keep_alive);
     }
     delete w;
+    return;
   }
+  inflight.fetch_add(1, std::memory_order_relaxed);
 }
 
 }  // namespace bf::http

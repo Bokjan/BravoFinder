@@ -198,6 +198,13 @@ std::string BodyOf(const std::string& response) {
   return response.substr(end + 4);
 }
 
+// Whether the response header block carries "Connection: <token>".
+bool HasConnection(const std::string& response, const std::string& token) {
+  const size_t end = response.find("\r\n\r\n");
+  const std::string headers = response.substr(0, end == std::string::npos ? response.size() : end);
+  return headers.find("Connection: " + token) != std::string::npos;
+}
+
 // True if the response header block carries an X-Elapsed-Ms header; if so, its
 // numeric value is written to *value.
 bool HasElapsedHeader(const std::string& response, unsigned long* value) {
@@ -387,6 +394,24 @@ TEST_CASE("http hardening: header limits and idle timeout", "[integration][http]
     req += "X-Big: " + std::string(64 * 1024, 'a') + "\r\n";  // exceeds kMaxHeaderBytes (32 KiB)
     req += "\r\n";
     CHECK(StatusOf(RoundTrip(port, req)) == 431);
+  }
+
+  SECTION("an oversized request-line URL is rejected with 414") {
+    // A multi-megabyte request line must trip the URL cap incrementally, not grow
+    // url_ unbounded until the (never-arriving) message completes.
+    std::string req = "GET /" + std::string(16 * 1024, 'A') + " HTTP/1.1\r\nHost: x\r\n\r\n";
+    CHECK(StatusOf(RoundTrip(port, req)) == 414);
+  }
+
+  SECTION("trailing bytes after a complete request force a close (no pipelining)") {
+    // A complete keep-alive request with extra bytes appended (a would-be second,
+    // pipelined request). We do not pipeline: the first request is answered but
+    // the connection is closed so the un-processed bytes are not silently lost.
+    std::string req = "GET /healthz HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n";
+    req += "GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n";  // trailing pipelined request
+    const std::string resp = RoundTrip(port, req);
+    CHECK(StatusOf(resp) == 200);
+    CHECK(HasConnection(resp, "close"));  // forced close despite the keep-alive ask
   }
 
   SECTION("an idle connection is closed after the io timeout") {

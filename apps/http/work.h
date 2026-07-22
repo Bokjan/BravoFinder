@@ -18,6 +18,7 @@
 
 #include <uv.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -34,10 +35,13 @@ class Connection;
 // on completion (loop thread): write the response via `conn` if it is still
 // alive. `cycle_error_status` is the status used when the cycle cannot be
 // resolved (400 for query endpoints, 503 for the readiness probe). Takes
-// ownership of `args`.
+// ownership of `args`. `inflight` counts in-flight work items: incremented once
+// the item is queued and decremented in the completion callback, so the caller
+// can shed load (503) before the queue grows without bound. All accesses are on
+// the loop thread; the counter is atomic only as a defensive convention.
 void QueueQuery(std::shared_ptr<Connection> conn, uv_loop_t* loop,
                 bf::service::NavDatabaseRegistry& registry, bf::service::QueryHandler handler,
                 rapidjson::Document args, std::optional<uint32_t> cycle, bool keep_alive,
-                int cycle_error_status);
+                int cycle_error_status, std::atomic<int>& inflight);
 
 }  // namespace bf::http

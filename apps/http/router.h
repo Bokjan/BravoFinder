@@ -11,6 +11,7 @@
 
 #include <uv.h>
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <string>
@@ -40,6 +41,10 @@ class Router {
   uv_loop_t* loop_;
   // POST path (e.g. "/v1/routes") -> the shared handler that serves it.
   std::unordered_map<std::string, bf::service::QueryHandler> routes_;
+  // In-flight offloaded work items. Incremented when queued, decremented on
+  // completion (both on the loop thread); a request that would exceed the cap is
+  // shed with 503 before it can grow the threadpool queue without bound.
+  std::atomic<int> inflight_{0};
 };
 
 }  // namespace bf::http
