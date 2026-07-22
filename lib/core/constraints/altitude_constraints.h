@@ -5,10 +5,11 @@
 namespace bf {
 
 // Hard filter: when a cruise altitude range is given, an airway segment is
-// usable only if that range overlaps the segment's [base_fl, top_fl] band.
-// Segments with no altitude limits recorded (base_fl == 0 && top_fl == 0, e.g.
-// synthetic DCT edges) are exempt. With no cruise altitude set, this constraint
-// allows everything.
+// usable only if that range overlaps the segment's [base_fl, top_fl] band. A
+// bound recorded as 0 means "no limit on that side": base_fl == 0 is an open
+// floor and top_fl == 0 is an open ceiling (e.g. synthetic DCT edges have both
+// open; a high-altitude airway may have a floor but no published ceiling). With
+// no cruise altitude set, this constraint allows everything.
 class AltitudeBandConstraint : public Constraint {
  public:
   EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest& request) const override {
@@ -16,12 +17,16 @@ class AltitudeBandConstraint : public Constraint {
       return EdgeVerdict::Allow();
     }
     const GraphEdge& e = ctx.edge;
-    if (e.base_fl == 0 && e.top_fl == 0) {
-      return EdgeVerdict::Allow();  // no recorded band (e.g. DCT)
-    }
     const FlRange& r = *request.altitude;
-    // Two inclusive ranges are disjoint iff one lies entirely below the other.
-    if (r.max_fl < e.base_fl || r.min_fl > e.top_fl) {
+    // Two inclusive ranges are disjoint iff one lies entirely below the other,
+    // but only test a bound that is actually recorded: a 0 bound is open on that
+    // side and constrains nothing. Testing an open (0) top_fl as if it were a
+    // real ceiling would wrongly Block a valid high-altitude segment whose range
+    // starts above FL0.
+    if (e.base_fl != 0 && r.max_fl < e.base_fl) {
+      return EdgeVerdict::Block();
+    }
+    if (e.top_fl != 0 && r.min_fl > e.top_fl) {
       return EdgeVerdict::Block();
     }
     return EdgeVerdict::Allow();

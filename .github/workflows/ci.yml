@@ -76,4 +76,8 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }} -j $(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
       - name: Test
-        run: ctest --preset ${{ matrix.preset }} --timeout 300
+        # Parallelize with the same runner-aware job count as the build step
+        # (release.yml uses -j too); the ctest preset's jobs:0 otherwise resolves
+        # to serial, which is especially slow for the tsan matrix leg.
+        shell: bash
+        run: ctest --preset ${{ matrix.preset }} -j $(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) --timeout 300

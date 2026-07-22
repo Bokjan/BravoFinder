@@ -71,6 +71,26 @@ TEST_CASE("altitude band: zero band (DCT) is exempt", "[constraint]") {
   CHECK(c.Evaluate(ctx, WithAltitude(350)).allowed);
 }
 
+TEST_CASE("altitude band: an open (0) ceiling imposes no upper bound", "[constraint]") {
+  // A high-altitude segment with a floor but no published ceiling (top_fl == 0
+  // means "open"). A cruise level above the floor must be allowed, not blocked as
+  // if the range lay above a real ceiling of 0.
+  bf::AltitudeBandConstraint c;
+  bf::EdgeContext ctx{MakeEdge(200, 0, true), bf::Coordinate{}, bf::Coordinate{}};
+  CHECK(c.Evaluate(ctx, WithAltitude(400)).allowed);        // well above the floor
+  CHECK(c.Evaluate(ctx, WithAltitude(200)).allowed);        // at the floor
+  CHECK_FALSE(c.Evaluate(ctx, WithAltitude(100)).allowed);  // below the floor
+}
+
+TEST_CASE("altitude band: an open (0) floor imposes no lower bound", "[constraint]") {
+  // Symmetric: base_fl == 0 is an open floor, only the ceiling constrains.
+  bf::AltitudeBandConstraint c;
+  bf::EdgeContext ctx{MakeEdge(0, 180, false), bf::Coordinate{}, bf::Coordinate{}};
+  CHECK(c.Evaluate(ctx, WithAltitude(50)).allowed);         // low, still under the ceiling
+  CHECK(c.Evaluate(ctx, WithAltitude(180)).allowed);        // at the ceiling
+  CHECK_FALSE(c.Evaluate(ctx, WithAltitude(250)).allowed);  // above the ceiling
+}
+
 TEST_CASE("level preference: penalizes non-preferred level", "[constraint]") {
   bf::LevelPreferenceConstraint c(0.5);
   bf::RouteRequest r;
