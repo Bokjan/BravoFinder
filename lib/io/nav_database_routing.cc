@@ -526,8 +526,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
                                                               request.departure_sid + "'"));
   }
   if (dep.connections.empty()) {
-    return Result<Routes>::Err(
-        Error(ErrorCode::kAirportNotFound, "unknown departure: " + request.departure));
+    return Result<Routes>::Err(Error(
+        ErrorCode::kAirportNotFound,
+        "unknown departure: " + request.departure + " (use an airport ICAO code, e.g. KLAX)"));
   }
   EndpointPlan arr = plan_endpoint(request.arrival, /*departure=*/false);
   if (arr.named_procedure_unmatched) {
@@ -537,7 +538,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   }
   if (arr.connections.empty()) {
     return Result<Routes>::Err(
-        Error(ErrorCode::kAirportNotFound, "unknown arrival: " + request.arrival));
+        Error(ErrorCode::kAirportNotFound,
+              "unknown arrival: " + request.arrival + " (use an airport ICAO code, e.g. KLAX)"));
   }
 
   // Assemble the active constraints from the request.

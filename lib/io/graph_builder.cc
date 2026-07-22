@@ -224,22 +224,29 @@ bool GraphBuilder::HasInbound(int vertex) const {
 
 std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int count,
                                                 bool inbound) const {
-  std::vector<int> candidates;
+  if (count <= 0) {
+    return {};
+  }
   const int v_count = graph_.VertexCount();
-  candidates.reserve(256);
   const std::vector<uint8_t>& mask = inbound ? has_inbound_ : has_outbound_;
+  // Score each on-network candidate with its distance computed exactly once; a
+  // sort comparator would recompute DistanceTo O(log V) times per element. Pairs
+  // sort by (distance, vertex), so ties break deterministically on vertex id.
+  std::vector<std::pair<double, int>> scored;
+  scored.reserve(256);
   for (int v = 0; v < v_count; ++v) {
     if (mask[v]) {
-      candidates.push_back(v);
+      scored.emplace_back(coord.DistanceTo(graph_.coords_[v]), v);
     }
   }
-  std::sort(candidates.begin(), candidates.end(), [&](int x, int y) {
-    return coord.DistanceTo(graph_.coords_[x]) < coord.DistanceTo(graph_.coords_[y]);
-  });
-  if (static_cast<int>(candidates.size()) > count) {
-    candidates.resize(count);
+  const size_t k = std::min(static_cast<size_t>(count), scored.size());
+  std::partial_sort(scored.begin(), scored.begin() + k, scored.end());
+  std::vector<int> out;
+  out.reserve(k);
+  for (size_t i = 0; i < k; ++i) {
+    out.push_back(scored[i].second);
   }
-  return candidates;
+  return out;
 }
 
 std::vector<int> GraphBuilder::VerticesByIdent(const std::string& ident) const {

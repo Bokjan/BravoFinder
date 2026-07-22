@@ -116,14 +116,13 @@ struct WriteReq {
 
 }  // namespace
 
-Connection::Connection(uv_loop_t* /*loop*/, Router& router, const Limits& limits)
-    : router_(router), limits_(limits) {}
+Connection::Connection(Router& router, const Limits& limits) : router_(router), limits_(limits) {}
 
 Connection::~Connection() = default;
 
 std::shared_ptr<Connection> Connection::Create(uv_loop_t* loop, Router& router,
                                                const Limits& limits) {
-  auto conn = std::shared_ptr<Connection>(new Connection(loop, router, limits));
+  auto conn = std::shared_ptr<Connection>(new Connection(router, limits));
   // Strong self-reference: the object outlives the local shared_ptr and every
   // libuv callback until both handles finish closing.
   conn->self_ = conn;

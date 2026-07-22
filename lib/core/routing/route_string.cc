@@ -52,6 +52,15 @@ std::vector<std::string> SplitDesignators(const std::string& via) {
 std::string BuildRouteString(const std::string& first_point, std::vector<RouteLeg>& legs) {
   std::string rs = first_point;
 
+  // Split every leg's via field exactly once up front, then index into this
+  // below. Folding otherwise re-parses each group-boundary leg twice: once as
+  // the `next` that breaks a group's running intersection, then again as the
+  // via that opens the following group.
+  std::vector<std::vector<std::string>> split(legs.size());
+  for (size_t k = 0; k < legs.size(); ++k) {
+    split[k] = SplitDesignators(legs[k].via);
+  }
+
   size_t i = 0;
   while (i < legs.size()) {
     // A DCT leg never folds: it is a hard boundary emitted on its own.
@@ -63,11 +72,8 @@ std::string BuildRouteString(const std::string& first_point, std::vector<RouteLe
     }
 
     // Grow a group of consecutive legs whose designator lists keep a non-empty
-    // running intersection (i.e. they stay on a shared physical airway). Cache
-    // each leg's split so the writeback below need not re-parse the via fields.
-    std::vector<std::vector<std::string>> group_names;
-    group_names.push_back(SplitDesignators(legs[i].via));
-    std::vector<std::string> running = group_names.front();
+    // running intersection (i.e. they stay on a shared physical airway).
+    std::vector<std::string> running = split[i];
     if (running.empty()) {
       // An empty via is not a real airway; treat the leg as DCT to stay safe.
       legs[i].concurrent_airways.clear();
@@ -77,13 +83,11 @@ std::string BuildRouteString(const std::string& first_point, std::vector<RouteLe
     }
     size_t j = i;
     while (j + 1 < legs.size() && legs[j + 1].via != "DCT") {
-      std::vector<std::string> next = SplitDesignators(legs[j + 1].via);
-      std::vector<std::string> inter = Intersect(running, next);
+      std::vector<std::string> inter = Intersect(running, split[j + 1]);
       if (inter.empty()) {
         break;
       }
       running = std::move(inter);
-      group_names.push_back(std::move(next));
       ++j;
     }
 
@@ -92,10 +96,9 @@ std::string BuildRouteString(const std::string& first_point, std::vector<RouteLe
     // irrelevant, so the first survivor is a fine deterministic pick.
     const std::string& chosen = running.front();
     for (size_t k = i; k <= j; ++k) {
-      std::vector<std::string>& names = group_names[k - i];
       legs[k].via = chosen;
-      if (names.size() > 1) {
-        legs[k].concurrent_airways = std::move(names);
+      if (split[k].size() > 1) {
+        legs[k].concurrent_airways = std::move(split[k]);
       } else {
         legs[k].concurrent_airways.clear();
       }

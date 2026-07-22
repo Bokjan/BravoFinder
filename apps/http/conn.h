@@ -89,7 +89,7 @@ class Connection : public std::enable_shared_from_this<Connection> {
   void WriteResponse(int status, const std::string& body, bool keep_alive, uint32_t elapsed_ms = 0);
 
  private:
-  Connection(uv_loop_t* loop, Router& router, const Limits& limits);
+  Connection(Router& router, const Limits& limits);
 
   // Begin closing the connection (idempotent). Stops the timer and closes the
   // handles; the object is freed once every handle's close callback has run and
