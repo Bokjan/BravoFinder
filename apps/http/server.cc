@@ -44,6 +44,15 @@ int Server::BoundPort() const {
   return (static_cast<int>(bytes[0]) << 8) | static_cast<int>(bytes[1]);
 }
 
+void Server::Close() {
+  // handle_ is uv_tcp_init'd in the constructor, so it is always a valid handle
+  // here even if Listen failed; guard against a double close.
+  auto* h = reinterpret_cast<uv_handle_t*>(&handle_);
+  if (uv_is_closing(h) == 0) {
+    uv_close(h, nullptr);
+  }
+}
+
 void Server::OnNewConnection(uv_stream_t* server, int status) {
   if (status != 0) {
     return;  // accept failed at the libuv level; nothing to clean up yet

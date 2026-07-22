@@ -63,10 +63,10 @@ class ServerHarness {
   }
 
   ~ServerHarness() {
-    // Give worker threads time to finish in-flight computations and the loop to
-    // process client disconnects, so every Connection frees itself normally
-    // before we force the loop down (avoids leaking a half-closed handle).
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    // Ask the loop thread to stop accepting (close the listener + the async).
+    // The loop then drains any in-flight computation and client disconnects on
+    // its own and returns from uv_run once no handle or queued work remains, so
+    // every Connection frees itself normally — no fixed-delay settle to guess.
     uv_async_send(&stop_);
     thread_.join();
   }
@@ -76,15 +76,25 @@ class ServerHarness {
  private:
   void RunLoop(std::promise<int> port_promise) {
     uv_loop_init(&loop_);
-    uv_async_init(&loop_, &stop_, [](uv_async_t* a) { uv_stop(a->loop); });
+    uv_async_init(&loop_, &stop_, [](uv_async_t* a) {
+      // Runs on the loop thread: stop accepting, then close the async itself.
+      // uv_run(UV_RUN_DEFAULT) returns once the listener, this async, all
+      // Connections, and all queued threadpool work have drained.
+      auto* server = static_cast<bf::http::Server*>(a->data);
+      server->Close();
+      uv_close(reinterpret_cast<uv_handle_t*>(a), nullptr);
+    });
     bf::http::Router router(registry_, &loop_);
     bf::http::Server server(&loop_, router, limits_);
+    // The async callback needs the server to close its listener. Safe to set
+    // before the send: the destructor cannot fire the async until the ctor has
+    // returned, which is after port_promise is fulfilled below.
+    stop_.data = &server;
     const int r = server.Listen("127.0.0.1", 0);
     port_promise.set_value(r == 0 ? server.BoundPort() : -1);
     uv_run(&loop_, UV_RUN_DEFAULT);
-    // Close whatever handles remain (listener + async) and flush, then close the
-    // loop. Client connections have already drained during the destructor's
-    // settle, so nothing shared_ptr-owned is force-closed here.
+    // Belt and braces: close any handle still open (there should be none after a
+    // graceful drain) and flush, then close the loop.
     uv_walk(
         &loop_,
         [](uv_handle_t* h, void*) {

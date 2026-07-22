@@ -31,6 +31,13 @@ class Server {
   // Listen; useful when binding to port 0.
   int BoundPort() const;
 
+  // Stop accepting new connections by closing the listening socket. MUST be
+  // called on the loop thread (e.g. from a uv_async callback). Idempotent.
+  // In-flight connections and queued work are untouched and drain on their own;
+  // once they finish, a loop running UV_RUN_DEFAULT has no active handles left
+  // and returns — enabling a graceful shutdown with no fixed-delay settle.
+  void Close();
+
  private:
   static void OnNewConnection(uv_stream_t* server, int status);
 
