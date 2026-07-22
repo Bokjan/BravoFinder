@@ -552,7 +552,7 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     cifp = CifpData{};
   };
 
-  return ForEachRow(stmt, [&]() {
+  Result<void> rows = ForEachRow(stmt, [&]() {
     const std::string airport = ColumnText(stmt, c.airport);
     const std::string name = ColumnText(stmt, c.proc);
     const std::string trans = ColumnText(stmt, c.transition);
@@ -596,6 +596,9 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     FillProcExtras(stmt, c, leg);
     current.legs.push_back(std::move(leg));
   });
+  if (!rows) {
+    return Result<void>::Err(rows.error());
+  }
   // Flush the last airport's accumulated procedures.
   flush_airport();
   return Result<void>::Ok();

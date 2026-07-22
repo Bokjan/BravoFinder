@@ -91,7 +91,11 @@ class UnifiedCache {
   //      2-char ICAO region). v9 DFD files store those fixes under a wrong,
   //      truncated region -- unreachable by airways/procedures and wrong in
   //      lookups -- so v9 is retired to force a rebuild once the key is corrected.
-  static constexpr uint32_t kFormatVersion = 10;
+  // v11: no layout change. The dfd1 procedure loader returned early from its row
+  //      scan and never flushed the last airport of each SID/STAR/IAP table, so
+  //      v10 dfd1 files silently omit those procedures while staying byte- and
+  //      version-valid. v10 is retired to force a rebuild of the now-complete data.
+  static constexpr uint32_t kFormatVersion = 11;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

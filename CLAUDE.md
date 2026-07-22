@@ -44,6 +44,7 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 - ② Unified container `format_version` (one single version, magic "BFDB"; mismatch → `Result::Err(kFormatMismatch)`). Three sections (graph/cifp/detail) share one file and one version; no per-section version.
 - ③ Program version + source_loader + AIRAC cycle are written into the container header as provenance (`build` removed — it was an X-Plane-only field).
 - **Cache disk layout change → bump container `format_version`; release behavior change → bump program version.** Read-side / internal-only changes do not change the layout and do not bump.
+- **Protective (poison) `format_version` bump — no layout change.** Also bump `format_version` when a write-side bug made an *older* version produce byte-valid, version-valid, but semantically wrong or incomplete files (they load fine and silently serve bad data — there is no other signal). Retiring the old version forces a rebuild. Precedent: v10 (DFD `region_code`/`icao_code` key), v11 (dfd1 dropped each table's last airport). The bump invalidates *all* caches (the version is unified across loaders/sections), which is the accepted cost — a cheap forced rebuild beats silently serving a bad cache. Document the reason in the `kFormatVersion` comment.
 
 ## Testing
 
