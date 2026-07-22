@@ -345,4 +345,50 @@ TEST_CASE("http server end-to-end over a loopback socket", "[integration][http]"
   }
 }
 
+// Hardening paths that reject or close a connection before any request reaches
+// routing, so they need no navigation data (an empty registry suffices) and run
+// even where navdata/ is absent. Covers the fixed header caps (431) and the
+// idle/slowloris timeout. The 431 sections also drive the reject_status_ write
+// path in Connection::OnRead (a parser callback sets the status and returns -1,
+// then OnRead emits the error response) -- otherwise reached only indirectly.
+TEST_CASE("http hardening: header limits and idle timeout", "[integration][http]") {
+  signal(SIGPIPE, SIG_IGN);
+
+  // Empty registry: none of these requests reach routing, so no data is needed.
+  bf::service::NavDatabaseRegistry registry(bf::BfdbInventory{});
+
+  bf::http::Limits limits;
+  limits.io_timeout_ms = 300;  // short, so the idle-timeout section stays fast
+  ServerHarness harness(registry, limits);
+  REQUIRE(harness.port() > 0);
+  const int port = harness.port();
+
+  SECTION("too many headers are rejected with 431") {
+    std::string req = "GET /healthz HTTP/1.1\r\nHost: x\r\n";
+    for (int i = 0; i < 200; ++i) {  // exceeds kMaxHeaderCount (100)
+      req += "X-Pad-" + std::to_string(i) + ": v\r\n";
+    }
+    req += "\r\n";
+    CHECK(StatusOf(RoundTrip(port, req)) == 431);
+  }
+
+  SECTION("an oversized header block is rejected with 431") {
+    std::string req = "GET /healthz HTTP/1.1\r\nHost: x\r\n";
+    req += "X-Big: " + std::string(64 * 1024, 'a') + "\r\n";  // exceeds kMaxHeaderBytes (32 KiB)
+    req += "\r\n";
+    CHECK(StatusOf(RoundTrip(port, req)) == 431);
+  }
+
+  SECTION("an idle connection is closed after the io timeout") {
+    const int fd = ConnectTo(port);
+    REQUIRE(fd >= 0);
+    // A partial request with no terminating CRLFCRLF, then stall. The idle timer
+    // must fire and close the connection; the client sees EOF (no response).
+    REQUIRE(SendAll(fd, "GET /healthz HTTP/1.1\r\nHost: x\r\n"));
+    const std::string resp = ReadResponse(fd);
+    CHECK(resp.empty());
+    close(fd);
+  }
+}
+
 #endif  // _WIN32
