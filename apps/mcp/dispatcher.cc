@@ -18,6 +18,7 @@
 
 #include "core/version.h"
 #include "handlers.h"
+#include "jsonrpc.h"
 
 namespace bf::mcp {
 
@@ -77,7 +78,8 @@ Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const
     // Invalid request: only reply if it carried an id (a notification with no
     // method is silently dropped, per JSON-RPC).
     if (has_id) {
-      return {MakeError(request["id"], -32600, "invalid request: missing or non-string method"),
+      return {MakeError(request["id"], jsonrpc::kInvalidRequest,
+                        "invalid request: missing or non-string method"),
               true};
     }
     return {};
@@ -104,13 +106,16 @@ Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const
     // A tools/call request must carry a params object; without one it is a
     // protocol error rather than a tool error.
     if (!request.HasMember("params") || !request["params"].IsObject()) {
-      return {MakeError(request["id"], -32602, "tools/call requires a params object"), true};
+      return {
+          MakeError(request["id"], jsonrpc::kInvalidParams, "tools/call requires a params object"),
+          true};
     }
     return {HandleToolsCall(request["id"], request["params"]), true};
   }
   // Unknown method: reply with method-not-found only for a request (has id).
   if (has_id) {
-    return {MakeError(request["id"], -32601, "method not found: " + method), true};
+    return {MakeError(request["id"], jsonrpc::kMethodNotFound, "method not found: " + method),
+            true};
   }
   return {};
 }
@@ -120,7 +125,7 @@ std::string Dispatcher::MakeResult(const rapidjson::Value& id, rapidjson::Value&
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
   writer.Key("jsonrpc");
-  writer.String("2.0");
+  writer.String(jsonrpc::kVersion);
   writer.Key("id");
   id.Accept(writer);  // echo the client's id verbatim (int/string/null)
   writer.Key("result");
@@ -135,7 +140,7 @@ std::string Dispatcher::MakeError(const rapidjson::Value& id, int code,
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
   writer.Key("jsonrpc");
-  writer.String("2.0");
+  writer.String(jsonrpc::kVersion);
   writer.Key("id");
   id.Accept(writer);  // echo the client's id verbatim (int/string/null)
   writer.Key("error");
@@ -155,7 +160,7 @@ std::string Dispatcher::MakeToolResult(const rapidjson::Value& id, const std::st
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
   writer.Key("jsonrpc");
-  writer.String("2.0");
+  writer.String(jsonrpc::kVersion);
   writer.Key("id");
   id.Accept(writer);  // echo the client's id verbatim (int/string/null)
   writer.Key("result");
@@ -280,7 +285,7 @@ std::string Dispatcher::HandleListCycles(const rapidjson::Value& id) const {
 std::string Dispatcher::HandleToolsCall(const rapidjson::Value& id,
                                         const rapidjson::Value& params) const {
   if (!params.HasMember("name") || !params["name"].IsString()) {
-    return MakeError(id, -32602, "missing tool name");
+    return MakeError(id, jsonrpc::kInvalidParams, "missing tool name");
   }
   const std::string name = params["name"].GetString();
 

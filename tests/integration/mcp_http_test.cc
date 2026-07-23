@@ -37,6 +37,7 @@ TEST_CASE("mcp-over-http e2e: skipped on Windows", "[integration][mcp]") {
 #include "io/cache/bfdb_naming.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/unified_cache.h"
+#include "jsonrpc.h"
 #include "mcp_http.h"
 #include "rapidjson/document.h"
 #include "registry.h"
@@ -346,6 +347,44 @@ TEST_CASE("mcp-over-http end-to-end over a loopback socket", "[integration][mcp]
         port, PostMcp(R"([{"jsonrpc":"2.0","method":"a"},{"jsonrpc":"2.0","method":"b"}])",
                       "application/json"));
     CHECK(StatusOf(resp) == 202);
+  }
+
+  SECTION("an empty batch is a 200 with a single -32600 error envelope") {
+    const std::string resp = RoundTrip(port, PostMcp("[]", "application/json"));
+    REQUIRE(StatusOf(resp) == 200);
+    rapidjson::Document doc = ParseBody(resp);
+    REQUIRE(doc.IsObject());
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+  }
+
+  SECTION("a non-object batch element gets a -32600 entry, not a silent drop") {
+    // A valid request plus a non-object (42) plus a notification: the response
+    // array holds the request's result and a -32600 for the 42, but nothing for
+    // the notification.
+    const std::string resp = RoundTrip(
+        port,
+        PostMcp(
+            R"([{"jsonrpc":"2.0","id":1,"method":"tools/list"},42,{"jsonrpc":"2.0","method":"n"}])",
+            "application/json"));
+    REQUIRE(StatusOf(resp) == 200);
+    rapidjson::Document doc = ParseBody(resp);
+    REQUIRE(doc.IsArray());
+    REQUIRE(doc.Size() == 2);
+    CHECK(doc[0]["id"].GetInt() == 1);
+    CHECK(doc[1]["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+  }
+
+  SECTION("a batch containing initialize returns a Mcp-Session-Id") {
+    const std::string resp = RoundTrip(
+        port,
+        PostMcp(
+            R"([{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}},{"jsonrpc":"2.0","id":2,"method":"tools/list"}])",
+            "application/json"));
+    REQUIRE(StatusOf(resp) == 200);
+    CHECK(HasHeader(resp, "Mcp-Session-Id: "));
+    rapidjson::Document doc = ParseBody(resp);
+    REQUIRE(doc.IsArray());
+    CHECK(doc.Size() == 2);
   }
 
   SECTION("Accept: text/event-stream yields a single SSE event") {

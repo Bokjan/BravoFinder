@@ -17,6 +17,7 @@
 #include "io/cache/bfdb_naming.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/unified_cache.h"
+#include "jsonrpc.h"
 #include "rapidjson/document.h"
 #include "registry.h"
 
@@ -204,7 +205,7 @@ TEST_CASE("mcp dispatcher: JSON-RPC protocol errors", "[unit][mcp]") {
     const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
     REQUIRE(resp.has_response);
     rapidjson::Document doc = Parse(resp.body);
-    CHECK(doc["error"]["code"].GetInt() == -32600);
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
   }
 
   SECTION("an unknown method with an id is -32601") {
@@ -212,7 +213,7 @@ TEST_CASE("mcp dispatcher: JSON-RPC protocol errors", "[unit][mcp]") {
     const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
     REQUIRE(resp.has_response);
     rapidjson::Document doc = Parse(resp.body);
-    CHECK(doc["error"]["code"].GetInt() == -32601);
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kMethodNotFound);
   }
 
   SECTION("tools/call without a params object is -32602") {
@@ -220,7 +221,7 @@ TEST_CASE("mcp dispatcher: JSON-RPC protocol errors", "[unit][mcp]") {
     const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
     REQUIRE(resp.has_response);
     rapidjson::Document doc = Parse(resp.body);
-    CHECK(doc["error"]["code"].GetInt() == -32602);
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidParams);
   }
 }
 

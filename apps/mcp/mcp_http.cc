@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "conn.h"  // http_server::Connection
+#include "jsonrpc.h"
 #include "rapidjson/document.h"
 #include "work.h"  // http_server::QueueWork, WorkResult
 
@@ -42,7 +43,7 @@ std::string JsonRpcFramingError(int code, const std::string& message) {
   rapidjson::Writer<rapidjson::StringBuffer> w(buf);
   w.StartObject();
   w.Key("jsonrpc");
-  w.String("2.0");
+  w.String(jsonrpc::kVersion);
   w.Key("id");
   w.Null();
   w.Key("error");
@@ -82,9 +83,12 @@ bool WantsSse(const http_server::HttpRequest& req) {
 // Run the dispatch(es) for one POST body and shape the result into a WorkResult.
 // Runs on a worker thread. A single object dispatches once; an array dispatches
 // each element and collects the non-notification responses into a JSON array. A
-// body of only notifications (no response) becomes 202 with an empty body, per
-// Streamable HTTP. Otherwise the response is framed as JSON or a single SSE
-// event, with a fresh Mcp-Session-Id header when the request was initialize.
+// batch element that is not a JSON object is an invalid request: it gets a
+// -32600 (id null) entry in the response array rather than being silently
+// dropped, per JSON-RPC 2.0. A body of only notifications (no response) becomes
+// 202 with an empty body, per Streamable HTTP. Otherwise the response is framed
+// as JSON or a single SSE event, with a fresh Mcp-Session-Id header when the
+// request was initialize (a single object, or a batch containing one).
 http_server::WorkResult BuildMcpWorkResult(const Dispatcher& dispatcher,
                                            const rapidjson::Document& req, bool wants_sse) {
   std::string json;
@@ -96,6 +100,19 @@ http_server::WorkResult BuildMcpWorkResult(const Dispatcher& dispatcher,
     rapidjson::Writer<rapidjson::StringBuffer> w(buf);
     w.StartArray();
     for (const rapidjson::Value& item : req.GetArray()) {
+      if (!item.IsObject()) {
+        // A non-object batch element is not a valid JSON-RPC request: emit a
+        // -32600 error entry (id null) so the client sees the rejection instead
+        // of a silently shortened response array.
+        has_response = true;
+        const std::string err = JsonRpcFramingError(jsonrpc::kInvalidRequest, "invalid request");
+        w.RawValue(err.c_str(), err.size(), rapidjson::kObjectType);
+        continue;
+      }
+      if (!is_initialize && item.HasMember("method") && item["method"].IsString() &&
+          std::strcmp(item["method"].GetString(), "initialize") == 0) {
+        is_initialize = true;
+      }
       const Dispatcher::Response r = dispatcher.Dispatch(item);
       if (r.has_response) {
         has_response = true;
@@ -172,7 +189,8 @@ void McpHttpHandler::HandlePost(std::shared_ptr<http_server::Connection> conn,
     return;
   }
   if (req.body.empty()) {
-    conn->WriteResponse(400, JsonRpcFramingError(-32700, "empty request body"), req.keep_alive);
+    conn->WriteResponse(400, JsonRpcFramingError(jsonrpc::kParseError, "empty request body"),
+                        req.keep_alive);
     return;
   }
   // Parse the body iteratively (kParseIterativeFlag): it is untrusted and up to
@@ -182,16 +200,25 @@ void McpHttpHandler::HandlePost(std::shared_ptr<http_server::Connection> conn,
   auto doc = std::make_shared<rapidjson::Document>();
   doc->Parse<rapidjson::kParseIterativeFlag>(req.body.data(), req.body.size());
   if (doc->HasParseError()) {
-    conn->WriteResponse(400, JsonRpcFramingError(-32700, "parse error"), req.keep_alive);
-    return;
-  }
-  if (!doc->IsObject() && !doc->IsArray()) {
-    conn->WriteResponse(400, JsonRpcFramingError(-32600, "request must be a JSON object or array"),
+    conn->WriteResponse(400, JsonRpcFramingError(jsonrpc::kParseError, "parse error"),
                         req.keep_alive);
     return;
   }
+  if (!doc->IsObject() && !doc->IsArray()) {
+    // Valid JSON, but not a JSON-RPC message at all: a framing-level 400.
+    conn->WriteResponse(
+        400,
+        JsonRpcFramingError(jsonrpc::kInvalidRequest, "request must be a JSON object or array"),
+        req.keep_alive);
+    return;
+  }
   if (doc->IsArray() && doc->Empty()) {
-    conn->WriteResponse(400, JsonRpcFramingError(-32600, "empty batch"), req.keep_alive);
+    // An empty batch is a formed JSON-RPC message (just empty), so it is a
+    // JSON-RPC-level error rather than a transport framing failure: answer 200
+    // with a single -32600 error envelope (id null), per JSON-RPC 2.0.
+    conn->WriteResponse(
+        200, JsonRpcFramingError(jsonrpc::kInvalidRequest, "invalid request: empty batch"),
+        req.keep_alive);
     return;
   }
 
