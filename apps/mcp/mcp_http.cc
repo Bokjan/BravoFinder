@@ -80,58 +80,37 @@ bool WantsSse(const http_server::HttpRequest& req) {
   return req.Header("accept").find("text/event-stream") != std::string::npos;
 }
 
-// Run the dispatch(es) for one POST body and shape the result into a WorkResult.
-// Runs on a worker thread. A single object dispatches once; an array dispatches
-// each element and collects the non-notification responses into a JSON array. A
-// batch element that is not a JSON object is an invalid request: it gets a
-// -32600 (id null) entry in the response array rather than being silently
-// dropped, per JSON-RPC 2.0. A body of only notifications (no response) becomes
-// 202 with an empty body, per Streamable HTTP. Otherwise the response is framed
-// as JSON or a single SSE event, with a fresh Mcp-Session-Id header when the
-// request was initialize (a single object, or a batch containing one).
+// Whether a parsed request (single object or batch) is or contains an initialize
+// call, so the HTTP transport can attach a fresh Mcp-Session-Id. Session tracking
+// is an HTTP concern (the id rides in a header), so this stays in the transport
+// rather than the transport-neutral Dispatcher.
+bool ContainsInitialize(const rapidjson::Document& req) {
+  const auto is_init = [](const rapidjson::Value& v) {
+    return v.IsObject() && v.HasMember("method") && v["method"].IsString() &&
+           std::strcmp(v["method"].GetString(), "initialize") == 0;
+  };
+  if (req.IsArray()) {
+    for (const rapidjson::Value& item : req.GetArray()) {
+      if (is_init(item)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return is_init(req);
+}
+
+// Run the dispatch for one POST body and shape the result into a WorkResult.
+// Runs on a worker thread. The Dispatcher handles both a single object and a
+// batch (array) -- including the -32600 entry for a non-object batch element --
+// so this function is only the HTTP framing: a no-response dispatch (pure
+// notification(s)) becomes 202 with an empty body, per Streamable HTTP;
+// otherwise the response is framed as JSON or a single SSE event, with a fresh
+// Mcp-Session-Id header when the request is or contains an initialize.
 http_server::WorkResult BuildMcpWorkResult(const Dispatcher& dispatcher,
                                            const rapidjson::Document& req, bool wants_sse) {
-  std::string json;
-  bool has_response = false;
-  bool is_initialize = false;
-
-  if (req.IsArray()) {
-    rapidjson::StringBuffer buf;
-    rapidjson::Writer<rapidjson::StringBuffer> w(buf);
-    w.StartArray();
-    for (const rapidjson::Value& item : req.GetArray()) {
-      if (!item.IsObject()) {
-        // A non-object batch element is not a valid JSON-RPC request: emit a
-        // -32600 error entry (id null) so the client sees the rejection instead
-        // of a silently shortened response array.
-        has_response = true;
-        const std::string err = JsonRpcFramingError(jsonrpc::kInvalidRequest, "invalid request");
-        w.RawValue(err.c_str(), err.size(), rapidjson::kObjectType);
-        continue;
-      }
-      if (!is_initialize && item.HasMember("method") && item["method"].IsString() &&
-          std::strcmp(item["method"].GetString(), "initialize") == 0) {
-        is_initialize = true;
-      }
-      const Dispatcher::Response r = dispatcher.Dispatch(item);
-      if (r.has_response) {
-        has_response = true;
-        // r.body is a complete JSON-RPC envelope; splice it in verbatim.
-        w.RawValue(r.body.c_str(), r.body.size(), rapidjson::kObjectType);
-      }
-    }
-    w.EndArray();
-    json = buf.GetString();
-  } else {
-    const Dispatcher::Response r = dispatcher.Dispatch(req);
-    has_response = r.has_response;
-    json = r.body;
-    if (req.IsObject() && req.HasMember("method") && req["method"].IsString()) {
-      is_initialize = std::strcmp(req["method"].GetString(), "initialize") == 0;
-    }
-  }
-
-  if (!has_response) {
+  const Dispatcher::Response r = dispatcher.Dispatch(req);
+  if (!r.has_response) {
     // Pure notification(s): acknowledge with 202 and no body.
     http_server::WorkResult out;
     out.status = 202;
@@ -142,12 +121,12 @@ http_server::WorkResult BuildMcpWorkResult(const Dispatcher& dispatcher,
   out.status = 200;
   if (wants_sse) {
     out.content_type = "text/event-stream";
-    out.body = "data: " + json + "\n\n";
+    out.body = "data: " + r.body + "\n\n";
   } else {
     out.content_type = "application/json";
-    out.body = std::move(json);
+    out.body = r.body;
   }
-  if (is_initialize) {
+  if (ContainsInitialize(req)) {
     out.extra_headers.emplace_back("Mcp-Session-Id", GenerateSessionId());
   }
   return out;
@@ -209,15 +188,6 @@ void McpHttpHandler::HandlePost(std::shared_ptr<http_server::Connection> conn,
     conn->WriteResponse(
         400,
         JsonRpcFramingError(jsonrpc::kInvalidRequest, "request must be a JSON object or array"),
-        req.keep_alive);
-    return;
-  }
-  if (doc->IsArray() && doc->Empty()) {
-    // An empty batch is a formed JSON-RPC message (just empty), so it is a
-    // JSON-RPC-level error rather than a transport framing failure: answer 200
-    // with a single -32600 error envelope (id null), per JSON-RPC 2.0.
-    conn->WriteResponse(
-        200, JsonRpcFramingError(jsonrpc::kInvalidRequest, "invalid request: empty batch"),
         req.keep_alive);
     return;
   }

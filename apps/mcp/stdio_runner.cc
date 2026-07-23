@@ -19,8 +19,9 @@ namespace bf::mcp {
 namespace {
 
 // Parse a JSON-RPC request line. Returns false if the line is not a valid JSON
-// object (the caller then silently skips it, as a well-behaved client sends
-// well-formed JSON).
+// object or array (the caller then silently skips it, as a well-behaved client
+// sends well-formed JSON). An array is a JSON-RPC batch; the Dispatcher handles
+// it as one unit, so the stdio transport gets batch support for free.
 bool ParseRequest(const std::string& line, rapidjson::Document& doc) {
   if (line.empty()) {
     return false;
@@ -30,7 +31,7 @@ bool ParseRequest(const std::string& line, rapidjson::Document& doc) {
   // C++ stack on a deeply nested payload. Using the length form also stops an
   // embedded NUL from truncating the request.
   return !doc.Parse<rapidjson::kParseIterativeFlag>(line.data(), line.size()).HasParseError() &&
-         doc.IsObject();
+         (doc.IsObject() || doc.IsArray());
 }
 
 // Read one newline-terminated line from `in`, bounding memory to `max_len`

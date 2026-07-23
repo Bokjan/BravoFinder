@@ -47,13 +47,20 @@ class Dispatcher {
   explicit Dispatcher(bf::service::NavDatabaseRegistry& registry)
       : registry_(registry), tools_(MakeTools()) {}
 
-  // Dispatch one parsed JSON-RPC request object. Runs synchronously on the
+  // Dispatch one parsed JSON-RPC request: a single object, or a batch (a JSON
+  // array of objects). A batch yields a JSON array of the non-notification
+  // responses (or no response when every element is a notification); an empty
+  // batch yields a single -32600 error envelope. Runs synchronously on the
   // calling thread: the transport decides whether that thread is the stdio loop
   // (inline) or a libuv worker (offloaded). Returns the response envelope, or a
   // no-response marker for a notification / malformed request that carries no id.
   Response Dispatch(const rapidjson::Value& request) const;
 
  private:
+  // Handle a batch (JSON array): dispatch each element and collect the
+  // non-notification responses into a JSON array. A non-object element becomes
+  // a -32600 (id null) entry; an empty batch becomes a single -32600 envelope.
+  Response DispatchBatch(const rapidjson::Value& batch) const;
   // The registry to serve from. Each database it holds is read-only per
   // NavDatabase contract B.
   bf::service::NavDatabaseRegistry& registry_;

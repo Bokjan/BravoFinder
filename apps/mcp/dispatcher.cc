@@ -67,9 +67,11 @@ const char* NegotiateProtocolVersion(const rapidjson::Value* params) {
 }  // namespace
 
 Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const {
-  // A request with no "id" is a notification (per JSON-RPC 2.0) and gets no
-  // response. A request with an id (int, string, or null) is echoed back
-  // verbatim so the client can match the response.
+  // A batch is a JSON array of requests. Handle it as one unit so both the
+  // stdio and HTTP transports get batch support from this single entry point.
+  if (request.IsArray()) {
+    return DispatchBatch(request);
+  }
   if (!request.IsObject()) {
     return {};  // not a JSON object: nothing to reply to
   }
@@ -118,6 +120,42 @@ Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const
             true};
   }
   return {};
+}
+
+Dispatcher::Response Dispatcher::DispatchBatch(const rapidjson::Value& batch) const {
+  // An empty batch is a formed-but-invalid JSON-RPC message: return a single
+  // -32600 error envelope (id null), per JSON-RPC 2.0 -- not an array.
+  if (batch.Empty()) {
+    const rapidjson::Value null_id(rapidjson::kNullType);
+    return {MakeError(null_id, jsonrpc::kInvalidRequest, "invalid request: empty batch"), true};
+  }
+  rapidjson::StringBuffer buf;
+  rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+  w.StartArray();
+  bool has_response = false;
+  for (const rapidjson::Value& item : batch.GetArray()) {
+    if (!item.IsObject()) {
+      // A non-object batch element is not a valid JSON-RPC request: emit a
+      // -32600 error entry (id null) so the client sees the rejection instead
+      // of a silently shortened response array, per JSON-RPC 2.0.
+      has_response = true;
+      const rapidjson::Value null_id(rapidjson::kNullType);
+      const std::string err = MakeError(null_id, jsonrpc::kInvalidRequest, "invalid request");
+      w.RawValue(err.c_str(), err.size(), rapidjson::kObjectType);
+      continue;
+    }
+    const Response r = Dispatch(item);
+    if (r.has_response) {
+      has_response = true;
+      // r.body is a complete JSON-RPC envelope; splice it in verbatim.
+      w.RawValue(r.body.c_str(), r.body.size(), rapidjson::kObjectType);
+    }
+  }
+  w.EndArray();
+  if (!has_response) {
+    return {};  // every element was a notification: no reply
+  }
+  return {buf.GetString(), true};
 }
 
 std::string Dispatcher::MakeResult(const rapidjson::Value& id, rapidjson::Value& result) const {

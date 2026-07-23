@@ -241,3 +241,50 @@ TEST_CASE("mcp dispatcher: a notification yields no response", "[unit][mcp]") {
     CHECK_FALSE(resp.has_response);
   }
 }
+
+TEST_CASE("mcp dispatcher: a batch dispatches each element", "[unit][mcp]") {
+  const fs::path dir = TempDir("batch");
+  WriteCache(dir, 2601);
+  bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
+  bf::mcp::Dispatcher dispatcher(reg);
+
+  SECTION("a batch returns an array of the non-notification responses") {
+    const rapidjson::Document req = Req(
+        R"([{"jsonrpc":"2.0","id":1,"method":"tools/list"},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_cycles"}}])");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    REQUIRE(doc.IsArray());
+    CHECK(doc.Size() == 2);
+  }
+
+  SECTION("a non-object batch element becomes a -32600 entry, not a drop") {
+    // A valid request, a non-object (42), and a notification: the array holds
+    // the request's result and a -32600 for the 42, nothing for the notification.
+    const rapidjson::Document req = Req(
+        R"([{"jsonrpc":"2.0","id":1,"method":"tools/list"},42,{"jsonrpc":"2.0","method":"n"}])");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    REQUIRE(doc.IsArray());
+    REQUIRE(doc.Size() == 2);
+    CHECK(doc[0]["id"].GetInt() == 1);
+    CHECK(doc[1]["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+  }
+
+  SECTION("a batch of only notifications yields no response") {
+    const rapidjson::Document req =
+        Req(R"([{"jsonrpc":"2.0","method":"a"},{"jsonrpc":"2.0","method":"b"}])");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    CHECK_FALSE(resp.has_response);
+  }
+
+  SECTION("an empty batch is a single -32600 error envelope, not an array") {
+    const rapidjson::Document req = Req("[]");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    REQUIRE(doc.IsObject());
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+  }
+}
