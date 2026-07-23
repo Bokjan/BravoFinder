@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.16.2
+        VERSION 3.16.3
         DESCRIPTION "A realistic / compliant flight route engine"
         LANGUAGES C CXX)
 
@@ -131,6 +131,14 @@ foreach(_c_lib uv_a llhttp_static)
     if(_c_incs)
       set_target_properties(${_c_lib} PROPERTIES
         INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_c_incs}")
+    endif()
+    # MSVC /MP compiles these C libraries' several .c files in parallel sharing
+    # one .pdb; without /FS a cl.exe that cannot grab the pdb lock fails with
+    # C1041 (an intermittent, timing-dependent build flake -- see windows-debug).
+    # /FS routes pdb writes through MSPDBSRV.EXE so the writers queue instead of
+    # erroring. No-op off MSVC.
+    if(MSVC)
+      target_compile_options(${_c_lib} PRIVATE /FS)
     endif()
   endif()
 endforeach()
