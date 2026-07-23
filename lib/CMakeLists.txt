@@ -31,6 +31,11 @@ else()
 endif()
 
 add_library(bravofinder STATIC
+  # sqlite3.c is listed first (not last) so low-core machines (-j 4) start its
+  # long -O3 compile at t=0 instead of queuing ~7s behind the ~23 C++ sources;
+  # it is the single slowest TU, so an early start keeps it off the critical
+  # path as much as possible (the -O3 cost itself is accepted, see below).
+  ${_sqlite3_dir}/sqlite3.c
   core/domain/coordinate.cc
   core/domain/procedure.cc
   ${_bf_astar}
@@ -54,8 +59,7 @@ add_library(bravofinder STATIC
   io/nav_database.cc
   io/nav_database_routing.cc
   io/nav_database_parse.cc
-  io/nav_database_query.cc
-  ${_sqlite3_dir}/sqlite3.c)
+  io/nav_database_query.cc)
 
 # When a variant is selected, its headers must win over lib/core/graph/*.h. A
 # BEFORE include dir mirroring the "core/graph/" path shadows the two headers
@@ -87,6 +91,12 @@ target_compile_features(bravofinder PUBLIC cxx_std_20)
 # former standalone bf_sqlite3 target: load extension is never used; threadsafe=1
 # (serialized default) plus per-connection SQLITE_OPEN_NOMUTEX (thread_local
 # connections, never shared across threads) gives correct, lock-free reads.
+#
+# sqlite3.c stays at the config's full -O3/-O2 (not downgraded): it is the single
+# slowest TU (~21s under release -O3 on one core), so to keep it off the
+# parallel-build critical path on low-core machines it is listed FIRST in the
+# source list above (starts at t=0 instead of queuing ~7s behind the ~23 C++
+# sources). The -O3 compile cost itself is accepted.
 set_source_files_properties(${_sqlite3_dir}/sqlite3.c PROPERTIES
   COMPILE_OPTIONS "$<$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>>:-w>"
   COMPILE_DEFINITIONS "SQLITE_OMIT_LOAD_EXTENSION;SQLITE_THREADSAFE=1")
