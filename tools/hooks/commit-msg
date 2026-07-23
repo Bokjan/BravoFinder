@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Local commit-msg hook: reject commit messages that hard-wrap a paragraph.
+# Activate with:  git config core.hooksPath tools/hooks
+# (or copy this file to .git/hooks/commit-msg)
+set -euo pipefail
+msg_file="${1:?commit-msg hook requires the message file path}"
+root="$(git rev-parse --show-toplevel)"
+exec python3 "${root}/tools/check_commit_messages.py" "${msg_file}"

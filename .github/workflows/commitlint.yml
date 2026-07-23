@@ -1,0 +1,34 @@
+name: Commit messages
+
+# Enforce BravoFinder's no-hard-wrap discipline (see CLAUDE.md): every commit
+# message paragraph must be one logical line. This blocks hard-wrapped bodies
+# in PRs and on push to v3 before they ever land.
+on:
+  pull_request:
+  push:
+    branches: [v3]
+
+permissions:
+  contents: read
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          # Full history so we can diff against the PR base / previous tip.
+          fetch-depth: 0
+
+      - name: Determine commit range
+        id: range
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..HEAD" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=${{ github.event.before }}..HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check commit messages
+        run: python3 tools/check_commit_messages.py --range "${{ steps.range.outputs.range }}"
