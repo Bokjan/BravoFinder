@@ -79,5 +79,5 @@ ctest --preset tsan -j 32    # must run after any concurrency-related change (Co
 ## Git
 
 - Commits use English **Conventional Commits**; body paragraphs are single unwrapped lines (same no-hard-wrap discipline as all markdown — see Language); keep the Claude co-author signature.
-- The no-hard-wrap rule is enforced: `tools/check_commit_messages.py` is wired into the local `commit-msg` hook (`git config core.hooksPath tools/hooks`) and the `commitlint` CI workflow, both of which reject a message that hard-wraps a paragraph. `0367ca0`-style `a -> b` rename lists and bullet/code/table blocks are not paragraphs and are left alone.
+- The no-hard-wrap rule is enforced locally by `tools/check_commit_messages.py` via the `commit-msg` hook (`git config core.hooksPath tools/hooks`), which rejects a message that hard-wraps a paragraph. `0367ca0`-style `a -> b` rename lists and bullet/code/table blocks are not paragraphs and are left alone.
 - For complex milestones, **align on the approach first, then implement**; at the end of each major task, do a docs / memory handoff.
