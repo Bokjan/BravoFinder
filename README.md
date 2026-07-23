@@ -33,7 +33,7 @@ Build only what you need with `--target`:
 | Target | What it builds |
 |---|---|
 | `bf` | CLI tool (`apps/cli/`) |
-| `bf_mcp` | MCP stdio server (`apps/mcp/`) |
+| `bf_mcp` | MCP server, stdio or HTTP (`apps/mcp/`) |
 | `bf_mcp_lib`   | MCP server library (static) |
 | `bf_http` | HTTP query server (`apps/http/`) |
 | `bf_service_lib` | Shared service layer: registry + handlers + typed entries, `bf::service` (static) |

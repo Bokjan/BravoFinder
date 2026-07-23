@@ -82,13 +82,13 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 
 `bf-mcp` 是同一套查询能力的另一个消费者。它默认 **stdio**（本地 MCP client spawn，向后兼容），也可切到 **HTTP**：`bf-mcp --transport http --port 8080`，供远程 / 多客户端 MCP client 接入。REST（`bf-http`）不受影响、独立二进制——`BravoFinderWeb` 的 Go 网关按 path+method 字节透传 REST、从不解析 body，砍掉 REST 换纯 MCP 会把它退化成 JSON-RPC↔REST 翻译桥，故 REST 保留。
 
-- **协议核心复用**：两种 MCP 传输共用 transport-neutral 的 `Dispatcher`（`apps/mcp/dispatcher.{h,cc}`，method 分发 + 协议版本协商 + 工具表）。stdio 内联 `Dispatch`；HTTP 把整个 `Dispatch` offload 到线程池（`Dispatch` 是 `const`、只读 registry/tools，多 worker 并发安全）。`stdio_runner` 与 `mcp_http` 只是两层薄壳。
+- **协议核心复用**：两种 MCP 传输共用 transport-neutral 的 `Dispatcher`（`apps/mcp/dispatcher.{h,cc}`，method 分发 + 协议版本协商 + 工具表 + **batch**）。`Dispatch` 同时认单个对象与 batch（JSON 数组）：batch 逐元素分发、收集非 notification 项为数组，全 notification 则无响应；非对象元素回一个 `id:null` 的 `-32600`（不静默丢弃），空 batch 回单个 `-32600` error 对象（非数组，per JSON-RPC 2.0）。正因为 batch 在 `Dispatcher` 里，**stdio 也支持 batch**——一行 batch 请求进、一行数组响应出。stdio 内联 `Dispatch`；HTTP 把整个 `Dispatch` offload 到线程池（`Dispatch` 是 `const`、只读 registry/tools，多 worker 并发安全）。`stdio_runner` 与 `mcp_http` 只是两层薄壳。错误码（`-32700`/`-32600`/`-32601`/`-32602`，JSON-RPC 2.0 §5.1 规范定义）收口在 `apps/mcp/jsonrpc.h` 的 `constexpr`，不散落字面量。
 - **传输核心复用**：HTTP 模式建在 `bf_http_server` 上，与 REST 同源——10–30ms 的 `tools/call` 计算走同一套 `uv_queue_work` offload + 连接存活守卫。offload 的工作单元是 **可拷贝** 的 `std::function<WorkResult()>`（解析后的请求用 `shared_ptr<Document>` 持有，move-capture 的 Document 不可拷贝、进不了 `std::function`）。
 - **Streamable HTTP（2025-03-26）单端点 `/mcp`**：
-  - `POST /mcp`：body 是 JSON-RPC 请求（单个或批量）。纯 notification（无 id）→ `202 Accepted` 空体；否则 offload dispatch，完成后按 `Accept` 头决定响应帧——含 `text/event-stream` → `200` + 单个 SSE 事件（`data: <json-rpc>\n\n`），否则 `200` `application/json`。批量：收集非 notification 项为数组，全 notification → 202。
+  - `POST /mcp`：body 是 JSON-RPC 请求（单个或批量，批量语义见上节 `Dispatcher`）。纯 notification（无 id）→ `202 Accepted` 空体；否则 offload dispatch，完成后按 `Accept` 头决定响应帧——含 `text/event-stream` → `200` + 单个 SSE 事件（`data: <json-rpc>\n\n`），否则 `200` `application/json`。空 batch 例外：它是合法 JSON 但非法 JSON-RPC 消息，回 `200` + 单个 `-32600` error 对象（不是 400 framing 错误，也不是数组）。
   - `GET /mcp`：开一条 SSE 长连接（`text/event-stream`，close-delimited 开放流），发一个 `: keepalive` 注释即占位。当前工具无 progress、无 server-push，此流零消费者，仅为将来通知预留 + 合成测试覆盖。
   - `DELETE /mcp`：无状态 → `200` ack。
-- **Session（无状态带 id）**：`initialize` 响应回一个随机 `Mcp-Session-Id` 头并协商到 2025-03-26；后续请求接受任意 session id 但**不跟踪**（Dispatcher 无 per-session 状态，每个请求独立）。
+- **Session（无状态带 id）**：`initialize`（单个请求或 batch 内含一个）响应回一个随机 `Mcp-Session-Id` 头并协商到 2025-03-26；后续请求接受任意 session id 但**不跟踪**（Dispatcher 无 per-session 状态，每个请求独立）。
 - **SSE 写出能力**（加在 `http_server/conn.cc`）：`WriteResponse` 支持自定义 `content_type` + 额外 header（POST→SSE 单事件用 `Content-Length` 缓冲）；`BeginStream`/`WriteEvent` 是 close-delimited 开放流（无 `Content-Length`、`Connection: keep-alive`），靠一个 `streaming_` 标志让写完成回调既不复位下一请求也不关连接，直到客户端断开 / idle 超时。**SSE 写出全在 loop 线程**，worker 只算不写。改这块并发面必过 `ctest --preset tsan`（契约 B）。
 
 端到端覆盖在 `tests/integration/mcp_http_test.cc`（真 loopback，用最小手造缓存，不依赖真实 navdata、不 SKIP）。

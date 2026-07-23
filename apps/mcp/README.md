@@ -5,7 +5,7 @@ BravoFinder's MCP server: it exposes the `bf route` and `bf query` capabilities 
 ## What it is
 
 - Transport: **stdio** (default — a local process the client spawns and talks to over stdin/stdout) or **HTTP** (`--transport http` — Streamable HTTP, 2025-03-26, on a TCP port `/mcp`, for remote / multi-client access). Both share the same protocol core and capabilities; only the byte transport differs.
-- Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK. Protocol version is negotiated at `initialize` (`2024-11-05` or `2025-03-26`).
+- Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK. Protocol version is negotiated at `initialize` (`2024-11-05` or `2025-03-26`). A message is either a single JSON-RPC request or a **batch** (a JSON array of requests); batch handling lives in the shared `Dispatcher`, so both transports accept it — stdio reads one batch per line and writes one batch response per line, HTTP carries a batch in one `POST /mcp` body.
 - Capabilities: the nine per-database tools below (mirroring the CLI `route` / `query` subcommands), plus a `list_cycles` tool.
 - Data: the server is pointed at a **directory** of prebuilt `.bfdb` caches and serves one or more AIRAC cycles from it. It never parses raw data or writes files.
 
