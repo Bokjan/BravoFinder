@@ -8,7 +8,7 @@
 
 using Catch::Matchers::WithinRel;
 
-TEST_CASE("GraphEdge stays compact (16 bytes)", "[graph]") {
+TEST_CASE("GraphEdge stays compact (16 bytes)", "[unit][graph]") {
   // The edge array is the largest structure in the graph and A* walks it on the
   // hot path; keeping the edge at 16 bytes doubles how many fit in a cache line.
   STATIC_REQUIRE(sizeof(bf::GraphEdge) == 16);
@@ -42,7 +42,7 @@ bf::NavData MakeLineData() {
   return d;
 }
 
-TEST_CASE("A* finds path along a linear airway", "[graph]") {
+TEST_CASE("A* finds path along a linear airway", "[unit][graph]") {
   bf::GraphBuilder builder(MakeLineData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int d = builder.VerticesByIdent("DDD")[0];
@@ -57,7 +57,7 @@ TEST_CASE("A* finds path along a linear airway", "[graph]") {
   CHECK_THAT(path.distance_nm, WithinRel(180.0, 0.01));
 }
 
-TEST_CASE("one-way airway is not traversable backward", "[graph]") {
+TEST_CASE("one-way airway is not traversable backward", "[unit][graph]") {
   bf::NavData d;
   auto wp = [](const char* id, double lon) {
     return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{0.0, lon}, bf::WaypointKind::kFix};
@@ -78,7 +78,7 @@ TEST_CASE("one-way airway is not traversable backward", "[graph]") {
   CHECK_FALSE(bf::FindShortestPath(builder.graph(), b, a).found);
 }
 
-TEST_CASE("a forward-only airway leaves its destination inbound-only", "[graph]") {
+TEST_CASE("a forward-only airway leaves its destination inbound-only", "[unit][graph]") {
   // Mirrors the real ABBEY topology: a forward-only airway A -> B gives B an
   // inbound edge but no outbound. B is on-network (union) and usable as a STAR
   // entry gate (inbound), but not as a SID hand-off (outbound). A is the reverse.
@@ -105,7 +105,7 @@ TEST_CASE("a forward-only airway leaves its destination inbound-only", "[graph]"
   CHECK(builder.OnNetwork(b));
 }
 
-TEST_CASE("unreachable vertices report no path", "[graph]") {
+TEST_CASE("unreachable vertices report no path", "[unit][graph]") {
   bf::NavData d;
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{10, 10}, {}}};
@@ -116,7 +116,7 @@ TEST_CASE("unreachable vertices report no path", "[graph]") {
   CHECK_FALSE(bf::FindShortestPath(builder.graph(), a, b).found);
 }
 
-TEST_CASE("multi-source/goal A* picks the cheapest seeded combination", "[graph]") {
+TEST_CASE("multi-source/goal A* picks the cheapest seeded combination", "[unit][graph]") {
   // A-B-C-D in a line (~60 NM per degree-step at the equator). Sources seed at
   // A and B; goals seed at C and D. The search must weigh seed costs against
   // enroute distance to choose the best end-to-end combination.
@@ -164,7 +164,7 @@ TEST_CASE("multi-source/goal A* picks the cheapest seeded combination", "[graph]
   }
 }
 
-TEST_CASE("multi-source/goal A* reports no path when disconnected", "[graph]") {
+TEST_CASE("multi-source/goal A* reports no path when disconnected", "[unit][graph]") {
   bf::NavData d;
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{10, 10}, {}}};
@@ -176,7 +176,7 @@ TEST_CASE("multi-source/goal A* reports no path when disconnected", "[graph]") {
   CHECK_FALSE(p.found);
 }
 
-TEST_CASE("VerticesByIdent returns every region match for a reused ident", "[graph]") {
+TEST_CASE("VerticesByIdent returns every region match for a reused ident", "[unit][graph]") {
   // An ident is reused across regions (e.g. the same fix code in K6 and EH).
   // The builder must surface ALL matches, never silently pick one.
   bf::NavData d;
@@ -210,7 +210,7 @@ TEST_CASE("VerticesByIdent returns every region match for a reused ident", "[gra
 // not whichever parallel edge happens to come first in the edge list. This is
 // the guarantee MakeRoute relies on to label a leg's via/airway consistently
 // with the path's cost model (regression for M5).
-TEST_CASE("SelectEdge returns the cost-model edge among parallel airways", "[graph]") {
+TEST_CASE("SelectEdge returns the cost-model edge among parallel airways", "[unit][graph]") {
   bf::NavData d;
   auto wp = [](const char* id, double lon) {
     return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{0.0, lon}, bf::WaypointKind::kFix};

@@ -67,7 +67,7 @@ if(BRAVOFINDER_BUILD_TESTS)
   FetchContent_Declare(
     Catch2
     GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG v3.5.4)
+    GIT_TAG v3.15.2)
   FetchContent_MakeAvailable(Catch2)
   # Make Catch2's CTest integration module (Catch.cmake) available.
   list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

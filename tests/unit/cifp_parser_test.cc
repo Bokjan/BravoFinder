@@ -35,7 +35,7 @@ const std::vector<std::string> kDeezz5Rw31L = {
 
 }  // namespace
 
-TEST_CASE("CIFP parser: DEEZZ5 RW31L leg sequence matches the file", "[cifp]") {
+TEST_CASE("CIFP parser: DEEZZ5 RW31L leg sequence matches the file", "[unit][cifp]") {
   const bf::CifpData data = bf::CifpParser::ParseLines(kDeezz5Rw31L);
   REQUIRE(data.procedures.size() == 1);
 
@@ -56,7 +56,7 @@ TEST_CASE("CIFP parser: DEEZZ5 RW31L leg sequence matches the file", "[cifp]") {
   CHECK(p.legs[5].path_term == bf::PathTerminator::kDF);
 }
 
-TEST_CASE("CIFP parser: definite-fix legs resolve their fix and region", "[cifp]") {
+TEST_CASE("CIFP parser: definite-fix legs resolve their fix and region", "[unit][cifp]") {
   const bf::CifpData data = bf::CifpParser::ParseLines(kDeezz5Rw31L);
   const bf::Procedure& p = data.procedures.front();
 
@@ -71,7 +71,7 @@ TEST_CASE("CIFP parser: definite-fix legs resolve their fix and region", "[cifp]
   CHECK_FALSE(p.legs[4].fix_is_definite());
 }
 
-TEST_CASE("CIFP parser: course, distance, and altitude columns", "[cifp]") {
+TEST_CASE("CIFP parser: course, distance, and altitude columns", "[unit][cifp]") {
   const bf::CifpData data = bf::CifpParser::ParseLines(kDeezz5Rw31L);
   const bf::Procedure& p = data.procedures.front();
 
@@ -87,7 +87,7 @@ TEST_CASE("CIFP parser: course, distance, and altitude columns", "[cifp]") {
   CHECK(p.legs[0].alt.kind == bf::AltConstraintKind::kNone);
 }
 
-TEST_CASE("CIFP parser: RNP, turn direction, and speed limit columns", "[cifp]") {
+TEST_CASE("CIFP parser: RNP, turn direction, and speed limit columns", "[unit][cifp]") {
   // Real cycle-2601 KJFK approach rows: an RF leg to JEVNI (right turn, RNP 0.30)
   // and a TF leg to PEEBO (speed limit 185 kt, RNP 0.30, no turn direction).
   const std::vector<std::string> lines = {
@@ -114,7 +114,7 @@ TEST_CASE("CIFP parser: RNP, turn direction, and speed limit columns", "[cifp]")
   CHECK(peebo.speed_limit_kt == 185);
 }
 
-TEST_CASE("CIFP parser: a change in transition starts a new procedure", "[cifp]") {
+TEST_CASE("CIFP parser: a change in transition starts a new procedure", "[unit][cifp]") {
   std::vector<std::string> lines = {
       "SID:010,5,DEEZZ5, ,DEEZZ,K6,E,A,E  H, ,   ,IF, , , , , ,      ,    ,    ,    ,    , ,     , "
       " "
@@ -139,7 +139,7 @@ TEST_CASE("CIFP parser: a change in transition starts a new procedure", "[cifp]"
   CHECK(data.procedures[1].route_type == 6);
 }
 
-TEST_CASE("CIFP parser: RWY records yield threshold coordinates", "[cifp]") {
+TEST_CASE("CIFP parser: RWY records yield threshold coordinates", "[unit][cifp]") {
   const std::vector<std::string> lines = {
       "RWY:RW04L,     ,      ,00012, ,IHIQ,1,   ;N40372318,W073470505,0460;",
   };
@@ -152,7 +152,7 @@ TEST_CASE("CIFP parser: RWY records yield threshold coordinates", "[cifp]") {
   CHECK_THAT(r.threshold.longitude, WithinAbs(-73.7847, 1e-3));
 }
 
-TEST_CASE("CIFP parser: all ARINC 424 path terminators are recognized", "[cifp]") {
+TEST_CASE("CIFP parser: all ARINC 424 path terminators are recognized", "[unit][cifp]") {
   // Round-trip every terminator token through parse + name. The full cycle-2601
   // corpus (14838 airports) uses all 23 of these; none must fall to kUnknown.
   const std::vector<std::string> tokens = {"TF", "IF", "DF", "CF", "AF", "RF", "CA", "FA",

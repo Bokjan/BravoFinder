@@ -16,7 +16,7 @@ using bf::FixedIdent;
 using bf::FixedIdentNoRegion;
 using bf::Ident;
 
-TEST_CASE("FixedIdent: round-trips ident and region", "[fixed_ident]") {
+TEST_CASE("FixedIdent: round-trips ident and region", "[unit][fixed_ident]") {
   const FixedIdent f = FixedIdent::FromParts("CANDR", "K6");
   CHECK(f.IdentView() == "CANDR");
   CHECK(f.RegionView() == "K6");
@@ -25,13 +25,13 @@ TEST_CASE("FixedIdent: round-trips ident and region", "[fixed_ident]") {
   CHECK(back.region == "K6");
 }
 
-TEST_CASE("FixedIdent: FromIdent matches FromParts", "[fixed_ident]") {
+TEST_CASE("FixedIdent: FromIdent matches FromParts", "[unit][fixed_ident]") {
   const FixedIdent a = FixedIdent::FromIdent(Ident("PSB", "K6"));
   const FixedIdent b = FixedIdent::FromParts("PSB", "K6");
   CHECK(a == b);
 }
 
-TEST_CASE("FixedIdent: empty ident and region round-trip", "[fixed_ident]") {
+TEST_CASE("FixedIdent: empty ident and region round-trip", "[unit][fixed_ident]") {
   const FixedIdent f = FixedIdent::FromParts("", "");
   CHECK(f.IdentView().empty());
   CHECK(f.RegionView().empty());
@@ -39,7 +39,7 @@ TEST_CASE("FixedIdent: empty ident and region round-trip", "[fixed_ident]") {
   CHECK(f.ToIdent().region.empty());
 }
 
-TEST_CASE("FixedIdent: equality distinguishes ident and region", "[fixed_ident]") {
+TEST_CASE("FixedIdent: equality distinguishes ident and region", "[unit][fixed_ident]") {
   const FixedIdent base = FixedIdent::FromParts("DGC", "K2");
   CHECK(base == FixedIdent::FromParts("DGC", "K2"));
   CHECK_FALSE(base == FixedIdent::FromParts("DGC", "LF"));  // region differs
@@ -47,7 +47,7 @@ TEST_CASE("FixedIdent: equality distinguishes ident and region", "[fixed_ident]"
   CHECK_FALSE(base == FixedIdent::FromParts("DG", "K2"));   // length differs
 }
 
-TEST_CASE("FixedIdent: orders by ident then region", "[fixed_ident]") {
+TEST_CASE("FixedIdent: orders by ident then region", "[unit][fixed_ident]") {
   // Primary key is the ident; the region breaks ties.
   CHECK(FixedIdent::FromParts("AAA", "K2") < FixedIdent::FromParts("AAB", "K1"));
   CHECK(FixedIdent::FromParts("AAA", "K1") < FixedIdent::FromParts("AAA", "K2"));
@@ -56,7 +56,7 @@ TEST_CASE("FixedIdent: orders by ident then region", "[fixed_ident]") {
   CHECK(FixedIdent::FromParts("AA", "K1") < FixedIdent::FromParts("AAA", "K1"));
 }
 
-TEST_CASE("FixedIdent: sort + binary search agree", "[fixed_ident]") {
+TEST_CASE("FixedIdent: sort + binary search agree", "[unit][fixed_ident]") {
   std::vector<FixedIdent> v = {
       FixedIdent::FromParts("PSB", "K6"), FixedIdent::FromParts("CANDR", "K6"),
       FixedIdent::FromParts("CANDR", "K2"), FixedIdent::FromParts("AAA", "K1")};
@@ -70,7 +70,7 @@ TEST_CASE("FixedIdent: sort + binary search agree", "[fixed_ident]") {
   CHECK_FALSE(std::binary_search(v.begin(), v.end(), absent));
 }
 
-TEST_CASE("FixedIdentNoRegion: round-trips and orders", "[fixed_ident]") {
+TEST_CASE("FixedIdentNoRegion: round-trips and orders", "[unit][fixed_ident]") {
   const FixedIdentNoRegion f = FixedIdentNoRegion::From("KIKR");
   CHECK(f.View() == "KIKR");
   CHECK(f == FixedIdentNoRegion::From("KIKR"));
@@ -82,7 +82,7 @@ TEST_CASE("FixedIdentNoRegion: round-trips and orders", "[fixed_ident]") {
   CHECK_FALSE(FixedIdentNoRegion::From("KNWL") < FixedIdentNoRegion::From("KNWL"));
 }
 
-TEST_CASE("FixedIdentNoRegion: sort + binary search agree", "[fixed_ident]") {
+TEST_CASE("FixedIdentNoRegion: sort + binary search agree", "[unit][fixed_ident]") {
   std::vector<FixedIdentNoRegion> v = {
       FixedIdentNoRegion::From("ZGGG"), FixedIdentNoRegion::From("KIKR"),
       FixedIdentNoRegion::From("KNWL"), FixedIdentNoRegion::From("ZHHH")};

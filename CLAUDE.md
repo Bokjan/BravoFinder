@@ -70,11 +70,11 @@ On Windows MSVC, `windows-debug` / `windows-release` presets are available (no s
 ctest runs each case in its own process. Cache round-trip tests (`bfdb:` / `cifp section:`, 11 cases) each take 20–40s and dominate wall-clock time — only run them when **the cache disk layout / serialization** changed. For day-to-day work, pick by scope:
 ```
 ctest --preset unit -j 32    # pure logic only (~0.7s): excludes ALL [integration]-labeled cases; algorithm/constraint/pure-function changes
-ctest --preset quick -j 32   # exclude cache tests (~12s): routing/query/constraint changes but cache layout untouched
+ctest --preset quick -j 32   # exclude cache tests (~16s): routing/query/constraint changes but cache layout untouched
 ctest --preset debug -j 32   # full suite (~56s): cache layout/serialization changed, or pre-release
 ctest --preset tsan -j 32    # must run after any concurrency-related change (Contract B)
 ```
-(unit/quick are based on the debug config, with ASan/UBSan. `unit` excludes cases by CTest label — the suite is registered as two groups, `LABELS unit` / `LABELS integration`, split on the Catch2 `[integration]` tag — so no integration case leaks in; `quick` excludes only the slow cache round-trip tests by name.)
+(unit/quick are based on the debug config, with ASan/UBSan. A single `catch_discover_tests` call registers every case with `ADD_TAGS_AS_LABELS`, so each Catch2 tag becomes a CTest label: `[integration]` → `integration`, `[unit]` → `unit` (plus per-file tags like `[coordinate]` → `coordinate`, handy for `ctest -L <area>`). The `unit` preset excludes the `integration` label, so no integration case leaks in; `quick` excludes only the slow cache round-trip tests by name. Every case in `tests/unit/` carries `[unit]`; the three cases in `tests/integration/` tagged `[unit]` (not `[integration]`) are intentional unit-class cases sharing an integration-only helper.)
 
 ## Git
 

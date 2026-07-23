@@ -8,13 +8,13 @@
 using bf::Coordinate;
 using bf::MoraGrid;
 
-TEST_CASE("MoraGrid: empty grid reports no floor", "[mora_grid]") {
+TEST_CASE("MoraGrid: empty grid reports no floor", "[unit][mora_grid]") {
   MoraGrid g;
   CHECK(g.Empty());
   CHECK(g.MoraAt(Coordinate{40.0, -74.0}) == 0);
 }
 
-TEST_CASE("MoraGrid: SetCell then MoraAt within the cell", "[mora_grid]") {
+TEST_CASE("MoraGrid: SetCell then MoraAt within the cell", "[unit][mora_grid]") {
   MoraGrid g;
   g.SetCell(40, -75, 120);
   CHECK_FALSE(g.Empty());
@@ -25,14 +25,14 @@ TEST_CASE("MoraGrid: SetCell then MoraAt within the cell", "[mora_grid]") {
   CHECK(g.MoraAt(Coordinate{41.0, -75.0}) == 0);
 }
 
-TEST_CASE("MoraGrid: negative coordinates floor toward -inf", "[mora_grid]") {
+TEST_CASE("MoraGrid: negative coordinates floor toward -inf", "[unit][mora_grid]") {
   MoraGrid g;
   g.SetCell(-1, -1, 55);
   CHECK(g.MoraAt(Coordinate{-0.5, -0.5}) == 55);  // floor(-0.5) == -1
   CHECK(g.MoraAt(Coordinate{0.5, 0.5}) == 0);     // cell (0,0), unset
 }
 
-TEST_CASE("MoraGrid: out-of-range indices are rejected", "[mora_grid]") {
+TEST_CASE("MoraGrid: out-of-range indices are rejected", "[unit][mora_grid]") {
   MoraGrid g;
   // The grid is unwrapped: lat +90 and lon +180 have no row/column.
   g.SetCell(90, 0, 300);   // ignored (lat out of range)
@@ -47,7 +47,7 @@ TEST_CASE("MoraGrid: out-of-range indices are rejected", "[mora_grid]") {
   CHECK(g.MoraAt(Coordinate{-90.0, -180.0}) == 220);
 }
 
-TEST_CASE("MoraGrid: non-finite coordinates return 0 (no UB)", "[mora_grid]") {
+TEST_CASE("MoraGrid: non-finite coordinates return 0 (no UB)", "[unit][mora_grid]") {
   MoraGrid g;
   g.SetCell(0, 0, 99);
   const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -57,7 +57,8 @@ TEST_CASE("MoraGrid: non-finite coordinates return 0 (no UB)", "[mora_grid]") {
   CHECK(g.MoraAt(Coordinate{1.0e18, 0.0}) == 0);  // out of int range guard
 }
 
-TEST_CASE("MoraGrid: overwriting a cell keeps the populated count consistent", "[mora_grid]") {
+TEST_CASE("MoraGrid: overwriting a cell keeps the populated count consistent",
+          "[unit][mora_grid]") {
   MoraGrid g;
   g.SetCell(10, 20, 100);
   CHECK_FALSE(g.Empty());
@@ -73,14 +74,14 @@ TEST_CASE("MoraGrid: overwriting a cell keeps the populated count consistent", "
   CHECK(g.Empty());
 }
 
-TEST_CASE("MoraGrid: FromCells rejects a wrong-sized array", "[mora_grid]") {
+TEST_CASE("MoraGrid: FromCells rejects a wrong-sized array", "[unit][mora_grid]") {
   std::vector<int16_t> too_small(10, 5);
   const MoraGrid g = MoraGrid::FromCells(std::move(too_small));
   CHECK(g.Empty());  // bad size -> empty grid, no floor anywhere
   CHECK(g.MoraAt(Coordinate{0.0, 0.0}) == 0);
 }
 
-TEST_CASE("MoraGrid: FromCells accepts the exact size and recomputes count", "[mora_grid]") {
+TEST_CASE("MoraGrid: FromCells accepts the exact size and recomputes count", "[unit][mora_grid]") {
   std::vector<int16_t> cells(static_cast<size_t>(MoraGrid::kLatCount) * MoraGrid::kLonCount, 0);
   // Populate the south-west corner cell (lat -90, lon -180) => index 0.
   cells[0] = 150;

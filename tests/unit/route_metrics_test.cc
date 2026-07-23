@@ -16,7 +16,7 @@ bf::RouteLeg Leg(double dist) {
 
 }  // namespace
 
-TEST_CASE("CumulativeDistances runs a parallel prefix sum", "[route_metrics]") {
+TEST_CASE("CumulativeDistances runs a parallel prefix sum", "[unit][route_metrics]") {
   const std::vector<bf::RouteLeg> legs = {Leg(3.4), Leg(100.0), Leg(50.6), Leg(12.0)};
   const std::vector<double> cum = bf::CumulativeDistances(legs);
   REQUIRE(cum.size() == legs.size());
@@ -26,6 +26,6 @@ TEST_CASE("CumulativeDistances runs a parallel prefix sum", "[route_metrics]") {
   CHECK(cum[3] == Catch::Approx(166.0));  // last element == route total
 }
 
-TEST_CASE("CumulativeDistances on no legs is empty", "[route_metrics]") {
+TEST_CASE("CumulativeDistances on no legs is empty", "[unit][route_metrics]") {
   CHECK(bf::CumulativeDistances({}).empty());
 }

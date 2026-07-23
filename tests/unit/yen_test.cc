@@ -43,7 +43,7 @@ bf::NavData MakeDiamondData() {
   return d;
 }
 
-TEST_CASE("Yen returns K distinct paths ordered by cost", "[yen]") {
+TEST_CASE("Yen returns K distinct paths ordered by cost", "[unit][yen]") {
   bf::GraphBuilder builder(MakeDiamondData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int dd = builder.VerticesByIdent("DDD")[0];
@@ -65,7 +65,7 @@ TEST_CASE("Yen returns K distinct paths ordered by cost", "[yen]") {
   CHECK(paths[0].vertices[1] == bbb);
 }
 
-TEST_CASE("Yen with k=1 returns just the best path", "[yen]") {
+TEST_CASE("Yen with k=1 returns just the best path", "[unit][yen]") {
   bf::GraphBuilder builder(MakeDiamondData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int dd = builder.VerticesByIdent("DDD")[0];
@@ -74,7 +74,7 @@ TEST_CASE("Yen with k=1 returns just the best path", "[yen]") {
   REQUIRE(paths.size() == 1);
 }
 
-TEST_CASE("Yen on unreachable goal returns empty", "[yen]") {
+TEST_CASE("Yen on unreachable goal returns empty", "[unit][yen]") {
   bf::NavData d;
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{0, 5}, {}}};
@@ -114,7 +114,7 @@ bf::NavData MakeTwoEntryData() {
   return d;
 }
 
-TEST_CASE("multi-endpoint Yen yields candidates through different entry fixes", "[yen]") {
+TEST_CASE("multi-endpoint Yen yields candidates through different entry fixes", "[unit][yen]") {
   bf::GraphBuilder builder(MakeTwoEntryData());
   const int s1 = builder.VerticesByIdent("S1")[0];
   const int s2 = builder.VerticesByIdent("S2")[0];
@@ -202,7 +202,7 @@ std::string Signature(const std::vector<bf::ShortestPath>& paths) {
   return sig;
 }
 
-TEST_CASE("Yen golden candidate sequence on a lattice (Lawler regression guard)", "[yen]") {
+TEST_CASE("Yen golden candidate sequence on a lattice (Lawler regression guard)", "[unit][yen]") {
   // A 4-column, 3-row lattice: enough parallel paths that k=8 exercises spur
   // deviations at every position. If this signature changes, the k-shortest
   // result set or its order changed -- which the Lawler optimization must NOT do.
@@ -243,7 +243,8 @@ TEST_CASE("Yen golden candidate sequence on a lattice (Lawler regression guard)"
   CHECK(Signature(paths) == kGolden);
 }
 
-TEST_CASE("multi-source Yen golden sequence on a lattice (Lawler regression guard)", "[yen]") {
+TEST_CASE("multi-source Yen golden sequence on a lattice (Lawler regression guard)",
+          "[unit][yen]") {
   // Same lattice, but as a multi-source/multi-goal search with two seeded entry
   // columns and two seeded goal rows -- exercising the super-source spur (index
   // -1) path that Lawler's deviation index must represent.
@@ -533,7 +534,7 @@ bf::NavData MakeRandomData(std::mt19937& rng, int n, int extra_edges) {
   return d;
 }
 
-TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (single-source)", "[yen]") {
+TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (single-source)", "[unit][yen]") {
   std::mt19937 rng(0xB4A0);  // fixed seed: reproducible
   std::uniform_int_distribution<int> n_dist(3, 15);
   int checked = 0;
@@ -560,7 +561,7 @@ TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (single-source)
   CHECK(checked > 150);  // most trials had distinct endpoints
 }
 
-TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (multi-source)", "[yen]") {
+TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (multi-source)", "[unit][yen]") {
   std::mt19937 rng(0x5EED);  // fixed seed: reproducible
   std::uniform_int_distribution<int> n_dist(4, 15);
   int checked = 0;

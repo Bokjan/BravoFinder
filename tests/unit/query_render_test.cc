@@ -25,12 +25,12 @@ bf::service::OutputFormat Text() { return bf::service::OutputFormat::kText; }
 
 }  // namespace
 
-TEST_CASE("RenderError: json object vs text line", "[render]") {
+TEST_CASE("RenderError: json object vs text line", "[unit][render]") {
   CHECK(bf::service::RenderError(Json(), "nope") == R"({"error":"nope"})");
   CHECK(bf::service::RenderError(Text(), "nope") == "error: nope\n");
 }
 
-TEST_CASE("RenderWaypoints: text hit/miss and json grouped array", "[render]") {
+TEST_CASE("RenderWaypoints: text hit/miss and json grouped array", "[unit][render]") {
   bf::WaypointInfo w;
   w.ident = "NINOX";
   w.region = "ZB";
@@ -49,7 +49,7 @@ TEST_CASE("RenderWaypoints: text hit/miss and json grouped array", "[render]") {
   CHECK(doc[1].GetArray().Empty());  // miss = empty group, not null
 }
 
-TEST_CASE("RenderAirports: text carries elevation and procedure flag", "[render]") {
+TEST_CASE("RenderAirports: text carries elevation and procedure flag", "[unit][render]") {
   bf::AirportInfo a;
   a.icao = "KJFK";
   a.region = "K6";
@@ -60,7 +60,7 @@ TEST_CASE("RenderAirports: text carries elevation and procedure flag", "[render]
   CHECK(text == "KJFK (K6)  40.64, -73.78  elev 13 ft  [has procedures]\n");
 }
 
-TEST_CASE("RenderNavaidDetails: NDB kHz vs VOR MHz split", "[render]") {
+TEST_CASE("RenderNavaidDetails: NDB kHz vs VOR MHz split", "[unit][render]") {
   bf::NavaidDetailInfo ndb;
   ndb.ident = "LV";
   ndb.region = "ZB";
@@ -82,7 +82,7 @@ TEST_CASE("RenderNavaidDetails: NDB kHz vs VOR MHz split", "[render]") {
   CHECK(text.find("freq 115 MHz") != std::string::npos);
 }
 
-TEST_CASE("RenderHolds: leg distance, turn, altitude range, speed limit", "[render]") {
+TEST_CASE("RenderHolds: leg distance, turn, altitude range, speed limit", "[unit][render]") {
   bf::HoldInfo h;
   h.fix_ident = "AE701";
   h.fix_region = "ZB";
@@ -97,7 +97,7 @@ TEST_CASE("RenderHolds: leg distance, turn, altitude range, speed limit", "[rend
   CHECK(text == "AE701 (ZB)  ENRT  inbound 180°  out 1.5 NM  R-turn  alt 3000-6000 ft  250 kt\n");
 }
 
-TEST_CASE("RenderHolds: timing leg falls back to minutes", "[render]") {
+TEST_CASE("RenderHolds: timing leg falls back to minutes", "[unit][render]") {
   bf::HoldInfo h;
   h.fix_ident = "H";
   h.fix_region = "ZB";
@@ -112,7 +112,7 @@ TEST_CASE("RenderHolds: timing leg falls back to minutes", "[render]") {
   CHECK(text.find("L-turn") != std::string::npos);
 }
 
-TEST_CASE("RenderAirways: directed segment line", "[render]") {
+TEST_CASE("RenderAirways: directed segment line", "[unit][render]") {
   bf::AirwayInfo a;
   a.name = "Y28";
   bf::AirwayLeg s;
@@ -127,7 +127,7 @@ TEST_CASE("RenderAirways: directed segment line", "[render]") {
   CHECK(text == "Y28: 1 segments\n  ABC -> DEF  12.5 NM  low  FL120-180\n");
 }
 
-TEST_CASE("RenderProcedures: summary list text", "[render]") {
+TEST_CASE("RenderProcedures: summary list text", "[unit][render]") {
   bf::AirportProcedures ap;
   ap.icao = "KJFK";
   bf::ProcedureSummary p;
@@ -139,7 +139,7 @@ TEST_CASE("RenderProcedures: summary list text", "[render]") {
   CHECK(text == "KJFK: 1 procedures\n  sid DEEZZ5.RW31L\n");
 }
 
-TEST_CASE("RenderProcedureDetail: per-leg block", "[render]") {
+TEST_CASE("RenderProcedureDetail: per-leg block", "[unit][render]") {
   bf::AirportProcedureDetail d;
   d.icao = "KJFK";
   d.procedure = "DEEZZ5";
@@ -160,7 +160,7 @@ TEST_CASE("RenderProcedureDetail: per-leg block", "[render]") {
   CHECK(text.find("TF CANDR  crs 90.0  5.0 NM") != std::string::npos);
 }
 
-TEST_CASE("RenderRoutes: single route text has no header and ends with elapsed", "[render]") {
+TEST_CASE("RenderRoutes: single route text has no header and ends with elapsed", "[unit][render]") {
   bf::Route r;
   r.route_string = "KJFK SID CANDR J60 PSB STAR KLAX";
   r.total_distance_nm = 2160.0;
@@ -173,7 +173,7 @@ TEST_CASE("RenderRoutes: single route text has no header and ends with elapsed",
   CHECK(text.find("Query elapsed: 42 ms") != std::string::npos);
 }
 
-TEST_CASE("RenderRoutes: multiple routes get a numbered header per route", "[render]") {
+TEST_CASE("RenderRoutes: multiple routes get a numbered header per route", "[unit][render]") {
   bf::Route r;
   r.route_string = "A B C";
   const std::string text = bf::service::RenderRoutes(Text(), {r, r}, 7);
@@ -181,7 +181,7 @@ TEST_CASE("RenderRoutes: multiple routes get a numbered header per route", "[ren
   CHECK(text.find("=== Route 2 of 2 ===") != std::string::npos);
 }
 
-TEST_CASE("RenderRoutes: json is a bare array (the transport shape)", "[render]") {
+TEST_CASE("RenderRoutes: json is a bare array (the transport shape)", "[unit][render]") {
   bf::Route r;
   r.route_string = "A B C";
   const std::string json = bf::service::RenderRoutes(Json(), {r}, 7);

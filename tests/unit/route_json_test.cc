@@ -25,7 +25,8 @@ struct StubWriter {
   void Double(double) { out += "#"; }
 };
 
-TEST_CASE("WriteRouteJson emits concurrent_airways only on concurrency legs", "[route_json]") {
+TEST_CASE("WriteRouteJson emits concurrent_airways only on concurrency legs",
+          "[unit][route_json]") {
   bf::Route route;
   route.route_string = "A Y28 C";
   route.dep_connection = bf::ConnectionKind::kProcedure;
@@ -60,7 +61,7 @@ TEST_CASE("WriteRouteJson emits concurrent_airways only on concurrency legs", "[
 }
 
 TEST_CASE("WriteRouteJson emits points[] with ident/lat/lon and per-leg cumulative_nm",
-          "[route_json]") {
+          "[unit][route_json]") {
   bf::Route route;
   route.route_string = "A Y28 C";
 
@@ -104,13 +105,14 @@ TEST_CASE("WriteRouteJson emits points[] with ident/lat/lon and per-leg cumulati
   CHECK(s.find("<cumulative_nm>", second_cumul + 1) == std::string::npos);
 }
 
-TEST_CASE("ToString maps every connection kind", "[route_json]") {
+TEST_CASE("ToString maps every connection kind", "[unit][route_json]") {
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kProcedure)) == "procedure");
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kDirect)) == "direct");
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kRadarVectors)) == "radar_vectors");
 }
 
-TEST_CASE("WriteRouteJson preserves coordinate precision with a 6-dp writer", "[route_json]") {
+TEST_CASE("WriteRouteJson preserves coordinate precision with a 6-dp writer",
+          "[unit][route_json]") {
   // The route object carries point lat/lon. A writer configured for 2 decimal
   // places (as the handlers used to be) would truncate a real coordinate such
   // as 40.639927 to 40.64 (~1.1 km). This drives the writer at 6 dp -- as the

@@ -33,14 +33,14 @@ bf::RouteRequest WithAltitudeRange(int min_fl, int max_fl) {
   return r;
 }
 
-TEST_CASE("altitude band: no cruise altitude allows everything", "[constraint]") {
+TEST_CASE("altitude band: no cruise altitude allows everything", "[unit][constraint]") {
   bf::AltitudeBandConstraint c;
   bf::RouteRequest r;  // no altitude
   bf::EdgeContext ctx{MakeEdge(180, 450, true), bf::Coordinate{}, bf::Coordinate{}};
   CHECK(c.Evaluate(ctx, r).allowed);
 }
 
-TEST_CASE("altitude band: blocks outside the band", "[constraint]") {
+TEST_CASE("altitude band: blocks outside the band", "[unit][constraint]") {
   bf::AltitudeBandConstraint c;
   bf::EdgeContext ctx{MakeEdge(180, 450, true), bf::Coordinate{}, bf::Coordinate{}};
   CHECK(c.Evaluate(ctx, WithAltitude(350)).allowed);        // inside
@@ -48,7 +48,7 @@ TEST_CASE("altitude band: blocks outside the band", "[constraint]") {
   CHECK_FALSE(c.Evaluate(ctx, WithAltitude(500)).allowed);  // above top
 }
 
-TEST_CASE("altitude band: range overlapping the band is usable", "[constraint]") {
+TEST_CASE("altitude band: range overlapping the band is usable", "[unit][constraint]") {
   bf::AltitudeBandConstraint c;
   bf::EdgeContext ctx{MakeEdge(180, 450, true), bf::Coordinate{}, bf::Coordinate{}};
   CHECK(c.Evaluate(ctx, WithAltitudeRange(300, 400)).allowed);  // fully inside
@@ -58,20 +58,20 @@ TEST_CASE("altitude band: range overlapping the band is usable", "[constraint]")
   CHECK(c.Evaluate(ctx, WithAltitudeRange(450, 450)).allowed);  // touches top only
 }
 
-TEST_CASE("altitude band: range entirely outside the band is blocked", "[constraint]") {
+TEST_CASE("altitude band: range entirely outside the band is blocked", "[unit][constraint]") {
   bf::AltitudeBandConstraint c;
   bf::EdgeContext ctx{MakeEdge(180, 450, true), bf::Coordinate{}, bf::Coordinate{}};
   CHECK_FALSE(c.Evaluate(ctx, WithAltitudeRange(50, 170)).allowed);   // wholly below
   CHECK_FALSE(c.Evaluate(ctx, WithAltitudeRange(460, 600)).allowed);  // wholly above
 }
 
-TEST_CASE("altitude band: zero band (DCT) is exempt", "[constraint]") {
+TEST_CASE("altitude band: zero band (DCT) is exempt", "[unit][constraint]") {
   bf::AltitudeBandConstraint c;
   bf::EdgeContext ctx{MakeEdge(0, 0, false), bf::Coordinate{}, bf::Coordinate{}};
   CHECK(c.Evaluate(ctx, WithAltitude(350)).allowed);
 }
 
-TEST_CASE("altitude band: an open (0) ceiling imposes no upper bound", "[constraint]") {
+TEST_CASE("altitude band: an open (0) ceiling imposes no upper bound", "[unit][constraint]") {
   // A high-altitude segment with a floor but no published ceiling (top_fl == 0
   // means "open"). A cruise level above the floor must be allowed, not blocked as
   // if the range lay above a real ceiling of 0.
@@ -82,7 +82,7 @@ TEST_CASE("altitude band: an open (0) ceiling imposes no upper bound", "[constra
   CHECK_FALSE(c.Evaluate(ctx, WithAltitude(100)).allowed);  // below the floor
 }
 
-TEST_CASE("altitude band: an open (0) floor imposes no lower bound", "[constraint]") {
+TEST_CASE("altitude band: an open (0) floor imposes no lower bound", "[unit][constraint]") {
   // Symmetric: base_fl == 0 is an open floor, only the ceiling constrains.
   bf::AltitudeBandConstraint c;
   bf::EdgeContext ctx{MakeEdge(0, 180, false), bf::Coordinate{}, bf::Coordinate{}};
@@ -91,7 +91,7 @@ TEST_CASE("altitude band: an open (0) floor imposes no lower bound", "[constrain
   CHECK_FALSE(c.Evaluate(ctx, WithAltitude(250)).allowed);  // above the ceiling
 }
 
-TEST_CASE("level preference: penalizes non-preferred level", "[constraint]") {
+TEST_CASE("level preference: penalizes non-preferred level", "[unit][constraint]") {
   bf::LevelPreferenceConstraint c(0.5);
   bf::RouteRequest r;
   r.level = bf::LevelPreference::kHigh;
@@ -104,7 +104,7 @@ TEST_CASE("level preference: penalizes non-preferred level", "[constraint]") {
   CHECK(v.extra_cost == 50.0);  // 100 NM * 0.5
 }
 
-TEST_CASE("level preference: both-level edge never penalized", "[constraint]") {
+TEST_CASE("level preference: both-level edge never penalized", "[unit][constraint]") {
   bf::LevelPreferenceConstraint c(0.5);
   bf::GraphEdge e = MakeEdge(180, 450, true);
   e.level = bf::AirwayLevel::kBoth;  // DFD flightlevel 'B': usable at either level
@@ -119,7 +119,7 @@ TEST_CASE("level preference: both-level edge never penalized", "[constraint]") {
   CHECK(c.Evaluate(ctx, low).extra_cost == 0.0);
 }
 
-TEST_CASE("MORA: blocks below grid minimum, allows at or above", "[constraint]") {
+TEST_CASE("MORA: blocks below grid minimum, allows at or above", "[unit][constraint]") {
   bf::MoraGrid grid;
   grid.SetCell(40, -74, 100);  // cell covering ~JFK area: MORA FL100
   bf::MoraConstraint c(grid);
@@ -131,7 +131,7 @@ TEST_CASE("MORA: blocks below grid minimum, allows at or above", "[constraint]")
   CHECK(c.Evaluate(ctx, WithAltitude(150)).allowed);       // above MORA
 }
 
-TEST_CASE("MORA: range cleared when its top reaches the floor", "[constraint]") {
+TEST_CASE("MORA: range cleared when its top reaches the floor", "[unit][constraint]") {
   bf::MoraGrid grid;
   grid.SetCell(40, -74, 100);  // MORA FL100
   bf::MoraConstraint c(grid);
@@ -144,7 +144,7 @@ TEST_CASE("MORA: range cleared when its top reaches the floor", "[constraint]") 
   CHECK_FALSE(c.Evaluate(ctx, WithAltitudeRange(60, 90)).allowed);  // whole range below
 }
 
-TEST_CASE("MORA: unknown cell imposes no limit", "[constraint]") {
+TEST_CASE("MORA: unknown cell imposes no limit", "[unit][constraint]") {
   bf::MoraGrid grid;  // empty
   bf::MoraConstraint c(grid);
   bf::EdgeContext ctx{MakeEdge(0, 0, false), bf::Coordinate{10.0, 20.0},
@@ -152,7 +152,7 @@ TEST_CASE("MORA: unknown cell imposes no limit", "[constraint]") {
   CHECK(c.Evaluate(ctx, WithAltitude(50)).allowed);
 }
 
-TEST_CASE("MORA: samples the short way across the antimeridian", "[constraint]") {
+TEST_CASE("MORA: samples the short way across the antimeridian", "[unit][constraint]") {
   bf::MoraGrid grid;
   // A high floor on the far side of the globe (lon 0). A correct short-path
   // sampler for a +179 -> -179 leg must NOT walk through it; the old long-way
@@ -165,7 +165,7 @@ TEST_CASE("MORA: samples the short way across the antimeridian", "[constraint]")
   CHECK(c.Evaluate(ctx, WithAltitude(200)).allowed);  // no floor on the true track
 }
 
-TEST_CASE("MORA: a high cell on the antimeridian crossing still blocks", "[constraint]") {
+TEST_CASE("MORA: a high cell on the antimeridian crossing still blocks", "[unit][constraint]") {
   bf::MoraGrid grid;
   grid.SetCell(0, 179, 300);  // a cell the true short track actually passes through
   bf::MoraConstraint c(grid);
@@ -174,7 +174,7 @@ TEST_CASE("MORA: a high cell on the antimeridian crossing still blocks", "[const
   CHECK_FALSE(c.Evaluate(ctx, WithAltitude(200)).allowed);  // below the FL300 floor
 }
 
-TEST_CASE("MORA grid floors negative coordinates correctly", "[constraint]") {
+TEST_CASE("MORA grid floors negative coordinates correctly", "[unit][constraint]") {
   bf::MoraGrid grid;
   grid.SetCell(-1, -1, 50);
   // A point at (-0.5, -0.5) floors to cell (-1, -1).
@@ -183,7 +183,7 @@ TEST_CASE("MORA grid floors negative coordinates correctly", "[constraint]") {
   CHECK(grid.MoraAt(bf::Coordinate{0.5, 0.5}) == 0);
 }
 
-TEST_CASE("avoid: blocks edges entering an avoided vertex", "[constraint]") {
+TEST_CASE("avoid: blocks edges entering an avoided vertex", "[unit][constraint]") {
   bf::AvoidConstraint c({7}, {});  // avoid vertex 7
   bf::RouteRequest r;
 
@@ -196,7 +196,7 @@ TEST_CASE("avoid: blocks edges entering an avoided vertex", "[constraint]") {
   CHECK(c.Evaluate(bf::EdgeContext{into_8, bf::Coordinate{}, bf::Coordinate{}}, r).allowed);
 }
 
-TEST_CASE("avoid: blocks edges on an avoided airway id", "[constraint]") {
+TEST_CASE("avoid: blocks edges on an avoided airway id", "[unit][constraint]") {
   bf::AvoidConstraint c({}, {3});  // avoid airway_id 3
   bf::RouteRequest r;
 
@@ -211,7 +211,7 @@ TEST_CASE("avoid: blocks edges on an avoided airway id", "[constraint]") {
   CHECK(c.Evaluate(bf::EdgeContext{on_4, bf::Coordinate{}, bf::Coordinate{}}, r).allowed);
 }
 
-TEST_CASE("avoid: empty sets allow everything", "[constraint]") {
+TEST_CASE("avoid: empty sets allow everything", "[unit][constraint]") {
   bf::AvoidConstraint c({}, {});
   bf::RouteRequest r;
   bf::GraphEdge e = MakeEdge(0, 0, false);
@@ -220,7 +220,7 @@ TEST_CASE("avoid: empty sets allow everything", "[constraint]") {
   CHECK(c.Evaluate(bf::EdgeContext{e, bf::Coordinate{}, bf::Coordinate{}}, r).allowed);
 }
 
-TEST_CASE("randomize: penalty is deterministic, non-negative, and bounded", "[constraint]") {
+TEST_CASE("randomize: penalty is deterministic, non-negative, and bounded", "[unit][constraint]") {
   bf::RouteRequest r;
   bf::GraphEdge e = MakeEdge(0, 0, false);  // distance_nm = 100
   e.to = 5;
@@ -237,7 +237,7 @@ TEST_CASE("randomize: penalty is deterministic, non-negative, and bounded", "[co
   CHECK(v1.extra_cost <= 100.0 * 0.05 + 1e-9);  // bounded by eps * distance
 }
 
-TEST_CASE("randomize: different seeds generally differ; same seed matches", "[constraint]") {
+TEST_CASE("randomize: different seeds generally differ; same seed matches", "[unit][constraint]") {
   bf::RouteRequest r;
   bf::GraphEdge e = MakeEdge(0, 0, false);
   e.to = 5;

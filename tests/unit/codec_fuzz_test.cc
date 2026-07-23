@@ -20,21 +20,22 @@ namespace {
 // for any particular body; the decoders must tolerate references that miss.
 const std::string kPool("\0KJFK\0CANDR\0KLAX\0", 17);
 
-TEST_CASE("GraphCodec::Decode: empty and tiny inputs error, never crash", "[codec_fuzz]") {
+TEST_CASE("GraphCodec::Decode: empty and tiny inputs error, never crash", "[unit][codec_fuzz]") {
   const char empty[1] = {0};
   CHECK_FALSE(bf::GraphCodec::Decode(empty, 0, kPool.data(), kPool.size()));
   const char tiny[3] = {0x01, 0x02, 0x03};
   CHECK_FALSE(bf::GraphCodec::Decode(tiny, sizeof(tiny), kPool.data(), kPool.size()));
 }
 
-TEST_CASE("NavDetailCodec::Decode: empty and tiny inputs error, never crash", "[codec_fuzz]") {
+TEST_CASE("NavDetailCodec::Decode: empty and tiny inputs error, never crash",
+          "[unit][codec_fuzz]") {
   const char empty[1] = {0};
   CHECK_FALSE(bf::NavDetailCodec::Decode(empty, 0, kPool.data(), kPool.size()));
   const char tiny[3] = {0x7f, 0x00, 0x42};
   CHECK_FALSE(bf::NavDetailCodec::Decode(tiny, sizeof(tiny), kPool.data(), kPool.size()));
 }
 
-TEST_CASE("cache decoders: random and truncated bytes never crash", "[codec_fuzz]") {
+TEST_CASE("cache decoders: random and truncated bytes never crash", "[unit][codec_fuzz]") {
   std::mt19937 rng(0xC0FFEEu);  // fixed seed: deterministic
   std::uniform_int_distribution<int> byte(0, 255);
   std::uniform_int_distribution<int> len(1, 512);
