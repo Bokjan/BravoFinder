@@ -1,11 +1,11 @@
 # bf-mcp
 
-BravoFinder's local MCP server: it exposes the `bf route` and `bf query` capabilities as MCP tools over stdio for LLM clients. This file is written for **agents / configuration assistants**: the first half is how to run the server and wire it into an MCP client; the second half is a tool reference.
+BravoFinder's MCP server: it exposes the `bf route` and `bf query` capabilities as MCP tools for LLM clients, over **stdio** (default) or **HTTP** (Streamable HTTP). This file is written for **agents / configuration assistants**: the first half is how to run the server and wire it into an MCP client; the second half is a tool reference.
 
 ## What it is
 
-- Transport: **stdio** (a local process; the client spawns it and talks over stdin/stdout).
-- Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK.
+- Transport: **stdio** (default — a local process the client spawns and talks to over stdin/stdout) or **HTTP** (`--transport http` — Streamable HTTP, 2025-03-26, on a TCP port `/mcp`, for remote / multi-client access). Both share the same protocol core and capabilities; only the byte transport differs.
+- Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK. Protocol version is negotiated at `initialize` (`2024-11-05` or `2025-03-26`).
 - Capabilities: the nine per-database tools below (mirroring the CLI `route` / `query` subcommands), plus a `list_cycles` tool.
 - Data: the server is pointed at a **directory** of prebuilt `.bfdb` caches and serves one or more AIRAC cycles from it. It never parses raw data or writes files.
 
@@ -20,7 +20,7 @@ The server reads a directory of `nav_<cycle>.bfdb` caches (built by `bf build`; 
 
 ## Build
 
-Depends only on the project's own `bf` library and RapidJSON — pure CMake + FetchContent, no extra dependencies.
+Depends on the project's own `bf` library, RapidJSON, and (for the HTTP transport) the shared `bf_http_server` core (libuv + llhttp) — pure CMake + FetchContent, no extra setup.
 
 ```bash
 cmake --preset release && cmake --build --preset release
@@ -52,7 +52,14 @@ BRAVOFINDER_NAVDATA=navdata bf-mcp
 
 # Explicit directory holding one or more caches.
 bf-mcp --db-dir /path/to/caches
+
+# Serve MCP over HTTP instead of stdio (single endpoint POST/GET/DELETE /mcp).
+# HTTP-mode flags mirror bf-http: --host, --port, --worker-threads, --max-body,
+# --io-timeout (all ignored in the default stdio mode).
+bf-mcp --transport http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
 ```
+
+The HTTP transport is stateless-with-id: `initialize` returns a random `Mcp-Session-Id` header that the server does not track (every request is independent). `POST /mcp` carries a JSON-RPC request (single or batch) and answers `application/json`, or a single `text/event-stream` SSE event when the client's `Accept` header opts in; a notification-only body returns `202`. `GET /mcp` opens an SSE stream (a placeholder — no server-push today). `DELETE /mcp` acknowledges a session teardown. See [docs/http-service.zh-CN.md](../../docs/http-service.zh-CN.md) for the transport design.
 
 `bf-mcp` also honors `--version`, which prints the program version and exits before scanning any caches.
 

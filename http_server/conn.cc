@@ -6,7 +6,8 @@
 //   * keep-alive: honor llhttp_should_keep_alive, and fully reset the parser and
 //     the per-request buffers before the next request so nothing leaks across;
 //   * response framing: hand-written status line + Content-Type / Content-Length
-//     / Connection / Date headers + body (we only ever send Content-Length);
+//     / Connection / Date headers + body, or a close-delimited open stream (SSE)
+//     with no Content-Length (BeginStream / WriteEvent);
 //   * limits: caps on total header bytes, header count, and body size (413) to
 //     bound memory;
 //   * timeouts: one idle timer covers header-read, body-read, and idle
@@ -21,6 +22,9 @@
 
 #include "conn.h"
 
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -28,10 +32,7 @@
 #include <string>
 #include <utility>
 
-#include "handlers.h"
-#include "router.h"
-
-namespace bf::http {
+namespace bf::http_server {
 
 namespace {
 
@@ -46,10 +47,14 @@ const char* ReasonPhrase(int status) {
   switch (status) {
     case 200:
       return "OK";
+    case 202:
+      return "Accepted";
     case 400:
       return "Bad Request";
     case 404:
       return "Not Found";
+    case 405:
+      return "Method Not Allowed";
     case 408:
       return "Request Timeout";
     case 413:
@@ -85,17 +90,30 @@ std::string HttpDate() {
   return std::string(buf, n);
 }
 
-// One full HTTP response with a JSON body. A non-zero elapsed_ms adds an
-// X-Elapsed-Ms header carrying the query's compute cost in milliseconds.
+// Append the extra (name: value) headers verbatim after the framing headers.
+void AppendExtraHeaders(std::string& out, const Headers& extra_headers) {
+  for (const auto& [name, value] : extra_headers) {
+    out += "\r\n";
+    out += name;
+    out += ": ";
+    out += value;
+  }
+}
+
+// One full HTTP response with a Content-Length body. A non-zero elapsed_ms adds
+// an X-Elapsed-Ms header carrying the query's compute cost in milliseconds.
 std::string BuildResponse(int status, const std::string& body, bool keep_alive,
-                          uint32_t elapsed_ms = 0) {
+                          const std::string& content_type, const Headers& extra_headers,
+                          uint32_t elapsed_ms) {
   std::string out;
-  out.reserve(body.size() + 160);
+  out.reserve(body.size() + 200);
   out += "HTTP/1.1 ";
   out += std::to_string(status);
   out += ' ';
   out += ReasonPhrase(status);
-  out += "\r\nContent-Type: application/json\r\nContent-Length: ";
+  out += "\r\nContent-Type: ";
+  out += content_type;
+  out += "\r\nContent-Length: ";
   out += std::to_string(body.size());
   out += "\r\nConnection: ";
   out += keep_alive ? "keep-alive" : "close";
@@ -105,29 +123,68 @@ std::string BuildResponse(int status, const std::string& body, bool keep_alive,
     out += "\r\nX-Elapsed-Ms: ";
     out += std::to_string(elapsed_ms);
   }
+  AppendExtraHeaders(out, extra_headers);
   out += "\r\n\r\n";
   out += body;
   return out;
 }
 
+// The header block for an open, close-delimited stream: no Content-Length (the
+// stream ends when the connection closes), Connection: keep-alive.
+std::string BuildStreamHeader(int status, const std::string& content_type,
+                              const Headers& extra_headers) {
+  std::string out;
+  out += "HTTP/1.1 ";
+  out += std::to_string(status);
+  out += ' ';
+  out += ReasonPhrase(status);
+  out += "\r\nContent-Type: ";
+  out += content_type;
+  out += "\r\nConnection: keep-alive\r\nDate: ";
+  out += HttpDate();
+  AppendExtraHeaders(out, extra_headers);
+  out += "\r\n\r\n";
+  return out;
+}
+
 // A pending write: keeps the response bytes and a strong connection reference
-// alive until libuv finishes the write.
+// alive until libuv finishes the write. `mode` decides post-write behavior.
 struct WriteReq {
   uv_write_t req{};
   std::string payload;
   std::shared_ptr<Connection> conn;
-  bool keep_alive = false;
+  WriteMode mode = WriteMode::kClose;
 };
 
 }  // namespace
 
-Connection::Connection(Router& router, const Limits& limits) : router_(router), limits_(limits) {}
+std::string JsonError(const std::string& message) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("error");
+  writer.String(message.c_str(), static_cast<unsigned>(message.size()));
+  writer.EndObject();
+  return buffer.GetString();
+}
+
+std::string HttpRequest::Header(const std::string& lower_name) const {
+  for (const auto& [name, value] : headers) {
+    if (name == lower_name) {
+      return value;
+    }
+  }
+  return "";
+}
+
+Connection::Connection(RequestHandler& handler, const Limits& limits)
+    : handler_(handler), limits_(limits) {}
 
 Connection::~Connection() = default;
 
-std::shared_ptr<Connection> Connection::Create(uv_loop_t* loop, Router& router,
+std::shared_ptr<Connection> Connection::Create(uv_loop_t* loop, RequestHandler& handler,
                                                const Limits& limits) {
-  auto conn = std::shared_ptr<Connection>(new Connection(router, limits));
+  auto conn = std::shared_ptr<Connection>(new Connection(handler, limits));
   // Strong self-reference: the object outlives the local shared_ptr and every
   // libuv callback until both handles finish closing.
   conn->self_ = conn;
@@ -202,11 +259,13 @@ void Connection::ResetForNextRequest() {
   header_bytes_ = 0;
   header_count_ = 0;
   saw_transfer_encoding_ = false;
+  headers_.clear();
   body_.clear();
   request_ready_ = false;
   keep_alive_ = false;
   awaiting_response_ = false;
   pipelined_ = false;
+  streaming_ = false;
   reject_status_ = 0;
   reject_message_.clear();
   RestartTimer();
@@ -240,7 +299,7 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
   if (conn->reject_status_ != 0) {
     // A hardening limit tripped (body/header cap, chunked): answer and close.
     conn->awaiting_response_ = true;
-    conn->WriteResponse(conn->reject_status_, bf::service::JsonError(conn->reject_message_), false);
+    conn->WriteResponse(conn->reject_status_, JsonError(conn->reject_message_), false);
     return;
   }
   if (conn->request_ready_) {
@@ -263,7 +322,7 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
   }
   if (err != HPE_OK && err != HPE_PAUSED) {
     conn->awaiting_response_ = true;
-    conn->WriteResponse(400, bf::service::JsonError("malformed HTTP request"), false);
+    conn->WriteResponse(400, JsonError("malformed HTTP request"), false);
     return;
   }
   // Otherwise the request is still arriving; keep reading.
@@ -320,14 +379,17 @@ void Connection::FinishHeaderPair() {
     reject_status_ = 431;
     reject_message_ = "request headers too large";
   }
-  // We only support Content-Length bodies. Any Transfer-Encoding request is
-  // refused rather than parsed, so a chunked/smuggled body cannot desync us.
+  // Store the header (lower-cased name) so the handler can read it -- e.g. the
+  // Accept header for SSE content negotiation. We only support Content-Length
+  // bodies: any Transfer-Encoding request is refused rather than parsed, so a
+  // chunked/smuggled body cannot desync us.
   std::string lower = cur_field_;
   std::transform(lower.begin(), lower.end(), lower.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   if (lower == "transfer-encoding") {
     saw_transfer_encoding_ = true;
   }
+  headers_.emplace_back(std::move(lower), cur_value_);
   cur_field_.clear();
   cur_value_.clear();
   reading_value_ = false;
@@ -403,22 +465,22 @@ void Connection::Dispatch() {
     req.query = url_.substr(q + 1);
   }
   req.body = std::move(body_);
+  req.headers = std::move(headers_);
   req.keep_alive = keep_alive_;
-  router_.Handle(shared_from_this(), req);
+  handler_.Handle(shared_from_this(), req);
 }
 
-void Connection::WriteResponse(int status, const std::string& body, bool keep_alive,
-                               uint32_t elapsed_ms) {
+void Connection::WriteRaw(std::string payload, WriteMode mode) {
   if (closing_) {
     return;
   }
-  // Own the write request through the uv_write handoff: if BuildResponse throws
-  // (or uv_write fails) the unique_ptr frees it; on a successful queue libuv owns
-  // it and OnWriteDone deletes it, so release() the pointer there.
+  // Own the write request through the uv_write handoff: if uv_write fails the
+  // unique_ptr frees it; on a successful queue libuv owns it and OnWriteDone
+  // deletes it, so release() the pointer there.
   auto wr = std::make_unique<WriteReq>();
-  wr->payload = BuildResponse(status, body, keep_alive, elapsed_ms);
+  wr->payload = std::move(payload);
   wr->conn = shared_from_this();
-  wr->keep_alive = keep_alive;
+  wr->mode = mode;
   wr->req.data = wr.get();
   uv_buf_t b = uv_buf_init(wr->payload.data(), static_cast<unsigned>(wr->payload.size()));
   const int r = uv_write(&wr->req, stream(), &b, 1, OnWriteDone);
@@ -429,18 +491,57 @@ void Connection::WriteResponse(int status, const std::string& body, bool keep_al
   wr.release();  // libuv owns it now; freed in OnWriteDone
 }
 
+void Connection::WriteResponse(int status, const std::string& body, bool keep_alive,
+                               const std::string& content_type, const Headers& extra_headers,
+                               uint32_t elapsed_ms) {
+  WriteRaw(BuildResponse(status, body, keep_alive, content_type, extra_headers, elapsed_ms),
+           keep_alive ? WriteMode::kKeepAlive : WriteMode::kClose);
+}
+
+void Connection::WriteResponse(int status, const std::string& body, bool keep_alive,
+                               uint32_t elapsed_ms) {
+  WriteResponse(status, body, keep_alive, "application/json", {}, elapsed_ms);
+}
+
+void Connection::BeginStream(int status, const std::string& content_type,
+                             const Headers& extra_headers) {
+  if (closing_) {
+    return;
+  }
+  // Mark streaming before the write so OnWriteDone leaves the connection open
+  // for subsequent events rather than resetting/closing.
+  streaming_ = true;
+  WriteRaw(BuildStreamHeader(status, content_type, extra_headers), WriteMode::kStream);
+}
+
+void Connection::WriteEvent(const std::string& chunk) {
+  if (closing_ || !streaming_) {
+    return;
+  }
+  WriteRaw(chunk, WriteMode::kStream);
+}
+
 void Connection::OnWriteDone(uv_write_t* req, int status) {
   auto* wr = static_cast<WriteReq*>(req->data);
   std::shared_ptr<Connection> conn = std::move(wr->conn);
-  const bool keep_alive = wr->keep_alive;
+  const WriteMode mode = wr->mode;
   delete wr;
   if (conn->closing_) {
     return;
   }
-  if (status != 0 || !keep_alive) {
+  if (status != 0) {
     conn->StartClose();
-  } else {
-    conn->ResetForNextRequest();
+    return;
+  }
+  switch (mode) {
+    case WriteMode::kStream:
+      return;  // an open stream: keep the connection alive for more events
+    case WriteMode::kKeepAlive:
+      conn->ResetForNextRequest();
+      return;
+    case WriteMode::kClose:
+      conn->StartClose();
+      return;
   }
 }
 
@@ -451,4 +552,4 @@ void Connection::OnHandleClosed(uv_handle_t* h) {
   }
 }
 
-}  // namespace bf::http
+}  // namespace bf::http_server

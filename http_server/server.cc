@@ -1,16 +1,15 @@
-// server.cc — bind/listen and accept-to-Connection for bf-http.
+// server.cc — bind/listen and accept-to-Connection for the shared HTTP core.
 
 #include "server.h"
 
 #include <cstdint>
 
 #include "conn.h"
-#include "router.h"
 
-namespace bf::http {
+namespace bf::http_server {
 
-Server::Server(uv_loop_t* loop, Router& router, const Limits& limits)
-    : loop_(loop), router_(router), limits_(limits) {
+Server::Server(uv_loop_t* loop, RequestHandler& handler, const Limits& limits)
+    : loop_(loop), handler_(handler), limits_(limits) {
   uv_tcp_init(loop_, &handle_);
   handle_.data = this;
 }
@@ -58,7 +57,8 @@ void Server::OnNewConnection(uv_stream_t* server, int status) {
     return;  // accept failed at the libuv level; nothing to clean up yet
   }
   auto* self = static_cast<Server*>(server->data);
-  std::shared_ptr<Connection> conn = Connection::Create(server->loop, self->router_, self->limits_);
+  std::shared_ptr<Connection> conn =
+      Connection::Create(server->loop, self->handler_, self->limits_);
   if (uv_accept(server, conn->stream()) == 0) {
     conn->Start();
   } else {
@@ -66,4 +66,4 @@ void Server::OnNewConnection(uv_stream_t* server, int status) {
   }
 }
 
-}  // namespace bf::http
+}  // namespace bf::http_server

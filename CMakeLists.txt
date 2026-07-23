@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.15.15
+        VERSION 3.16.0
         DESCRIPTION "A realistic / compliant flight route engine"
         LANGUAGES C CXX)
 
@@ -140,6 +140,7 @@ endforeach()
 # ---------------------------------------------------------------------------
 add_subdirectory(lib)
 add_subdirectory(service)
+add_subdirectory(http_server)
 add_subdirectory(apps/cli)
 add_subdirectory(apps/mcp)
 add_subdirectory(apps/http)

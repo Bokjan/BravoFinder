@@ -3,14 +3,17 @@
 #include "router.h"
 
 #include <charconv>
+#include <functional>
+#include <optional>
 #include <string_view>
 #include <utility>
 
+#include "conn.h"  // http_server::Connection
 #include "io/cache/bfdb_inventory.h"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
-#include "work.h"
+#include "work.h"  // http_server::QueueWork, WorkResult
 
 namespace bf::http {
 
@@ -69,10 +72,38 @@ bool ParseCycle(const std::string& query, std::optional<uint32_t>* out) {
 
 // Readiness handler: reached only when registry.Get(latest) succeeded, so the
 // server can open and serve the newest cycle. A resolve failure is turned into
-// 503 by the work layer (cycle_error_status), never reaching this handler.
+// 503 by the cycle_error_status below, never reaching this handler.
 bf::service::HandlerResult ReadyHandler(const rapidjson::Value& /*args*/,
                                         const bf::NavDatabase& /*db*/) {
   return {R"({"status":"ready"})", 200};
+}
+
+// Build the offloaded-work closure: resolve the database for `cycle` then run
+// `handler(args)`, projecting the result into a transport-neutral WorkResult. A
+// resolve failure becomes `cycle_error_status`. The closure owns `args` via a
+// shared_ptr so it stays copyable (std::function requires a copyable target),
+// and captures `registry` by reference (it outlives the Router and all work).
+std::function<http_server::WorkResult()> MakeWork(bf::service::NavDatabaseRegistry& registry,
+                                                  bf::service::QueryHandler handler,
+                                                  std::shared_ptr<rapidjson::Document> args,
+                                                  std::optional<uint32_t> cycle,
+                                                  int cycle_error_status) {
+  return [&registry, handler = std::move(handler), args = std::move(args), cycle,
+          cycle_error_status]() -> http_server::WorkResult {
+    bf::Result<const bf::NavDatabase*> db = registry.Get(cycle);
+    if (!db) {
+      http_server::WorkResult err;
+      err.status = cycle_error_status;
+      err.body = bf::service::JsonError(db.error().message);
+      return err;
+    }
+    bf::service::HandlerResult r = handler(*args, *db.value());
+    http_server::WorkResult out;
+    out.status = r.status;
+    out.body = std::move(r.body);
+    out.elapsed_ms = r.elapsed_ms;
+    return out;
+  };
 }
 
 }  // namespace
@@ -92,7 +123,8 @@ Router::Router(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop)
   }
 }
 
-void Router::Handle(std::shared_ptr<Connection> conn, const HttpRequest& req) {
+void Router::Handle(std::shared_ptr<http_server::Connection> conn,
+                    const http_server::HttpRequest& req) {
   // Liveness: the process is up, so always 200 -- no database touched.
   if (req.method == "GET" && req.path == "/healthz") {
     conn->WriteResponse(200, R"({"status":"ok"})", req.keep_alive);
@@ -107,31 +139,32 @@ void Router::Handle(std::shared_ptr<Connection> conn, const HttpRequest& req) {
   // it cannot be resolved.
   if (req.method == "GET" && req.path == "/readyz") {
     if (inflight_.load(std::memory_order_relaxed) >= kMaxInflightWork) {
-      conn->WriteResponse(503, bf::service::JsonError("server busy"), req.keep_alive);
+      conn->WriteResponse(503, http_server::JsonError("server busy"), req.keep_alive);
       return;
     }
-    rapidjson::Document empty;
-    empty.SetObject();
-    QueueQuery(std::move(conn), loop_, registry_, ReadyHandler, std::move(empty), std::nullopt,
-               req.keep_alive, 503, inflight_);
+    auto empty = std::make_shared<rapidjson::Document>();
+    empty->SetObject();
+    http_server::QueueWork(std::move(conn), loop_,
+                           MakeWork(registry_, ReadyHandler, std::move(empty), std::nullopt, 503),
+                           req.keep_alive, inflight_);
     return;
   }
 
   // Query endpoints: POST + JSON body. An unmatched (method, path) is 404.
   auto it = routes_.find(req.path);
   if (req.method != "POST" || it == routes_.end()) {
-    conn->WriteResponse(404, bf::service::JsonError("not found"), req.keep_alive);
+    conn->WriteResponse(404, http_server::JsonError("not found"), req.keep_alive);
     return;
   }
   // Shed load before doing any per-request work if the offload queue is full.
   if (inflight_.load(std::memory_order_relaxed) >= kMaxInflightWork) {
-    conn->WriteResponse(503, bf::service::JsonError("server busy"), req.keep_alive);
+    conn->WriteResponse(503, http_server::JsonError("server busy"), req.keep_alive);
     return;
   }
   // ?cycle=NNNN selects the database; malformed cycle is a 400 before any work.
   std::optional<uint32_t> cycle;
   if (!ParseCycle(req.query, &cycle)) {
-    conn->WriteResponse(400, bf::service::JsonError("cycle must be a non-negative integer"),
+    conn->WriteResponse(400, http_server::JsonError("cycle must be a non-negative integer"),
                         req.keep_alive);
     return;
   }
@@ -141,20 +174,21 @@ void Router::Handle(std::shared_ptr<Connection> conn, const HttpRequest& req) {
   // default recursive-descent parser would blow the C++ stack on a deeply nested
   // "[[[[..." payload, crashing the whole process. Parse over (data, size) rather
   // than a C string so an embedded NUL cannot truncate the body.
-  rapidjson::Document args;
+  auto args = std::make_shared<rapidjson::Document>();
   if (req.body.empty()) {
-    args.SetObject();
+    args->SetObject();
   } else {
-    args.Parse<rapidjson::kParseIterativeFlag>(req.body.data(), req.body.size());
-    if (args.HasParseError() || !args.IsObject()) {
-      conn->WriteResponse(400, bf::service::JsonError("request body must be a JSON object"),
+    args->Parse<rapidjson::kParseIterativeFlag>(req.body.data(), req.body.size());
+    if (args->HasParseError() || !args->IsObject()) {
+      conn->WriteResponse(400, http_server::JsonError("request body must be a JSON object"),
                           req.keep_alive);
       return;
     }
   }
   // Offload: an unknown/unserved cycle is the client's error (400).
-  QueueQuery(std::move(conn), loop_, registry_, it->second, std::move(args), cycle, req.keep_alive,
-             400, inflight_);
+  http_server::QueueWork(std::move(conn), loop_,
+                         MakeWork(registry_, it->second, std::move(args), cycle, 400),
+                         req.keep_alive, inflight_);
 }
 
 std::string Router::SerializeCycles() const {

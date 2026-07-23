@@ -16,7 +16,7 @@ The tool builds a directed graph honoring airway directionality and high/low lev
 
 A single loaded database is safe to query concurrently from multiple threads.
 
-The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` CLI, an MCP stdio server (`bf-mcp`) for LLM clients, and an HTTP+JSON server (`bf-http`) for network callers. The latter two share one service layer (`service/`, namespace `bf::service`).
+The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` CLI, an MCP server (`bf-mcp`) for LLM clients — over **stdio** (default) or **HTTP** (Streamable HTTP, `--transport http`) — and a REST+JSON server (`bf-http`) for network callers. They share one service layer (`service/`, namespace `bf::service`); the two HTTP transports (`bf-http` REST and `bf-mcp` HTTP) share one transport core (`http_server/`, namespace `bf::http_server`).
 
 ## Building
 
@@ -82,7 +82,7 @@ The public entry point is `bf::NavDatabase` (`#include "io/nav_database.h"`); he
 
 ### MCP server (`bf-mcp`)
 
-BravoFinder also ships a local MCP server that exposes `bf route` and `bf query` as MCP tools over stdio, so an LLM client can ask for routes and look up navigation data directly. It is a thin, zero-dependency (beyond the project's own library) stdio JSON-RPC server.
+BravoFinder also ships an MCP server that exposes `bf route` and `bf query` as MCP tools, so an LLM client can ask for routes and look up navigation data directly. It speaks MCP over one of two transports: **stdio** (default — JSON-RPC over stdin/stdout, for a local client that spawns the process) or **HTTP** (`--transport http` — Streamable HTTP, 2025-03-26, on a TCP port, for remote / multi-client access). The stdio transport is zero-dependency beyond the project's own library; the HTTP transport shares the `bf-http` transport core (libuv + llhttp).
 
 It is pointed at a **directory** of `.bfdb` caches (not a single file) and can serve multiple AIRAC cycles from it: each cycle's database is opened lazily on first use and cached. Every tool takes an optional `cycle` argument (omit for the newest), and a `list_cycles` tool enumerates what is available. A single-cycle deployment is just a directory holding one cache.
 
@@ -99,6 +99,10 @@ Point it at a directory and run it (it fails fast at startup if the directory ho
 # The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
 BRAVOFINDER_NAVDATA=navdata bf-mcp
 bf-mcp --db-dir /path/to/caches
+
+# Serve MCP over HTTP instead of stdio (Streamable HTTP, single endpoint /mcp):
+bf-mcp --transport http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
+# HTTP-mode flags mirror bf-http: --worker-threads N, --max-body BYTES, --io-timeout SEC.
 ```
 
 Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the `lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways` / `lookup_navaid_detail` / `lookup_holds` batch lookups plus `lookup_procedure_legs` (a named procedure's per-leg detail; mirroring `bf query`), and `list_cycles`. See [apps/mcp/README.md](apps/mcp/README.md) for the full tool reference, argument semantics, and client configuration.

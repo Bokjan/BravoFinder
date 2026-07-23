@@ -17,7 +17,9 @@
 
 handler 返回 `HandlerResult{body, status}`（HTTP 风格状态码）。两种传输各取所需：MCP 只看 `is_error = (status >= 400)`；HTTP 直接用 status。新增一个查询能力 = 在 `bf::service` 加一个 handler，两端自动受益。
 
-## 传输：手搓 libuv + llhttp
+## 传输：手搓 libuv + llhttp（共享核心 `http_server/`）
+
+传输本身也不属于任何一种消费者。连接状态机、TCP listener、线程池 offload、`RequestHandler` 接口与传输本地的 `WorkResult`，都在 **顶层 `http_server/`（命名空间 `bf::http_server`，target `bf_http_server`）**：REST 服务（`apps/http`）与 MCP-over-HTTP 传输（`apps/mcp` http 模式）**共用同一份**。它是 **JSON/查询中性**的——不依赖 `bf_service_lib`（正如 `lib/` 不依赖网络），消费者实现 `RequestHandler` 赋予请求含义。（其头文件名是 `transport.h` 而非 `dispatcher.h`：后者是 MCP 的 JSON-RPC dispatcher 专名，两目录在编译 `bf_mcp_lib` 时都在 include 路径上，同名会歧义。）
 
 - **libuv**：事件循环 + 内置线程池，统一 API 下自动走 epoll(Linux)/kqueue(macOS)/IOCP(Windows)， 天然跨平台，原生支持 MSVC。
 - **llhttp**：Node 的 HTTP/1.1 解析器，只做**解析**（喂字节 → 回调）。
@@ -75,6 +77,21 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 区分"你传错了"(400) 与"你没传错但无解"(422)，是错误模型的核心。
 
 探针：`/healthz` 恒 200（进程存活）；`/readyz` 最新周期可打开才 200，否则 503（且开库可能有磁盘 I/O，故 readyz 也走 offload）。
+
+## MCP-over-HTTP 传输（`bf-mcp --transport http`）
+
+`bf-mcp` 是同一套查询能力的另一个消费者。它默认 **stdio**（本地 MCP client spawn，向后兼容），也可切到 **HTTP**：`bf-mcp --transport http --port 8080`，供远程 / 多客户端 MCP client 接入。REST（`bf-http`）不受影响、独立二进制——`BravoFinderWeb` 的 Go 网关按 path+method 字节透传 REST、从不解析 body，砍掉 REST 换纯 MCP 会把它退化成 JSON-RPC↔REST 翻译桥，故 REST 保留。
+
+- **协议核心复用**：两种 MCP 传输共用 transport-neutral 的 `Dispatcher`（`apps/mcp/dispatcher.{h,cc}`，method 分发 + 协议版本协商 + 工具表）。stdio 内联 `Dispatch`；HTTP 把整个 `Dispatch` offload 到线程池（`Dispatch` 是 `const`、只读 registry/tools，多 worker 并发安全）。`stdio_runner` 与 `mcp_http` 只是两层薄壳。
+- **传输核心复用**：HTTP 模式建在 `bf_http_server` 上，与 REST 同源——10–30ms 的 `tools/call` 计算走同一套 `uv_queue_work` offload + 连接存活守卫。offload 的工作单元是 **可拷贝** 的 `std::function<WorkResult()>`（解析后的请求用 `shared_ptr<Document>` 持有，move-capture 的 Document 不可拷贝、进不了 `std::function`）。
+- **Streamable HTTP（2025-03-26）单端点 `/mcp`**：
+  - `POST /mcp`：body 是 JSON-RPC 请求（单个或批量）。纯 notification（无 id）→ `202 Accepted` 空体；否则 offload dispatch，完成后按 `Accept` 头决定响应帧——含 `text/event-stream` → `200` + 单个 SSE 事件（`data: <json-rpc>\n\n`），否则 `200` `application/json`。批量：收集非 notification 项为数组，全 notification → 202。
+  - `GET /mcp`：开一条 SSE 长连接（`text/event-stream`，close-delimited 开放流），发一个 `: keepalive` 注释即占位。当前工具无 progress、无 server-push，此流零消费者，仅为将来通知预留 + 合成测试覆盖。
+  - `DELETE /mcp`：无状态 → `200` ack。
+- **Session（无状态带 id）**：`initialize` 响应回一个随机 `Mcp-Session-Id` 头并协商到 2025-03-26；后续请求接受任意 session id 但**不跟踪**（Dispatcher 无 per-session 状态，每个请求独立）。
+- **SSE 写出能力**（加在 `http_server/conn.cc`）：`WriteResponse` 支持自定义 `content_type` + 额外 header（POST→SSE 单事件用 `Content-Length` 缓冲）；`BeginStream`/`WriteEvent` 是 close-delimited 开放流（无 `Content-Length`、`Connection: keep-alive`），靠一个 `streaming_` 标志让写完成回调既不复位下一请求也不关连接，直到客户端断开 / idle 超时。**SSE 写出全在 loop 线程**，worker 只算不写。改这块并发面必过 `ctest --preset tsan`（契约 B）。
+
+端到端覆盖在 `tests/integration/mcp_http_test.cc`（真 loopback，用最小手造缓存，不依赖真实 navdata、不 SKIP）。
 
 ## 合规
 

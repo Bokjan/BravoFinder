@@ -1,9 +1,10 @@
-// server.h — the TCP listener + accept loop for bf-http.
+// server.h — the TCP listener + accept loop for the shared HTTP core.
 //
 // Server owns the listening uv_tcp_t and turns each accepted socket into a
-// Connection. It is extracted from main.cc so tests can start a real listener
-// on a loopback port (Listen with port 0, then BoundPort) and drive it over an
-// actual socket. All methods run on the listener's loop thread.
+// Connection routed to a RequestHandler. It is extracted so tests (and each
+// app's main) can start a real listener on a loopback port (Listen with port 0,
+// then BoundPort) and drive it over an actual socket. All methods run on the
+// listener's loop thread.
 
 #pragma once
 
@@ -11,17 +12,15 @@
 
 #include <string>
 
-#include "conn.h"  // Limits
+#include "transport.h"  // Limits, RequestHandler
 
-namespace bf::http {
-
-class Router;
+namespace bf::http_server {
 
 class Server {
  public:
-  // Serve connections routed by `router`, applying `limits` to each. Both must
+  // Serve connections routed by `handler`, applying `limits` to each. Both must
   // outlive the Server. Does no I/O until Listen().
-  Server(uv_loop_t* loop, Router& router, const Limits& limits);
+  Server(uv_loop_t* loop, RequestHandler& handler, const Limits& limits);
 
   // Bind `host:port` and start listening. Returns 0 on success or a libuv error
   // code. Pass port 0 to let the OS choose a free port (see BoundPort).
@@ -42,9 +41,9 @@ class Server {
   static void OnNewConnection(uv_stream_t* server, int status);
 
   uv_loop_t* loop_;
-  Router& router_;
+  RequestHandler& handler_;
   Limits limits_;
   uv_tcp_t handle_{};
 };
 
-}  // namespace bf::http
+}  // namespace bf::http_server

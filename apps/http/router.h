@@ -1,11 +1,13 @@
 // router.h — maps a parsed HTTP request to a bf::service handler for bf-http.
 //
-// The Router runs on the libuv loop thread. It answers the cheap endpoints
-// inline (liveness probe, cycle list, not-found / bad-request errors) and
-// offloads everything that touches a database -- the query endpoints and the
-// readiness probe -- to the threadpool via work.h, so the 10-30 ms route
-// computation never blocks the loop. Endpoint -> handler wiring, ?cycle=
-// parsing, and status-code selection all live here.
+// The Router is the RequestHandler for the shared HTTP core: it runs on the
+// libuv loop thread, answers the cheap endpoints inline (liveness probe, cycle
+// list, not-found / bad-request errors) and offloads everything that touches a
+// database -- the query endpoints and the readiness probe -- to the threadpool
+// via http_server::QueueWork, so the 10-30 ms route computation never blocks the
+// loop. Endpoint -> handler wiring, ?cycle= parsing, and status-code selection
+// all live here; the transport (connection state machine, listener, offload
+// plumbing) lives in the shared http_server/ library.
 
 #pragma once
 
@@ -13,17 +15,16 @@
 
 #include <atomic>
 #include <memory>
-#include <optional>
 #include <string>
 #include <unordered_map>
 
-#include "conn.h"  // HttpRequest, Connection
 #include "handlers.h"
 #include "registry.h"
+#include "transport.h"  // http_server::RequestHandler, HttpRequest, Connection (fwd)
 
 namespace bf::http {
 
-class Router {
+class Router : public http_server::RequestHandler {
  public:
   // Serve queries from `registry`; offload work onto `loop`'s threadpool. Both
   // must outlive the Router.
@@ -31,7 +32,8 @@ class Router {
 
   // Route one fully-parsed request (loop thread): write an inline response, or
   // queue an offloaded query, using `conn` for the reply.
-  void Handle(std::shared_ptr<Connection> conn, const HttpRequest& req);
+  void Handle(std::shared_ptr<http_server::Connection> conn,
+              const http_server::HttpRequest& req) override;
 
  private:
   // Serialize the available AIRAC cycles, newest first, as {"cycles":[...]}.

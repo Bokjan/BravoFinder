@@ -1,32 +1,31 @@
-// mcp_server.cc — the stdio JSON-RPC transport for bf-mcp.
+// dispatcher.cc — the transport-neutral MCP method dispatch for bf-mcp.
 //
-// This file is the protocol layer only: it reads JSON-RPC requests from stdin,
-// dispatches the three methods MCP needs (initialize / tools/list / tools/call),
-// and writes JSON-RPC responses to stdout. The capabilities themselves are
-// defined in tools.cc as Tool objects; this file iterates that list rather
-// than knowing about any individual tool.
+// This is the protocol logic only: it takes a parsed JSON-RPC request, runs the
+// three MCP methods (initialize / tools/list / tools/call) plus the
+// server-provided list_cycles tool, and returns the JSON-RPC response envelope
+// as a string. It does no byte I/O -- the stdio and HTTP transports own that.
+// The capabilities themselves live in tools.cc as Tool objects; this file
+// iterates that list rather than knowing about any individual tool.
 
-#include "mcp_server.h"
+#include "dispatcher.h"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "core/version.h"
 #include "handlers.h"
-#include "tools.h"
 
 namespace bf::mcp {
 
 namespace {
 
-constexpr char kProtocolVersion[] = "2024-11-05";
-
 // A server-provided tool (not a per-database capability): lists the AIRAC
-// cycles the registry can serve. Handled directly by McpServer since it needs
-// the registry, not a single NavDatabase.
+// cycles the registry can serve. Handled directly by the Dispatcher since it
+// needs the registry, not a single NavDatabase.
 constexpr char kListCyclesTool[] = "list_cycles";
 
 // Inject the shared "cycle" argument into a per-database tool's schema. cycle
@@ -47,122 +46,76 @@ void InjectCycleProperty(rapidjson::Value& schema, rapidjson::Document::Allocato
   schema["properties"].AddMember("cycle", cycle, alloc);
 }
 
-// Parse a JSON-RPC request line. Returns false if the line is not a valid JSON
-// object (the caller then silently skips it, as a well-behaved client sends
-// well-formed JSON).
-bool ParseRequest(const std::string& line, rapidjson::Document& doc) {
-  if (line.empty()) {
-    return false;
-  }
-  // Parse iteratively (kParseIterativeFlag) over (data, size): the line is
-  // untrusted, and rapidjson's default recursive-descent parser would blow the
-  // C++ stack on a deeply nested payload. Using the length form also stops an
-  // embedded NUL from truncating the request.
-  return !doc.Parse<rapidjson::kParseIterativeFlag>(line.data(), line.size()).HasParseError() &&
-         doc.IsObject();
-}
-
-// Read one newline-terminated line from `in`, bounding memory to `max_len`
-// bytes. std::getline grows the target string without limit, so a client that
-// streams bytes and never sends a newline (exactly the attack the cap is meant
-// to stop) makes getline consume until OOM -- the size check afterward never
-// runs. This reader stops growing `out` once `max_len` is reached and keeps
-// draining the rest of the oversized line to the newline, so the buffer never
-// exceeds the cap. kEof is returned only at end of input with no pending bytes.
-enum class LineResult { kOk, kOversized, kEof };
-
-LineResult ReadBoundedLine(std::istream& in, std::string& out, size_t max_len) {
-  out.clear();
-  bool oversized = false;
-  bool saw_any = false;
-  char ch = 0;
-  while (in.get(ch)) {
-    saw_any = true;
-    if (ch == '\n') {
-      return oversized ? LineResult::kOversized : LineResult::kOk;
+// Negotiate the MCP protocol version. Echo the client's requested version when
+// it is one we support; otherwise fall back to the default (which keeps a client
+// that sends no protocolVersion on the historical stdio behavior).
+const char* NegotiateProtocolVersion(const rapidjson::Value* params) {
+  if (params != nullptr && params->IsObject() && params->HasMember("protocolVersion") &&
+      (*params)["protocolVersion"].IsString()) {
+    const std::string_view requested = (*params)["protocolVersion"].GetString();
+    if (requested == kProtocolVersion2025) {
+      return kProtocolVersion2025;
     }
-    if (out.size() < max_len) {
-      out.push_back(ch);
-    } else {
-      oversized = true;  // keep draining to the newline without growing `out`
+    if (requested == kProtocolVersion2024) {
+      return kProtocolVersion2024;
     }
   }
-  if (!saw_any) {
-    return LineResult::kEof;  // clean end of input
-  }
-  return oversized ? LineResult::kOversized : LineResult::kOk;  // final unterminated line
+  return kDefaultProtocolVersion;
 }
 
 }  // namespace
 
-int McpServer::Run() {
-  // JSON-RPC over stdio: one request per line, one response per line on stdout.
+Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const {
   // A request with no "id" is a notification (per JSON-RPC 2.0) and gets no
-  // response. A request with an id (int, string, or null) is echoed back verbatim
-  // so the client can match the response.
-  std::string line;
-  // Cap a single request line: a malicious or buggy client could stream without
-  // a newline and grow `line` until OOM. The MCP frame is bounded by realistic
-  // tool arguments; anything larger is drained and rejected without buffering it
-  // whole (see ReadBoundedLine).
-  constexpr size_t kMaxLineLen = 16 * 1024 * 1024;  // 16 MiB
-  for (;;) {
-    const LineResult lr = ReadBoundedLine(std::cin, line, kMaxLineLen);
-    if (lr == LineResult::kEof) {
-      break;
-    }
-    if (lr == LineResult::kOversized) {
-      // The oversized line was drained to its newline; drop it (there is no
-      // request id to reply to yet).
-      continue;
-    }
-    rapidjson::Document doc;
-    if (!ParseRequest(line, doc)) {
-      continue;
-    }
-    if (!doc.HasMember("method") || !doc["method"].IsString()) {
-      // Invalid request: only reply if it carried an id (a notification with no
-      // method is silently dropped, per JSON-RPC).
-      if (doc.HasMember("id")) {
-        SendError(doc["id"], -32600, "invalid request: missing or non-string method");
-      }
-      continue;
-    }
-    const std::string method = doc["method"].GetString();
-    const bool has_id = doc.HasMember("id");
-
-    if (method == "initialize") {
-      if (!has_id) {
-        continue;  // notification: no response
-      }
-      HandleInitialize(doc["id"]);
-    } else if (method == "tools/list") {
-      if (!has_id) {
-        continue;
-      }
-      HandleToolsList(doc["id"]);
-    } else if (method == "tools/call") {
-      if (!has_id) {
-        continue;
-      }
-      // A tools/call request must carry a params object; without one it is a
-      // protocol error rather than a tool error.
-      if (!doc.HasMember("params") || !doc["params"].IsObject()) {
-        SendError(doc["id"], -32602, "tools/call requires a params object");
-        continue;
-      }
-      HandleToolsCall(doc["id"], doc["params"]);
-    } else {
-      // Unknown method: reply with method-not-found only for a request (has id).
-      if (has_id) {
-        SendError(doc["id"], -32601, "method not found: " + method);
-      }
-    }
+  // response. A request with an id (int, string, or null) is echoed back
+  // verbatim so the client can match the response.
+  if (!request.IsObject()) {
+    return {};  // not a JSON object: nothing to reply to
   }
-  return 0;
+  const bool has_id = request.HasMember("id");
+  if (!request.HasMember("method") || !request["method"].IsString()) {
+    // Invalid request: only reply if it carried an id (a notification with no
+    // method is silently dropped, per JSON-RPC).
+    if (has_id) {
+      return {MakeError(request["id"], -32600, "invalid request: missing or non-string method"),
+              true};
+    }
+    return {};
+  }
+  const std::string method = request["method"].GetString();
+
+  if (method == "initialize") {
+    if (!has_id) {
+      return {};  // notification: no response
+    }
+    const rapidjson::Value* params = request.HasMember("params") ? &request["params"] : nullptr;
+    return {HandleInitialize(request["id"], params), true};
+  }
+  if (method == "tools/list") {
+    if (!has_id) {
+      return {};
+    }
+    return {HandleToolsList(request["id"]), true};
+  }
+  if (method == "tools/call") {
+    if (!has_id) {
+      return {};
+    }
+    // A tools/call request must carry a params object; without one it is a
+    // protocol error rather than a tool error.
+    if (!request.HasMember("params") || !request["params"].IsObject()) {
+      return {MakeError(request["id"], -32602, "tools/call requires a params object"), true};
+    }
+    return {HandleToolsCall(request["id"], request["params"]), true};
+  }
+  // Unknown method: reply with method-not-found only for a request (has id).
+  if (has_id) {
+    return {MakeError(request["id"], -32601, "method not found: " + method), true};
+  }
+  return {};
 }
 
-void McpServer::SendResult(const rapidjson::Value& id, rapidjson::Value& result) {
+std::string Dispatcher::MakeResult(const rapidjson::Value& id, rapidjson::Value& result) const {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
@@ -173,11 +126,11 @@ void McpServer::SendResult(const rapidjson::Value& id, rapidjson::Value& result)
   writer.Key("result");
   result.Accept(writer);
   writer.EndObject();
-  std::cout << buffer.GetString() << "\n";
-  std::cout.flush();
+  return buffer.GetString();
 }
 
-void McpServer::SendError(const rapidjson::Value& id, int code, const std::string& message) {
+std::string Dispatcher::MakeError(const rapidjson::Value& id, int code,
+                                  const std::string& message) const {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
@@ -193,12 +146,11 @@ void McpServer::SendError(const rapidjson::Value& id, int code, const std::strin
   writer.String(message.c_str(), static_cast<unsigned>(message.size()));
   writer.EndObject();
   writer.EndObject();
-  std::cout << buffer.GetString() << "\n";
-  std::cout.flush();
+  return buffer.GetString();
 }
 
-void McpServer::SendToolResult(const rapidjson::Value& id, const std::string& json_text,
-                               bool is_error, uint32_t elapsed_ms) {
+std::string Dispatcher::MakeToolResult(const rapidjson::Value& id, const std::string& json_text,
+                                       bool is_error, uint32_t elapsed_ms) const {
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
@@ -233,15 +185,16 @@ void McpServer::SendToolResult(const rapidjson::Value& id, const std::string& js
   }
   writer.EndObject();
   writer.EndObject();
-  std::cout << buffer.GetString() << "\n";
-  std::cout.flush();
+  return buffer.GetString();
 }
 
-void McpServer::HandleInitialize(const rapidjson::Value& id) {
+std::string Dispatcher::HandleInitialize(const rapidjson::Value& id,
+                                         const rapidjson::Value* params) const {
   rapidjson::Document result;
   result.SetObject();
   auto& alloc = result.GetAllocator();
-  result.AddMember("protocolVersion", rapidjson::Value(kProtocolVersion, alloc), alloc);
+  result.AddMember("protocolVersion", rapidjson::Value(NegotiateProtocolVersion(params), alloc),
+                   alloc);
   rapidjson::Value server_info(rapidjson::kObjectType);
   server_info.AddMember("name", rapidjson::Value("bf-mcp", alloc), alloc);
   server_info.AddMember("version", rapidjson::Value(kBravoFinderVersion, alloc), alloc);
@@ -251,10 +204,10 @@ void McpServer::HandleInitialize(const rapidjson::Value& id) {
   tools.AddMember("listChanged", false, alloc);
   capabilities.AddMember("tools", tools, alloc);
   result.AddMember("capabilities", capabilities, alloc);
-  SendResult(id, result);
+  return MakeResult(id, result);
 }
 
-void McpServer::HandleToolsList(const rapidjson::Value& id) {
+std::string Dispatcher::HandleToolsList(const rapidjson::Value& id) const {
   rapidjson::Document result;
   result.SetObject();
   auto& alloc = result.GetAllocator();
@@ -296,11 +249,11 @@ void McpServer::HandleToolsList(const rapidjson::Value& id) {
   }
 
   result.AddMember("tools", tools, alloc);
-  SendResult(id, result);
+  return MakeResult(id, result);
 }
 
 // Serialize the registry's available cycles as a JSON array, newest first.
-void McpServer::HandleListCycles(const rapidjson::Value& id) {
+std::string Dispatcher::HandleListCycles(const rapidjson::Value& id) const {
   const BfdbInventory& inv = registry_.inventory();
   // A cycle is "loaded" once Get has opened it; the inventory does not track
   // that, so we only report the cycle here (loaded state is transient and not
@@ -321,19 +274,18 @@ void McpServer::HandleListCycles(const rapidjson::Value& id) {
   // (In practice the server fail-fasts on an empty inventory at startup, so the
   // registry is never empty here, but the flag must reflect semantics either
   // way rather than conflate "no cycles" with "the call failed".)
-  SendToolResult(id, buffer.GetString(), /*is_error=*/false);
+  return MakeToolResult(id, buffer.GetString(), /*is_error=*/false);
 }
 
-void McpServer::HandleToolsCall(const rapidjson::Value& id, const rapidjson::Value& params) {
+std::string Dispatcher::HandleToolsCall(const rapidjson::Value& id,
+                                        const rapidjson::Value& params) const {
   if (!params.HasMember("name") || !params["name"].IsString()) {
-    SendError(id, -32602, "missing tool name");
-    return;
+    return MakeError(id, -32602, "missing tool name");
   }
   const std::string name = params["name"].GetString();
 
   if (name == kListCyclesTool) {
-    HandleListCycles(id);
-    return;
+    return HandleListCycles(id);
   }
 
   // A missing/non-object "arguments" is treated as empty: tools validate their
@@ -352,29 +304,26 @@ void McpServer::HandleToolsCall(const rapidjson::Value& id, const rapidjson::Val
     // the latest: a client passing cycle:-1 would otherwise be served a
     // different cycle's data with no signal.
     if (!args["cycle"].IsUint()) {
-      SendToolResult(
+      return MakeToolResult(
           id, bf::service::JsonError("cycle must be a non-negative integer (omit for latest)"),
           true);
-      return;
     }
     cycle = args["cycle"].GetUint();
   }
   Result<const NavDatabase*> db = registry_.Get(cycle);
   if (!db) {
-    SendToolResult(id, bf::service::JsonError(db.error().message), true);
-    return;
+    return MakeToolResult(id, bf::service::JsonError(db.error().message), true);
   }
 
   for (const Tool& tool : tools_) {
     if (tool.name == name) {
       ToolResult tr = tool.handler(args, *db.value());
-      SendToolResult(id, tr.json_text, tr.is_error, tr.elapsed_ms);
-      return;
+      return MakeToolResult(id, tr.json_text, tr.is_error, tr.elapsed_ms);
     }
   }
   // The tool name is client-controlled, so escape it (a name with a quote must
   // not break the JSON frame).
-  SendToolResult(id, bf::service::JsonError("unknown tool: " + name), true);
+  return MakeToolResult(id, bf::service::JsonError("unknown tool: " + name), true);
 }
 
 }  // namespace bf::mcp

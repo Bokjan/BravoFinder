@@ -17,7 +17,6 @@
 #include <string>
 #include <thread>
 
-#include "conn.h"
 #include "core/env.h"
 #include "core/version.h"
 #include "io/cache/bfdb_inventory.h"
@@ -91,11 +90,11 @@ int main(int argc, char** argv) {
   uv_loop_init(&loop);
   bf::http::Router router(registry, &loop);
 
-  bf::http::Limits limits;
+  bf::http_server::Limits limits;
   limits.max_body_bytes = static_cast<size_t>(max_body);
   limits.io_timeout_ms = static_cast<uint64_t>(io_timeout_sec) * 1000;
 
-  bf::http::Server server(&loop, router, limits);
+  bf::http_server::Server server(&loop, router, limits);
   const int rc = server.Listen(host, port);
   if (rc != 0) {
     std::cerr << "error: cannot listen on " << host << ":" << port << ": " << uv_strerror(rc)

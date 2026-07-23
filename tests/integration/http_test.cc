@@ -54,7 +54,7 @@ using bf::test::NavDataDir;
 // in-flight work and client disconnects drain, then stops the loop and joins.
 class ServerHarness {
  public:
-  ServerHarness(bf::service::NavDatabaseRegistry& registry, const bf::http::Limits& limits)
+  ServerHarness(bf::service::NavDatabaseRegistry& registry, const bf::http_server::Limits& limits)
       : registry_(registry), limits_(limits) {
     std::promise<int> port_promise;
     std::future<int> port_future = port_promise.get_future();
@@ -80,12 +80,12 @@ class ServerHarness {
       // Runs on the loop thread: stop accepting, then close the async itself.
       // uv_run(UV_RUN_DEFAULT) returns once the listener, this async, all
       // Connections, and all queued threadpool work have drained.
-      auto* server = static_cast<bf::http::Server*>(a->data);
+      auto* server = static_cast<bf::http_server::Server*>(a->data);
       server->Close();
       uv_close(reinterpret_cast<uv_handle_t*>(a), nullptr);
     });
     bf::http::Router router(registry_, &loop_);
-    bf::http::Server server(&loop_, router, limits_);
+    bf::http_server::Server server(&loop_, router, limits_);
     // The async callback needs the server to close its listener. Safe to set
     // before the send: the destructor cannot fire the async until the ctor has
     // returned, which is after port_promise is fulfilled below.
@@ -108,7 +108,7 @@ class ServerHarness {
   }
 
   bf::service::NavDatabaseRegistry& registry_;
-  bf::http::Limits limits_;
+  bf::http_server::Limits limits_;
   uv_loop_t loop_{};
   uv_async_t stop_{};
   std::thread thread_;
@@ -261,7 +261,7 @@ TEST_CASE("http server end-to-end over a loopback socket", "[integration][http]"
   }
   bf::service::NavDatabaseRegistry registry(std::move(inventory.value()));
 
-  bf::http::Limits limits;
+  bf::http_server::Limits limits;
   limits.max_body_bytes = 1024;  // small, so a modest body triggers 413
   ServerHarness harness(registry, limits);
   REQUIRE(harness.port() > 0);
@@ -374,7 +374,7 @@ TEST_CASE("http hardening: header limits and idle timeout", "[integration][http]
   // Empty registry: none of these requests reach routing, so no data is needed.
   bf::service::NavDatabaseRegistry registry(bf::BfdbInventory{});
 
-  bf::http::Limits limits;
+  bf::http_server::Limits limits;
   limits.io_timeout_ms = 300;  // short, so the idle-timeout section stays fast
   ServerHarness harness(registry, limits);
   REQUIRE(harness.port() > 0);

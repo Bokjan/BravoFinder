@@ -1,11 +1,12 @@
-// conn.h — one TCP connection's HTTP/1.1 state machine for bf-http.
+// conn.h — one TCP connection's HTTP/1.1 state machine for the shared HTTP core.
 //
 // A Connection owns a libuv TCP handle, an llhttp parser, and the per-request
 // accumulation buffers. It runs entirely on the libuv loop thread: it reads
 // bytes, feeds them to llhttp, assembles a complete request, and hands it to the
-// Router. The Router either answers inline (probes, cycles, errors) or offloads
-// the computation to the threadpool (work.h); either way the response is written
-// back here via WriteResponse, still on the loop thread.
+// RequestHandler. The handler either answers inline (probes, cycles, errors) or
+// offloads the computation to the threadpool (work.h); either way the response
+// is written back here via WriteResponse (or streamed via BeginStream /
+// WriteEvent), still on the loop thread.
 //
 // Lifetime: a Connection is heap-allocated and held by a std::shared_ptr. It
 // keeps a strong self-reference (self_) so it stays alive across libuv callbacks
@@ -30,34 +31,20 @@
 #include <string>
 
 #include "llhttp.h"
+#include "transport.h"  // HttpRequest, Limits, Headers, RequestHandler
 
-namespace bf::http {
+namespace bf::http_server {
 
-class Router;
-
-// Transport limits/timeouts. Body size and the idle timeout are CLI-tunable;
-// the header caps are fixed hardening constants (see conn.cc).
-struct Limits {
-  size_t max_body_bytes = 1u << 20;  // 1 MiB request body cap (--max-body)
-  uint64_t io_timeout_ms = 30'000;   // header/body read + idle keep-alive (--io-timeout)
-};
-
-// A fully-parsed HTTP request handed to the Router. method/path are what routing
-// keys off; query carries the raw string after '?' (for ?cycle=); body is the
-// raw request body (may be empty).
-struct HttpRequest {
-  std::string method;
-  std::string path;
-  std::string query;
-  std::string body;
-  bool keep_alive = false;
-};
+// Post-write behavior for a queued write: close the connection, reset it for the
+// next keep-alive request, or (an open stream) leave it open for more events.
+enum class WriteMode { kClose, kKeepAlive, kStream };
 
 class Connection : public std::enable_shared_from_this<Connection> {
  public:
   // Create a connection on `loop`, initialize its TCP handle, and arm the
   // idle timer. The caller then uv_accept()s into tcp() and calls Start().
-  static std::shared_ptr<Connection> Create(uv_loop_t* loop, Router& router, const Limits& limits);
+  static std::shared_ptr<Connection> Create(uv_loop_t* loop, RequestHandler& handler,
+                                            const Limits& limits);
 
   ~Connection();
 
@@ -82,14 +69,32 @@ class Connection : public std::enable_shared_from_this<Connection> {
   // means the client went away while the worker ran, so the response is dropped.
   bool IsAlive() const { return !closing_; }
 
-  // Write one HTTP response (status line + headers + JSON body) and, when
+  // Write one complete HTTP response (status line + headers + body) and, when
   // keep_alive is set and the write succeeds, reset for the next request;
-  // otherwise close the connection after the write drains. A non-zero elapsed_ms
-  // adds an X-Elapsed-Ms header (the query's compute cost). Loop thread only.
+  // otherwise close the connection after the write drains. content_type sets the
+  // Content-Type header; extra_headers are appended verbatim after the framing
+  // headers. A non-zero elapsed_ms adds an X-Elapsed-Ms header. Loop thread only.
+  void WriteResponse(int status, const std::string& body, bool keep_alive,
+                     const std::string& content_type, const Headers& extra_headers,
+                     uint32_t elapsed_ms = 0);
+
+  // Convenience overload for the common JSON response: Content-Type
+  // application/json, no extra headers.
   void WriteResponse(int status, const std::string& body, bool keep_alive, uint32_t elapsed_ms = 0);
 
+  // Begin an open, close-delimited response stream: write the status line +
+  // headers with Connection: keep-alive and NO Content-Length, then stream
+  // chunks via WriteEvent until the client disconnects or the idle timer fires.
+  // Used for a text/event-stream GET (SSE). Once streaming, OnWriteDone neither
+  // resets for a next request nor closes on write completion. Loop thread only.
+  void BeginStream(int status, const std::string& content_type, const Headers& extra_headers);
+
+  // Write one raw chunk to an open stream (an SSE "data: ...\n\n" event or a
+  // ": keepalive\n\n" comment). No-op unless a stream is open. Loop thread only.
+  void WriteEvent(const std::string& chunk);
+
  private:
-  Connection(Router& router, const Limits& limits);
+  Connection(RequestHandler& handler, const Limits& limits);
 
   // Begin closing the connection (idempotent). Stops the timer and closes the
   // handles; the object is freed once every handle's close callback has run and
@@ -103,8 +108,12 @@ class Connection : public std::enable_shared_from_this<Connection> {
   // (Re)arm the one-shot idle timer to the configured io-timeout.
   void RestartTimer();
 
-  // Dispatch the assembled request to the Router (loop thread).
+  // Dispatch the assembled request to the RequestHandler (loop thread).
   void Dispatch();
+
+  // Low-level write of an already-built payload. `mode` decides post-write
+  // behavior: keep-alive reset, close, or (streaming) leave the connection open.
+  void WriteRaw(std::string payload, WriteMode mode);
 
   // llhttp settings wiring + the static trampolines it calls back into.
   static void SetupParser(Connection& conn);
@@ -123,8 +132,9 @@ class Connection : public std::enable_shared_from_this<Connection> {
   static void OnWriteDone(uv_write_t* req, int status);
   static void OnHandleClosed(uv_handle_t* h);
 
-  // Record the just-finished header field/value pair: enforce the header caps
-  // and note a Transfer-Encoding header (which we reject).
+  // Record the just-finished header field/value pair: enforce the header caps,
+  // note a Transfer-Encoding header (which we reject), and store the pair so the
+  // handler can read request headers (e.g. Accept).
   void FinishHeaderPair();
 
   // Whether the accumulated headers (finalized pairs + the field/value currently
@@ -136,7 +146,7 @@ class Connection : public std::enable_shared_from_this<Connection> {
   uv_timer_t timer_{};
   llhttp_t parser_{};
   llhttp_settings_t settings_{};
-  Router& router_;
+  RequestHandler& handler_;
   Limits limits_;
 
   // Self-reference keeping the object alive between callbacks; reset when the
@@ -156,11 +166,13 @@ class Connection : public std::enable_shared_from_this<Connection> {
   size_t header_bytes_ = 0;
   int header_count_ = 0;
   bool saw_transfer_encoding_ = false;
+  Headers headers_;  // finalized (lower-cased name, value) pairs
   std::string body_;
   bool request_ready_ = false;
   bool keep_alive_ = false;
   bool awaiting_response_ = false;  // request dispatched; ignore further input bytes
   bool pipelined_ = false;          // a second request began in the same buffer; close after reply
+  bool streaming_ = false;          // an open stream is active; writes leave the connection open
   int reject_status_ = 0;           // non-zero => a hardening limit tripped; response + close
   std::string reject_message_;      // human-readable reason paired with reject_status_
 
@@ -169,4 +181,4 @@ class Connection : public std::enable_shared_from_this<Connection> {
   char read_buf_[64 * 1024];
 };
 
-}  // namespace bf::http
+}  // namespace bf::http_server
