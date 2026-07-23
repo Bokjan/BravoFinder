@@ -5,7 +5,6 @@
 
 #include "core/domain/procedure.h"
 #include "core/graph/astar.h"
-#include "io/loaders/xplane12/cifp/cifp_parser.h"
 
 namespace bf {
 

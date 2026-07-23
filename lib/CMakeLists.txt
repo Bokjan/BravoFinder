@@ -42,8 +42,7 @@ add_library(bravofinder STATIC
   io/loaders/dfd1/dfd1_loader.cc
   io/loaders/dfd2/dfd2_loader.cc
   io/loaders/xplane12/xplane12_loader.cc
-  io/loaders/xplane12/cifp/cifp_parser.cc
-  io/loaders/xplane12/cifp/procedure_connector.cc
+  io/loaders/xplane12/cifp_parser.cc
   io/cache/graph_codec.cc
   io/cache/bfdb_inventory.cc
   io/cache/bfdb_naming.cc
@@ -51,6 +50,7 @@ add_library(bravofinder STATIC
   io/cache/nav_detail_codec.cc
   io/cache/unified_cache.cc
   io/graph_builder.cc
+  io/procedure_connector.cc
   io/nav_database.cc
   io/nav_database_routing.cc
   io/nav_database_parse.cc
@@ -133,7 +133,7 @@ if(BRAVOFINDER_INSTALL)
   install(FILES io/cache/cifp_codec.h                  DESTINATION include/bf/io/cache)
   install(FILES io/cache/nav_detail_codec.h            DESTINATION include/bf/io/cache)
   install(FILES io/cache/pread_file.h                 DESTINATION include/bf/io/cache)
-  install(FILES io/loaders/xplane12/cifp/cifp_parser.h DESTINATION include/bf/io/loaders/xplane12/cifp)
+  install(FILES io/loaders/xplane12/cifp_parser.h      DESTINATION include/bf/io/loaders/xplane12)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/core/version.h
           DESTINATION include/bf/core)
 endif()

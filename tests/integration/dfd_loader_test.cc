@@ -16,7 +16,7 @@
 #include "io/loaders/dfd1/dfd1_loader.h"
 #include "io/loaders/dfd2/dfd2_loader.h"
 #include "io/loaders/loader_registry.h"
-#include "io/loaders/xplane12/cifp/cifp_parser.h"
+#include "io/loaders/xplane12/cifp_parser.h"
 #include "test_dfd1.h"
 #include "test_dfd2.h"
 #include "test_xplane12.h"

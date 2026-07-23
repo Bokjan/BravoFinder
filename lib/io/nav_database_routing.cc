@@ -15,8 +15,8 @@
 #include "core/routing/route_string.h"
 #include "core/util/string_util.h"
 #include "io/graph_builder.h"
-#include "io/loaders/xplane12/cifp/procedure_connector.h"
 #include "io/nav_database.h"
+#include "io/procedure_connector.h"
 
 namespace bf {
 

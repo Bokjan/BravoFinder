@@ -9,7 +9,7 @@
 
 #include "core/result.h"
 #include "io/cache/pread_file.h"
-#include "io/loaders/xplane12/cifp/cifp_parser.h"
+#include "io/loaders/xplane12/cifp_parser.h"
 
 namespace bf {
 

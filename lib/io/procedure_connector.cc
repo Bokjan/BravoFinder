@@ -1,4 +1,4 @@
-#include "io/loaders/xplane12/cifp/procedure_connector.h"
+#include "io/procedure_connector.h"
 
 #include <algorithm>
 #include <unordered_map>
