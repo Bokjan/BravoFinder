@@ -105,6 +105,19 @@ void AppendHeaderSafe(std::string& out, std::string_view v) {
   }
 }
 
+// Append a header NAME to `out`: drops CR / LF / NUL like AppendHeaderSafe and
+// additionally any space or ':'. Either of those in a name would split the
+// "name: value" framing below and forge a header. Header names are RFC 9110
+// tokens (no space, no colon), so a well-formed name is unchanged; this only
+// hardens the transport core against a future caller passing a half-trusted name.
+void AppendHeaderNameSafe(std::string& out, std::string_view name) {
+  for (const char c : name) {
+    if (c != '\r' && c != '\n' && c != '\0' && c != ' ' && c != ':') {
+      out += c;
+    }
+  }
+}
+
 // RFC 1123 date for the Date header, e.g. "Sun, 06 Nov 1994 08:49:37 GMT".
 std::string HttpDate() {
   const std::time_t now = std::time(nullptr);
@@ -123,7 +136,7 @@ std::string HttpDate() {
 void AppendExtraHeaders(std::string& out, const Headers& extra_headers) {
   for (const auto& [name, value] : extra_headers) {
     out += "\r\n";
-    AppendHeaderSafe(out, name);
+    AppendHeaderNameSafe(out, name);
     out += ": ";
     AppendHeaderSafe(out, value);
   }
@@ -362,13 +375,21 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
 
 void Connection::OnTimeout(uv_timer_t* t) {
   auto* conn = static_cast<Connection*>(t->data);
-  // A slow or idle connection (slowloris, or an idle keep-alive). When no
-  // request is in flight, first answer 408 per RFC 9110 §15.5.7 (SHOULD) so a
-  // client learns why the connection dropped; the false keep_alive makes the
-  // write close afterwards. If a request is already dispatched (awaiting_response_),
-  // writing here would race the work-completion write, so just close -- the
-  // completion callback will find IsAlive() false and drop its response.
-  if (!conn->closing_ && !conn->awaiting_response_) {
+  if (conn->awaiting_response_) {
+    // A request is already dispatched: an offloaded route computation is running
+    // on the threadpool, or an SSE stream is open. The read phase is over, so the
+    // idle timer no longer applies -- it bounds slow/idle READS and keep-alive
+    // idle, NOT compute. The route computation is bounded (k is capped, the graph
+    // is fixed), so the worker will finish and its completion callback writes the
+    // response on the loop thread; the in-flight work holds a strong self-
+    // reference, so the connection cannot leak meanwhile. Closing here would race
+    // that write and silently drop a valid-but-slow response, so leave it be.
+    return;
+  }
+  if (!conn->closing_) {
+    // Slow or idle client with nothing dispatched (slowloris, or an idle keep-
+    // alive): answer 408 per RFC 9110 §15.5.7 (SHOULD) so the client learns why
+    // the connection dropped; the false keep_alive makes the write close after.
     conn->awaiting_response_ = true;
     conn->WriteResponse(kStatusRequestTimeout, JsonError("request timeout"), false);
     return;

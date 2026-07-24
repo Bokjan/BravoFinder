@@ -61,21 +61,49 @@ std::string JsonRpcFramingError(int code, const std::string& message) {
 // returns it on initialize but does not track it (each request is independent,
 // since the Dispatcher holds no per-session state).
 std::string GenerateSessionId() {
-  std::random_device rd;
-  const auto word = [&rd]() -> uint64_t {
-    return (static_cast<uint64_t>(rd()) << 32) | static_cast<uint64_t>(rd());
-  };
-  const uint64_t hi = word();
-  const uint64_t lo = word();
+  // A thread_local engine seeded once from random_device, rather than
+  // constructing a fresh std::random_device per call: that construction can be
+  // slow or even blocking on some libstdc++ configurations. The id is stateless
+  // (never tracked server-side) and not a security token, so a per-thread PRNG
+  // is ample.
+  thread_local std::mt19937_64 engine(std::random_device{}());
+  const uint64_t hi = engine();
+  const uint64_t lo = engine();
   char buf[33];
   std::snprintf(buf, sizeof(buf), "%016llx%016llx", static_cast<unsigned long long>(hi),
                 static_cast<unsigned long long>(lo));
   return std::string(buf, 32);
 }
 
+// Encode `json` as the data of a single SSE event. Each line gets its own
+// "data:" field (SSE folds them back with '\n'), so the frame stays well-formed
+// even if the body ever spans multiple lines -- today rapidjson's Writer emits
+// compact single-line JSON, but this does not silently break if that changes.
+std::string SseData(const std::string& json) {
+  std::string out;
+  out.reserve(json.size() + 16);
+  size_t start = 0;
+  while (start <= json.size()) {
+    const size_t nl = json.find('\n', start);
+    const size_t end = nl == std::string::npos ? json.size() : nl;
+    out += "data: ";
+    out.append(json, start, end - start);
+    out += '\n';
+    if (nl == std::string::npos) {
+      break;
+    }
+    start = nl + 1;
+  }
+  out += '\n';  // blank line terminates the event
+  return out;
+}
+
 // Whether the request's Accept header opts into an SSE (text/event-stream)
 // response. When present, the server replies with a single buffered SSE event;
-// otherwise it replies with an application/json body.
+// otherwise it replies with an application/json body. A plain substring match
+// (no q-value / "*/*" handling) is deliberate: MCP clients send an explicit
+// "Accept: application/json, text/event-stream", so full content negotiation
+// would be dead complexity here.
 bool WantsSse(const http_server::HttpRequest& req) {
   return req.Header("accept").find("text/event-stream") != std::string::npos;
 }
@@ -121,7 +149,7 @@ http_server::WorkResult BuildMcpWorkResult(const Dispatcher& dispatcher,
   out.status = http_server::kStatusOk;
   if (wants_sse) {
     out.content_type = "text/event-stream";
-    out.body = "data: " + r.body + "\n\n";
+    out.body = SseData(r.body);
   } else {
     out.content_type = "application/json";
     out.body = r.body;

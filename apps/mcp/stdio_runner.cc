@@ -51,6 +51,12 @@ LineResult ReadBoundedLine(std::istream& in, std::string& out, size_t max_len) {
   while (in.get(ch)) {
     saw_any = true;
     if (ch == '\n') {
+      // Strip a CRLF client's trailing '\r' so the caller sees the same line a
+      // '\n'-only client would send. rapidjson tolerates trailing whitespace, so
+      // this is defensive today, but keeps framing exact if that ever tightens.
+      if (!out.empty() && out.back() == '\r') {
+        out.pop_back();
+      }
       return oversized ? LineResult::kOversized : LineResult::kOk;
     }
     if (out.size() < max_len) {
