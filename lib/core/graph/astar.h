@@ -44,8 +44,11 @@ class SearchWorkspace;
 // every parallel edge is blocked). Because every constraint is a deterministic
 // function of the edge, this reproduces the search's choice, so a route's leg
 // labels (airway, distance) match the path the search actually cost -- not the
-// merely shortest-by-distance parallel edge.
-const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options);
+// merely shortest-by-distance parallel edge. When `out_cost` is non-null it
+// receives the selected edge's effective cost (distance_nm + penalties), so a
+// caller re-costing a path need not re-evaluate the winner's constraints.
+const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options,
+                            double* out_cost = nullptr);
 
 // Find the shortest path from `start` to `goal` using A* with an admissible
 // great-circle heuristic. Soft penalties only add cost, so the geographic

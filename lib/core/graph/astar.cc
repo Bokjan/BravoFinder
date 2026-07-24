@@ -38,7 +38,8 @@ bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coor
 
 }  // namespace
 
-const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options) {
+const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options,
+                            double* out_cost) {
   const GraphEdge* best = nullptr;
   double best_cost = kInfinity;
   for (const GraphEdge* e = graph.EdgesBegin(from); e != graph.EdgesEnd(from); ++e) {
@@ -54,6 +55,9 @@ const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const Searc
       best_cost = total;
       best = e;
     }
+  }
+  if (out_cost != nullptr && best != nullptr) {
+    *out_cost = best_cost;
   }
   return best;
 }

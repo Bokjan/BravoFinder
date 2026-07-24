@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -25,53 +24,29 @@ inline int64_t EdgeKey(int from, int to) {
 // usable edge to the next vertex, or is blocked by a constraint on every
 // parallel edge. For each step, when several parallel edges connect u->v (the
 // same airway over different flight-level bands, or two airways sharing both
-// endpoints), the cheapest allowed one is chosen -- matching how A* relaxes the
-// edge with the least (distance_nm + soft penalty), rather than the first
-// matching edge (which could be the wrong band and mis-cost the candidate).
+// endpoints), SelectEdge picks the cheapest allowed one by (distance_nm + soft
+// penalty) -- the SAME routine A* relaxation and route-leg labeling use, so this
+// re-costing cannot drift from the search's own edge choice (a hand-rolled copy
+// of that selection previously risked exactly that drift).
 bool CostOfPath(const NavGraph& graph, const std::vector<int>& path, const SearchOptions& options,
                 double& cost, double& distance) {
   cost = 0.0;
   distance = 0.0;
-  const bool use_constraints = !options.constraints.empty() && options.request != nullptr;
   for (size_t i = 0; i + 1 < path.size(); ++i) {
     const int u = path[i];
     const int v = path[i + 1];
-    // Among all parallel u->v edges, pick the cheapest allowed one (A* does the
-    // same on relaxation); if none is allowed the path is invalid.
-    double best_total = std::numeric_limits<double>::infinity();
-    double best_dist = 0.0;
-    bool found = false;
-    for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
-      if (e->to != v) {
-        continue;
-      }
-      double extra = 0.0;
-      if (use_constraints) {
-        const EdgeContext ctx{*e, graph.CoordOf(u), graph.CoordOf(v)};
-        for (const Constraint* c : options.constraints) {
-          const EdgeVerdict verdict = c->Evaluate(ctx, *options.request);
-          if (!verdict.allowed) {
-            extra = std::numeric_limits<double>::infinity();  // edge blocked
-            break;
-          }
-          extra += verdict.extra_cost;
-        }
-      }
-      if (extra == std::numeric_limits<double>::infinity()) {
-        continue;  // this parallel edge is blocked; try the next
-      }
-      const double total = e->distance_nm + extra;
-      if (total < best_total) {
-        best_total = total;
-        best_dist = e->distance_nm;
-        found = true;
-      }
-    }
-    if (!found) {
+    // Delegate the parallel-edge choice to SelectEdge -- the SAME routine A*
+    // relaxation and route-leg labeling use -- so this re-costing can never
+    // drift from the search's own edge selection. SelectEdge hands back the
+    // winner's effective cost (distance + penalties) via out_cost, so no
+    // constraint is re-evaluated here.
+    double edge_cost = 0.0;
+    const GraphEdge* e = SelectEdge(graph, u, v, options, &edge_cost);
+    if (e == nullptr) {
       return false;  // no allowed edge u->v
     }
-    cost += best_total;
-    distance += best_dist;
+    cost += edge_cost;
+    distance += e->distance_nm;
   }
   return true;
 }
