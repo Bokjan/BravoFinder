@@ -171,6 +171,18 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
       !count_fits(airway_count, 8) || !count_fits(msa_count, 28)) {
     return bad("corrupt .bfdb: section counts exceed section size");
   }
+  // Each fuse above bounds one count against the whole remaining section without
+  // debiting the others, so a crafted header could pass all five yet demand far
+  // more than `avail` in total (each resize below allocates independently). Cap
+  // the combined minimum too. Products fit in size_t: every count is a uint32
+  // and per_elem is tiny, on a 64-bit size_t.
+  const size_t min_body_bytes =
+      static_cast<size_t>(v) * 34 + static_cast<size_t>(airport_count) * 4 +
+      static_cast<size_t>(e) * 15 + static_cast<size_t>(airway_count) * 8 +
+      static_cast<size_t>(msa_count) * 28;
+  if (min_body_bytes > avail) {
+    return bad("corrupt .bfdb: combined section counts exceed section size");
+  }
 
   // Vertex records: coord + ident refs + flags + kind, one per vertex. Ident
   // refs are resolved against the global string pool after the body is read.

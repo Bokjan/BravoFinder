@@ -80,7 +80,7 @@ Result<NavDetailArchive> NavDetailCodec::Decode(const char* data, size_t size, c
 
   // Sanity-check counts before allocating.
   constexpr size_t kNavaidRecordMin = 8 + 8 + 1 + 4 + 4 + 8 + 8;            // 41 bytes
-  constexpr size_t kHoldRecordMin = 8 + 8 + 8 + 8 + 8 + 8 + 1 + 4 + 4 + 4;  // 65 bytes
+  constexpr size_t kHoldRecordMin = 8 + 8 + 8 + 8 + 8 + 8 + 1 + 4 + 4 + 4;  // 61 bytes
   if (static_cast<size_t>(navaid_count) > r.remaining() / kNavaidRecordMin) {
     return bad("corrupt nav detail section: navaid count exceeds section");
   }
@@ -150,6 +150,12 @@ Result<NavDetailArchive> NavDetailCodec::Decode(const char* data, size_t size, c
 
   if (!refs_ok) {
     return bad("corrupt nav detail section: string reference out of range");
+  }
+  // A well-formed section is consumed exactly; leftover bytes mean a count was
+  // under-read (a corrupt/half-written same-version file), so reject it (mirrors
+  // the graph section's trailing-byte guard).
+  if (r.remaining() != 0) {
+    return bad("corrupt nav detail section: trailing bytes");
   }
 
   archive.Finalize();

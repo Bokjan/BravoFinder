@@ -224,7 +224,14 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   };
   auto readStr = [&](std::string& s) {
     uint32_t len = 0;
-    if (!readU32(len) || static_cast<std::streamoff>(len) > file_size) {
+    if (!readU32(len)) {
+      return false;
+    }
+    // Bound the length by the bytes still ahead of the stream cursor, not the
+    // whole file: len <= file_size can still be larger than what remains after
+    // the current position, letting readN resize(len) before failing at EOF.
+    const std::streamoff remaining = file_size - static_cast<std::streamoff>(f.tellg());
+    if (static_cast<std::streamoff>(len) > remaining) {
       return false;
     }
     return readN(s, len);
@@ -255,7 +262,13 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     return bad("corrupt .bfdb header");
   }
   uint32_t pool_len = 0;
-  if (!readU32(pool_len) || static_cast<std::streamoff>(pool_len) > file_size) {
+  if (!readU32(pool_len)) {
+    return bad("corrupt .bfdb header");
+  }
+  // Bound by the bytes remaining after the cursor, not the whole file (the pool
+  // and every section body still lie ahead, so pool_len can never exceed this).
+  const std::streamoff pool_remaining = file_size - static_cast<std::streamoff>(f.tellg());
+  if (static_cast<std::streamoff>(pool_len) > pool_remaining) {
     return bad("corrupt .bfdb: pool length exceeds file");
   }
 

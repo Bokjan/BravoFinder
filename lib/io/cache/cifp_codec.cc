@@ -152,6 +152,12 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
   if (!br.ok() || !refs_ok) {
     return std::nullopt;
   }
+  // A well-formed segment body is consumed exactly; leftover bytes mean a count
+  // was under-read (a corrupt/half-written same-version file), so reject it
+  // (mirrors the graph / nav-detail section trailing-byte guards).
+  if (br.remaining() != 0) {
+    return std::nullopt;
+  }
   return data_out;
 }
 
@@ -267,6 +273,14 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
     // 64-bit target).
     if (seg_rel > section_length || seg_len > section_length - seg_rel) {
       return bad("corrupt CIFP section: segment reference out of range");
+    }
+    // A non-empty segment must also start at or after the count + directory
+    // region; a seg_rel pointing into the directory would alias directory bytes
+    // as a segment body. Encode never emits this -- it only guards a forged or
+    // corrupt same-version file (the upper-bound check above misses it).
+    const uint64_t body_start = 4 + static_cast<uint64_t>(airport_count) * kDirEntrySize;
+    if (seg_len > 0 && seg_rel < body_start) {
+      return bad("corrupt CIFP section: segment overlaps directory");
     }
     const uint64_t abs_off = section_offset + seg_rel;
     std::string icao = archive.pool_.substr(icao_off, icao_len);
