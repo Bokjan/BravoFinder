@@ -49,7 +49,8 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS": "/MP /W3 /WX /EHsc /DNOMINMAX"
+        "CMAKE_C_FLAGS": "/MP /FS /DNOMINMAX",
+        "CMAKE_CXX_FLAGS": "/MP /FS /W3 /WX /EHsc /DNOMINMAX"
       }
     },
     {
@@ -58,7 +59,8 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_FLAGS": "/MP /O2 /W3 /EHsc /DNOMINMAX"
+        "CMAKE_C_FLAGS": "/MP /FS /DNOMINMAX",
+        "CMAKE_CXX_FLAGS": "/MP /FS /O2 /W3 /EHsc /DNOMINMAX"
       }
     }
   ],
