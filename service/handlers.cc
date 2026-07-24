@@ -29,12 +29,30 @@ namespace {
 // produced inside the typed entries).
 constexpr int kBadRequest = 400;
 
-// Parse a string-array argument. Returns nullopt if missing or malformed.
+// Max entries allowed in any request ID array (forced_points, avoid_waypoints,
+// avoid_airways, lookup ids). The only other size bound is the 1 MiB body cap,
+// under which a single request could still ship tens of thousands of short
+// idents; each drives graph lookups / per-edge ban checks, an asymmetric-cost
+// vector. 256 far exceeds any real "force via / avoid these" list.
+constexpr size_t kMaxIdListSize = 256;
+
+// Max accepted flight level (hundreds of feet). GetInt() otherwise accepts values
+// up to ~2.1e9, which are physically meaningless; FL600 (60,000 ft) is already
+// above any civil cruise altitude.
+constexpr int kMaxFl = 600;
+
+// Parse a string-array argument. Returns nullopt if the member is absent OR
+// malformed (not an array, a non-string element, or more than kMaxIdListSize
+// entries). Callers that need to tell "absent" (skip) from "present but bad"
+// (reject) check HasMember themselves before deciding.
 std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args, const char* key) {
   if (!args.HasMember(key) || !args[key].IsArray()) {
     return std::nullopt;
   }
   const rapidjson::Value& arr = args[key];
+  if (arr.Size() > kMaxIdListSize) {
+    return std::nullopt;  // over the cap: treat as malformed so callers reject it
+  }
   std::vector<std::string> ids;
   ids.reserve(arr.Size());
   for (const rapidjson::Value& v : arr.GetArray()) {
@@ -53,7 +71,7 @@ QueryHandler MakeLookupAdapter(Fn fn) {
   return [fn](const rapidjson::Value& args, const NavDatabase& db) -> HandlerResult {
     auto ids = ParseIdList(args, "ids");
     if (!ids) {
-      return {JsonError("ids (array of strings) is required"), kBadRequest};
+      return {JsonError("ids (array of at most 256 strings) is required"), kBadRequest};
     }
     return fn(db, *ids, OutputFormat::kJson);
   };
@@ -89,6 +107,12 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
       if (min_fl < 0) {
         return {JsonError("min_fl and max_fl must be non-negative"), kBadRequest};
       }
+      // Bound the top of the range: an absurdly high FL is physically
+      // meaningless and only invites overflow-adjacent inputs. min_fl <= max_fl
+      // is already enforced, so capping max_fl bounds both.
+      if (max_fl > kMaxFl) {
+        return {JsonError("min_fl and max_fl must not exceed 600"), kBadRequest};
+      }
       request.altitude = bf::FlRange{min_fl, max_fl};
     }
   }
@@ -105,7 +129,13 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     // mapping an unknown level to the no-preference default is the accepted
     // fallback rather than a hard error.
   }
-  if (args.HasMember("k") && args["k"].IsInt()) {
+  if (args.HasMember("k")) {
+    // A present-but-non-integer k (e.g. 3.5, or the string "3") must be rejected,
+    // not silently dropped to the default: the caller clearly meant to set k, and
+    // ignoring it would hand back one route where several were asked for.
+    if (!args["k"].IsInt()) {
+      return {JsonError("k must be an integer"), kBadRequest};
+    }
     request.k = args["k"].GetInt();
   }
   // The schema declares minimum:1, but enforce it server-side too: Yen K-shortest
@@ -134,16 +164,31 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   if (args.HasMember("arrival_star") && args["arrival_star"].IsString()) {
     request.arrival_star = args["arrival_star"].GetString();
   }
-  if (auto v = ParseIdList(args, "avoid_waypoints")) {
+  // For the optional ID lists, tell "absent" (skip) from "present but bad"
+  // (reject): a present list that is malformed or over the 256 cap is a 400, not
+  // a silent no-op that would drop a user's avoid/force intent.
+  if (args.HasMember("avoid_waypoints")) {
+    auto v = ParseIdList(args, "avoid_waypoints");
+    if (!v) {
+      return {JsonError("avoid_waypoints must be an array of at most 256 strings"), kBadRequest};
+    }
     request.avoid_waypoints = std::move(*v);
   }
-  if (auto v = ParseIdList(args, "avoid_airways")) {
+  if (args.HasMember("avoid_airways")) {
+    auto v = ParseIdList(args, "avoid_airways");
+    if (!v) {
+      return {JsonError("avoid_airways must be an array of at most 256 strings"), kBadRequest};
+    }
     request.avoid_airways = std::move(*v);
   }
   if (args.HasMember("random_seed") && args["random_seed"].IsUint()) {
     request.random_seed = args["random_seed"].GetUint();
   }
-  if (auto v = ParseIdList(args, "forced_points")) {
+  if (args.HasMember("forced_points")) {
+    auto v = ParseIdList(args, "forced_points");
+    if (!v) {
+      return {JsonError("forced_points must be an array of at most 256 strings"), kBadRequest};
+    }
     request.forced_points = std::move(*v);
   }
 
