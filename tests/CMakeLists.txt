@@ -61,6 +61,12 @@ if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread" AND IS_ABSOLUTE "${_tsan_lib}")
   set_property(TARGET bf_tests PROPERTY CROSSCOMPILING_EMULATOR
     "${CMAKE_COMMAND};-E;env;LD_PRELOAD=${_tsan_lib}")
 elseif(CMAKE_CXX_FLAGS MATCHES "-fsanitize" AND IS_ABSOLUTE "${_asan_lib}")
+  # Only one runtime is preloaded. For the debug preset's combined
+  # `-fsanitize=address,undefined`, preloading libasan alone is sufficient on
+  # GCC: its libasan bundles the UBSan runtime, so no separate libubsan preload
+  # is needed (and Clang links the UBSan runtime statically, needing no preload
+  # at all). A standalone `-fsanitize=undefined`-only build is not a preset we
+  # ship, so it is not special-cased here.
   set_property(TARGET bf_tests PROPERTY CROSSCOMPILING_EMULATOR
     "${CMAKE_COMMAND};-E;env;LD_PRELOAD=${_asan_lib}")
 endif()

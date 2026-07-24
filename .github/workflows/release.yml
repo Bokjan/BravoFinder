@@ -23,6 +23,10 @@ jobs:
             preset: release
             arch: x86_64
             archive: tar.gz
+          - os: ubuntu-24.04-arm   # GitHub arm64 Linux runner
+            preset: release
+            arch: arm64
+            archive: tar.gz
           - os: macos-15          # Apple Silicon runner -> arm64 only (see plan §3.4)
             preset: release
             arch: arm64
@@ -57,8 +61,8 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/ccache
-          key: ccache-release-Linux-v1
-          restore-keys: ccache-release-Linux-v1
+          key: ccache-release-Linux-${{ matrix.arch }}-v1
+          restore-keys: ccache-release-Linux-${{ matrix.arch }}-v1
 
       - name: Cache ccache (macOS)
         if: runner.os == 'macOS'
@@ -93,7 +97,7 @@ jobs:
       - name: Configure
         run: >
           cmake --preset ${{ matrix.preset }}
-          ${{ runner.os != 'Windows' && '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache' || '' }}
+          ${{ runner.os != 'Windows' && '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache' || '' }}
 
       - name: Build
         # Auto-detect build parallelism per runner instead of relying on the

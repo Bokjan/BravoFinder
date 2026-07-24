@@ -65,30 +65,25 @@
   "buildPresets": [
     {
       "name": "debug",
-      "configurePreset": "debug",
-      "jobs": 0
+      "configurePreset": "debug"
     },
     {
       "name": "release",
-      "configurePreset": "release",
-      "jobs": 0
+      "configurePreset": "release"
     },
     {
       "name": "tsan",
-      "configurePreset": "tsan",
-      "jobs": 0
+      "configurePreset": "tsan"
     },
     {
       "name": "windows-debug",
       "configurePreset": "windows-debug",
-      "configuration": "Debug",
-      "jobs": 0
+      "configuration": "Debug"
     },
     {
       "name": "windows-release",
       "configurePreset": "windows-release",
-      "configuration": "Release",
-      "jobs": 0
+      "configuration": "Release"
     }
   ],
   "testPresets": [
@@ -97,9 +92,6 @@
       "configurePreset": "debug",
       "output": {
         "outputOnFailure": true
-      },
-      "execution": {
-        "jobs": 0
       }
     },
     {
@@ -108,9 +100,6 @@
       "configurePreset": "debug",
       "output": {
         "outputOnFailure": true
-      },
-      "execution": {
-        "jobs": 0
       },
       "filter": {
         "exclude": {
@@ -125,9 +114,6 @@
       "output": {
         "outputOnFailure": true
       },
-      "execution": {
-        "jobs": 0
-      },
       "filter": {
         "exclude": {
           "label": "integration"
@@ -139,9 +125,6 @@
       "configurePreset": "release",
       "output": {
         "outputOnFailure": true
-      },
-      "execution": {
-        "jobs": 0
       }
     },
     {

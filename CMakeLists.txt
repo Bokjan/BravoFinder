@@ -104,6 +104,13 @@ set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 # project's C++ -Werror (CMAKE_C_FLAGS is unset, exactly like the SQLite
 # amalgamation); we additionally mark their headers SYSTEM below so the C++ that
 # includes them stays clean under -Wpedantic -Werror. Pin exact tags.
+#
+# Force static for BOTH C libs up front: set BUILD_SHARED_LIBS OFF before either
+# FetchContent_MakeAvailable so libuv also honors it (it builds only uv_a, the
+# static target we consume, and skips the shared uv target). Setting it only
+# before llhttp -- as this used to -- left libuv's static-only behavior implicit
+# and order-fragile.
+set(BUILD_SHARED_LIBS OFF)
 set(LIBUV_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LIBUV_BUILD_BENCH OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
@@ -113,8 +120,8 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(libuv)
 
 # llhttp: build the static library and alias it as llhttp::llhttp (its CMake
-# points the alias at llhttp_static when the shared build is off).
-set(BUILD_SHARED_LIBS OFF)
+# points the alias at llhttp_static when the shared build is off; BUILD_SHARED_LIBS
+# is already OFF from above).
 set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
   llhttp
