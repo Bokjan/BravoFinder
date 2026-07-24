@@ -419,8 +419,13 @@ Result<NavData> Dfd1Loader::LoadNavData(const std::string& source_dir) const {
     if (row.value()) {
       const std::string cyc = ColumnText(s.value().get(), 0);
       unsigned int cycle = 0;
-      std::from_chars(cyc.data(), cyc.data() + cyc.size(), cycle);
-      data.cycle = cycle;
+      // A non-numeric (or partially numeric) current_airac leaves cycle at 0,
+      // which means "no AIRAC provenance", rather than a half-parsed value.
+      // Check from_chars's result instead of discarding it.
+      const auto [ptr, ec] = std::from_chars(cyc.data(), cyc.data() + cyc.size(), cycle);
+      if (ec == std::errc{} && ptr == cyc.data() + cyc.size()) {
+        data.cycle = cycle;
+      }
     }
   }
 
@@ -504,10 +509,16 @@ struct ProcCols {
 // hundredths; turn_direction is 'L'/'R' text; speed_limit is an integer in knots.
 void FillProcExtras(sqlite3_stmt* stmt, const ProcCols& c, ProcedureLeg& leg) {
   const double rnp = ColumnDouble(stmt, c.rnp);
-  leg.rnp_centinm = rnp > 0.0 ? static_cast<uint16_t>(std::lround(rnp * 100.0)) : 0;
+  // rnp_centinm and speed_limit_kt are uint16_t. Guard the narrowing so an
+  // out-of-range DFD value (negative, or beyond 65535) clamps to the field range
+  // instead of silently wrapping. Real data is well within bounds (RNP <= ~15 nm,
+  // speeds <= ~350 kt); this only hardens against a corrupt/unexpected source row.
+  const long rnp_centi = rnp > 0.0 ? std::lround(rnp * 100.0) : 0;
+  leg.rnp_centinm = static_cast<uint16_t>(std::clamp<long>(rnp_centi, 0, 65535));
   const std::string turn = ColumnText(stmt, c.turn_dir);
   leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
-  leg.speed_limit_kt = static_cast<uint16_t>(ColumnInt(stmt, c.speed_limit));
+  const int speed = ColumnInt(stmt, c.speed_limit);
+  leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(speed, 0, 65535));
 }
 
 // Append legs/runways from one procedure table into `out` (per-airport). `type`

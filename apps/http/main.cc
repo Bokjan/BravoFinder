@@ -144,6 +144,12 @@ int main(int argc, char** argv) {
       },
       nullptr);
   uv_run(&loop, UV_RUN_DEFAULT);
-  uv_loop_close(&loop);
+  if (const int close_rc = uv_loop_close(&loop); close_rc != 0) {
+    // Nonzero (UV_EBUSY) means a handle outlived the drain above -- harmless at
+    // process exit, but a signal that the teardown missed something, so surface
+    // it rather than swallow a future drain regression.
+    std::cerr << "warning: uv_loop_close: " << uv_strerror(close_rc)
+              << " (a handle outlived the drain)\n";
+  }
   return 0;
 }

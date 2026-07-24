@@ -66,7 +66,9 @@ int RunHttp(bf::service::NavDatabaseRegistry& registry, const std::string& host,
   if (rc != 0) {
     std::cerr << "error: cannot listen on " << host << ":" << port << ": " << uv_strerror(rc)
               << "\n";
-    uv_loop_close(&loop);
+    if (const int close_rc = uv_loop_close(&loop); close_rc != 0) {
+      std::cerr << "warning: uv_loop_close: " << uv_strerror(close_rc) << "\n";
+    }
     return EXIT_FAILURE;
   }
   std::cerr << "bf-mcp (http) listening on " << host << ":" << port << " (" << cycle_count
@@ -95,7 +97,12 @@ int RunHttp(bf::service::NavDatabaseRegistry& registry, const std::string& host,
       },
       nullptr);
   uv_run(&loop, UV_RUN_DEFAULT);
-  uv_loop_close(&loop);
+  if (const int close_rc = uv_loop_close(&loop); close_rc != 0) {
+    // Nonzero (UV_EBUSY) means a handle outlived the drain -- harmless at exit,
+    // but surfaced rather than swallowed so a future drain regression is visible.
+    std::cerr << "warning: uv_loop_close: " << uv_strerror(close_rc)
+              << " (a handle outlived the drain)\n";
+  }
   return EXIT_SUCCESS;
 }
 

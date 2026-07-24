@@ -61,6 +61,10 @@ class [[nodiscard]] Result {
   // Access the error. Precondition: has_value() is false.
   const E& error() const& { return std::get<1>(data_); }
   E& error() & { return std::get<1>(data_); }
+  // Move the error out of an rvalue Result, so `std::move(r).error()` moves
+  // rather than copies -- error types can be heavy (message strings), and every
+  // `return Result::Err(std::move(other).error())` forwarding path hits this.
+  E&& error() && { return std::get<1>(std::move(data_)); }
 
   // Return the success value if present, otherwise the supplied fallback.
   T value_or(T fallback) const& { return has_value() ? std::get<0>(data_) : std::move(fallback); }
@@ -92,6 +96,7 @@ class [[nodiscard]] Result<void, E> {
   // Access the error. Precondition: has_value() is false.
   const E& error() const& { return std::get<1>(data_); }
   E& error() & { return std::get<1>(data_); }
+  E&& error() && { return std::get<1>(std::move(data_)); }
 
  private:
   explicit Result(std::monostate tag) : data_(std::in_place_index<0>, tag) {}
