@@ -66,6 +66,10 @@ void OnAfterWork(uv_work_t* req, int status) {
 
 void QueueWork(std::shared_ptr<Connection> conn, uv_loop_t* loop, std::function<WorkResult()> work,
                bool keep_alive, std::atomic<int>& inflight) {
+  // Bare new/delete here is the integer half of a libuv C-callback handoff, not
+  // an unmanaged allocation: uv_queue_work takes a raw uv_work_t* and, on a
+  // successful queue, OnAfterWork reclaims it via unique_ptr. On the failure
+  // path below (queue unavailable) nothing was queued, so we delete it directly.
   auto* w = new WorkRequest();
   w->conn = std::move(conn);
   w->work = std::move(work);

@@ -40,11 +40,23 @@ namespace bf::http_server {
 enum class WriteMode { kClose, kKeepAlive, kStream };
 
 class Connection : public std::enable_shared_from_this<Connection> {
+  // Passkey so make_shared can reach the constructor while external code still
+  // cannot: the constructor is public (make_shared needs that) but requires a
+  // Passkey token that only Connection can mint. This keeps Create() as the sole
+  // construction path without a bare `new`.
+  struct Passkey {
+    explicit Passkey() = default;
+  };
+
  public:
   // Create a connection on `loop`, initialize its TCP handle, and arm the
   // idle timer. The caller then uv_accept()s into tcp() and calls Start().
   static std::shared_ptr<Connection> Create(uv_loop_t* loop, RequestHandler& handler,
                                             const Limits& limits);
+
+  // Public only so make_shared can call it; the Passkey makes it effectively
+  // private (only Create() can construct one). Do not call directly.
+  Connection(Passkey, RequestHandler& handler, const Limits& limits);
 
   ~Connection();
 
@@ -94,8 +106,6 @@ class Connection : public std::enable_shared_from_this<Connection> {
   void WriteEvent(const std::string& chunk);
 
  private:
-  Connection(RequestHandler& handler, const Limits& limits);
-
   // Begin closing the connection (idempotent). Stops the timer and closes the
   // handles; the object is freed once every handle's close callback has run and
   // no work item still references it.

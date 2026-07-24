@@ -30,6 +30,7 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace bf::http_server {
@@ -70,9 +71,35 @@ const char* ReasonPhrase(int status) {
     case 503:
       return "Service Unavailable";
     default:
-      // An unmapped status is unexpected (every status we emit is listed above);
-      // a neutral phrase avoids a misleading "200 OK" style status line.
-      return "Error";
+      // An unmapped status is unexpected (every status we emit is listed above).
+      // Fall back by class so a future unmapped code still yields a sane phrase
+      // rather than a misleading "200 OK" style line or a bare "Error".
+      if (status < 200) {
+        return "Informational";
+      }
+      if (status < 300) {
+        return "OK";
+      }
+      if (status < 400) {
+        return "Redirection";
+      }
+      if (status < 500) {
+        return "Client Error";
+      }
+      return "Server Error";
+  }
+}
+
+// Append `v` to `out`, dropping any CR / LF / NUL byte. Header names and values
+// are concatenated into the response with raw string ops, so a stray \r\n in a
+// value would inject headers or split the response (HTTP response splitting).
+// Every current caller passes trusted content (hardcoded content types, a
+// hex-only session id), but the transport core must not rely on that.
+void AppendHeaderSafe(std::string& out, std::string_view v) {
+  for (const char c : v) {
+    if (c != '\r' && c != '\n' && c != '\0') {
+      out += c;
+    }
   }
 }
 
@@ -94,9 +121,9 @@ std::string HttpDate() {
 void AppendExtraHeaders(std::string& out, const Headers& extra_headers) {
   for (const auto& [name, value] : extra_headers) {
     out += "\r\n";
-    out += name;
+    AppendHeaderSafe(out, name);
     out += ": ";
-    out += value;
+    AppendHeaderSafe(out, value);
   }
 }
 
@@ -112,7 +139,7 @@ std::string BuildResponse(int status, const std::string& body, bool keep_alive,
   out += ' ';
   out += ReasonPhrase(status);
   out += "\r\nContent-Type: ";
-  out += content_type;
+  AppendHeaderSafe(out, content_type);
   out += "\r\nContent-Length: ";
   out += std::to_string(body.size());
   out += "\r\nConnection: ";
@@ -139,7 +166,7 @@ std::string BuildStreamHeader(int status, const std::string& content_type,
   out += ' ';
   out += ReasonPhrase(status);
   out += "\r\nContent-Type: ";
-  out += content_type;
+  AppendHeaderSafe(out, content_type);
   out += "\r\nConnection: keep-alive\r\nDate: ";
   out += HttpDate();
   AppendExtraHeaders(out, extra_headers);
@@ -177,14 +204,14 @@ std::string HttpRequest::Header(const std::string& lower_name) const {
   return "";
 }
 
-Connection::Connection(RequestHandler& handler, const Limits& limits)
+Connection::Connection(Passkey, RequestHandler& handler, const Limits& limits)
     : handler_(handler), limits_(limits) {}
 
 Connection::~Connection() = default;
 
 std::shared_ptr<Connection> Connection::Create(uv_loop_t* loop, RequestHandler& handler,
                                                const Limits& limits) {
-  auto conn = std::shared_ptr<Connection>(new Connection(handler, limits));
+  auto conn = std::make_shared<Connection>(Passkey{}, handler, limits);
   // Strong self-reference: the object outlives the local shared_ptr and every
   // libuv callback until both handles finish closing.
   conn->self_ = conn;
@@ -289,12 +316,15 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
   if (nread == 0) {
     return;  // no data available yet (EAGAIN-equivalent)
   }
-  conn->RestartTimer();
   if (conn->awaiting_response_) {
     // A request is already dispatched; we do not pipeline, so ignore any bytes
-    // that arrive before we have answered it.
+    // that arrive before we have answered it -- and do NOT restart the idle
+    // timer for them: otherwise a client could keep dribbling bytes to hold the
+    // connection (and its shared_ptr<Connection> + in-flight WorkRequest) alive
+    // indefinitely while its dispatched work is still running.
     return;
   }
+  conn->RestartTimer();
   const llhttp_errno_t err = llhttp_execute(&conn->parser_, buf->base, static_cast<size_t>(nread));
   if (conn->reject_status_ != 0) {
     // A hardening limit tripped (body/header cap, chunked): answer and close.
@@ -330,7 +360,17 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
 
 void Connection::OnTimeout(uv_timer_t* t) {
   auto* conn = static_cast<Connection*>(t->data);
-  // A slow or idle connection (slowloris, or an idle keep-alive): close it.
+  // A slow or idle connection (slowloris, or an idle keep-alive). When no
+  // request is in flight, first answer 408 per RFC 9110 §15.5.7 (SHOULD) so a
+  // client learns why the connection dropped; the false keep_alive makes the
+  // write close afterwards. If a request is already dispatched (awaiting_response_),
+  // writing here would race the work-completion write, so just close -- the
+  // completion callback will find IsAlive() false and drop its response.
+  if (!conn->closing_ && !conn->awaiting_response_) {
+    conn->awaiting_response_ = true;
+    conn->WriteResponse(408, JsonError("request timeout"), false);
+    return;
+  }
   conn->StartClose();
 }
 
@@ -482,6 +522,9 @@ void Connection::WriteRaw(std::string payload, WriteMode mode) {
   wr->conn = shared_from_this();
   wr->mode = mode;
   wr->req.data = wr.get();
+  // uv_buf_init's length arg is unsigned int (uv.h), so this is a 32-bit field
+  // regardless of the cast -- fine here since every response body (JSON) is far
+  // under 4 GiB. A >4 GiB payload would need splitting across multiple uv_buf_t.
   uv_buf_t b = uv_buf_init(wr->payload.data(), static_cast<unsigned>(wr->payload.size()));
   const int r = uv_write(&wr->req, stream(), &b, 1, OnWriteDone);
   if (r != 0) {
@@ -525,6 +568,9 @@ void Connection::OnWriteDone(uv_write_t* req, int status) {
   auto* wr = static_cast<WriteReq*>(req->data);
   std::shared_ptr<Connection> conn = std::move(wr->conn);
   const WriteMode mode = wr->mode;
+  // Bare delete (paired with the wr.release() in WriteRaw): libuv's uv_write_t C
+  // callback hands ownership back here by raw pointer, so this is the integer
+  // half of the RAII handoff, not an unmanaged allocation.
   delete wr;
   if (conn->closing_) {
     return;

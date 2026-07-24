@@ -418,10 +418,12 @@ TEST_CASE("http hardening: header limits and idle timeout", "[integration][http]
     const int fd = ConnectTo(port);
     REQUIRE(fd >= 0);
     // A partial request with no terminating CRLFCRLF, then stall. The idle timer
-    // must fire and close the connection; the client sees EOF (no response).
+    // must fire; per RFC 9110 §15.5.7 the server answers 408 and then closes, so
+    // the client learns why the connection dropped rather than just seeing EOF.
     REQUIRE(SendAll(fd, "GET /healthz HTTP/1.1\r\nHost: x\r\n"));
     const std::string resp = ReadResponse(fd);
-    CHECK(resp.empty());
+    CHECK(StatusOf(resp) == 408);
+    CHECK(HasConnection(resp, "close"));
     close(fd);
   }
 }
