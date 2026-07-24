@@ -17,8 +17,12 @@ namespace {
 std::string Trim(std::string_view s) {
   size_t b = 0;
   size_t e = s.size();
-  while (b < e && s[b] == ' ') ++b;
-  while (e > b && s[e - 1] == ' ') --e;
+  while (b < e && s[b] == ' ') {
+    ++b;
+  }
+  while (e > b && s[e - 1] == ' ') {
+    --e;
+  }
   return std::string(s.substr(b, e - b));
 }
 

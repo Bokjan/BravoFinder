@@ -253,8 +253,12 @@ TEST_CASE("multi-source Yen golden sequence on a lattice (Lawler regression guar
                                                    {builder.VerticesByIdent("L0r1")[0], 5.0}};
   const std::vector<bf::SeededEndpoint> goals = {{builder.VerticesByIdent("L3r0")[0], 3.0},
                                                  {builder.VerticesByIdent("L3r1")[0], 3.0}};
-  for (const auto& s : sources) REQUIRE(s.vertex >= 0);
-  for (const auto& g : goals) REQUIRE(g.vertex >= 0);
+  for (const auto& s : sources) {
+    REQUIRE(s.vertex >= 0);
+  }
+  for (const auto& g : goals) {
+    REQUIRE(g.vertex >= 0);
+  }
 
   const std::vector<bf::ShortestPath> paths =
       bf::FindKShortestPathsMulti(builder.graph(), sources, goals, 8, bf::SearchOptions{});
