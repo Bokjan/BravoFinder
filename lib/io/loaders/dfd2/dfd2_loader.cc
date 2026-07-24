@@ -34,6 +34,12 @@ namespace {
 
 constexpr std::string_view kLoaderName = "dfd2";
 
+// Feet per flight level (100 ft per FL); DFD stores altitudes in feet, the
+// graph works in flight levels.
+constexpr int kFeetPerFlightLevel = 100;
+// DFD encodes "no ceiling" as maximum_altitude = 99999; treated as unset.
+constexpr int kUnknownAltitudeFt = 99999;
+
 // v2 table names -- prefixes are NOT a fixed pattern (tbl_d_vhfnavaids is a
 // single letter), so they are listed explicitly.
 constexpr std::string_view kTblHeader = "tbl_hdr_header";
@@ -272,11 +278,11 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
       seg.name = prev_route;
       seg.direction = ParseDirection(prev_dir);
       seg.level = ParseAirwayLevel(prev_level);
-      seg.base_fl = prev_min_alt / 100;  // feet -> flight level
+      seg.base_fl = prev_min_alt / kFeetPerFlightLevel;  // feet -> flight level
       // 99999 ("no ceiling") -> 999: a very high finite band, not the
       // base_fl==0 && top_fl==0 sentinel AltitudeBandConstraint exempts. Harmless
       // since no query cruises above FL999. (Same as dfd1.)
-      seg.top_fl = prev_max_alt / 100;
+      seg.top_fl = prev_max_alt / kFeetPerFlightLevel;
       data.airways.push_back(
           AirwayConnection{Ident(prev_ident, prev_icao), Ident(ident, icao), seg});
     }
@@ -356,7 +362,7 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
     h.leg_time_min = ColumnDouble(stmt, 6);
     h.min_alt_ft = ColumnInt(stmt, 7);
     const int max_alt = ColumnInt(stmt, 8);
-    h.max_alt_ft = (max_alt >= 99999) ? 0 : max_alt;
+    h.max_alt_ft = (max_alt >= kUnknownAltitudeFt) ? 0 : max_alt;
     h.speed_limit_kt = ColumnInt(stmt, 9);
     data.hold_fixes.push_back(std::move(h));
   });
@@ -717,13 +723,16 @@ std::optional<CifpData> LoadAirportProcedures(
 // magnetic = true - variation (variation: west negative, so magnetic > true west).
 // Defined at namespace scope (declared in the header) so the sign convention can
 // be locked by a unit test.
+// Degrees in a full circle; used to wrap magnetic variation into [0, 360).
+constexpr double kDegreesFullCircle = 360.0;
+
 double ToMagnetic(double true_course, double magvar) {
   double mag = true_course - magvar;
   while (mag < 0.0) {
-    mag += 360.0;
+    mag += kDegreesFullCircle;
   }
-  while (mag >= 360.0) {
-    mag -= 360.0;
+  while (mag >= kDegreesFullCircle) {
+    mag -= kDegreesFullCircle;
   }
   return mag;
 }

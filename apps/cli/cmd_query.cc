@@ -91,7 +91,7 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
     if (fmt == bf::service::OutputFormat::kJson) {
       std::cout << "\n";
     }
-    if (result.status >= 400) {
+    if (result.status >= bf::service::kErrorStatusThreshold) {
       exit_code = EXIT_FAILURE;
     }
   });

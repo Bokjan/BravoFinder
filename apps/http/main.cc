@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     worker_threads = 4;
   }
   uint64_t max_body = 1u << 20;  // 1 MiB
-  int io_timeout_sec = 30;
+  int io_timeout_sec = bf::http_server::kDefaultIoTimeoutSec;
 
   app.add_option("--db-dir", db_dir, "Directory of nav_<cycle>.bfdb caches")->capture_default_str();
   app.add_option("--host", host, "Bind address")->capture_default_str();

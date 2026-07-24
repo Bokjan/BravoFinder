@@ -29,6 +29,10 @@ namespace bf::http_server {
 
 class Connection;
 
+// Default request read + idle keep-alive timeout, in seconds (overridable via
+// --io-timeout). The Limits struct stores it as milliseconds.
+inline constexpr int kDefaultIoTimeoutSec = 30;
+
 // A list of extra response headers (name, value), beyond the framing headers
 // (Content-Type / Content-Length / Connection / Date) the core always writes.
 using Headers = std::vector<std::pair<std::string, std::string>>;
@@ -37,7 +41,8 @@ using Headers = std::vector<std::pair<std::string, std::string>>;
 // the header caps are fixed hardening constants (see conn.cc).
 struct Limits {
   size_t max_body_bytes = 1u << 20;  // 1 MiB request body cap (--max-body)
-  uint64_t io_timeout_ms = 30'000;   // header/body read + idle keep-alive (--io-timeout)
+  uint64_t io_timeout_ms = static_cast<uint64_t>(kDefaultIoTimeoutSec) *
+                           1000;  // header/body read + idle keep-alive (--io-timeout)
 };
 
 // A fully-parsed HTTP request handed to the RequestHandler. method/path are what

@@ -8,6 +8,10 @@
 
 namespace bf {
 
+// Degrees in a full circle; used to wrap longitude deltas into the shorter
+// arc around the antimeridian.
+inline constexpr double kDegreesFullCircle = 360.0;
+
 // Hard filter: when a cruise altitude range is given, an edge is usable only if
 // some level in that range is at or above the grid minimum off-route altitude
 // (MORA) along the whole leg -- i.e. the range's top clears the floor
@@ -56,7 +60,7 @@ class MoraConstraint : public Constraint {
     // from +179 to -179 spans 2 degrees, not 358. Without this the samples would
     // march the long way around and read an entirely wrong strip of cells,
     // potentially blocking a legitimate trans-Pacific leg.
-    const double dlon = std::remainder(to.longitude - from.longitude, 360.0);
+    const double dlon = std::remainder(to.longitude - from.longitude, kDegreesFullCircle);
     // Degrees of track spanned; sample roughly every 0.5 degrees.
     const double span = std::max(std::abs(dlat), std::abs(dlon));
     const int steps = std::max(1, static_cast<int>(std::ceil(span / 0.5)));
@@ -64,7 +68,7 @@ class MoraConstraint : public Constraint {
       const double t = static_cast<double>(i) / steps;
       // Wrap the interpolated longitude back into [-180, 180] so a sample that
       // crosses the antimeridian still maps to a real grid cell.
-      const double lon = std::remainder(from.longitude + dlon * t, 360.0);
+      const double lon = std::remainder(from.longitude + dlon * t, kDegreesFullCircle);
       best = std::max(best, grid_.MoraAt(Coordinate{from.latitude + dlat * t, lon}));
     }
     return best;

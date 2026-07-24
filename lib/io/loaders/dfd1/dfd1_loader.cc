@@ -35,6 +35,12 @@ namespace {
 
 constexpr std::string_view kLoaderName = "dfd1";
 
+// Feet per flight level (100 ft per FL); DFD stores altitudes in feet, the
+// graph works in flight levels.
+constexpr int kFeetPerFlightLevel = 100;
+// DFD encodes "no ceiling" as maximum_altitude = 99999; treated as unset.
+constexpr int kUnknownAltitudeFt = 99999;
+
 // Search source_dir for the v1 database (byte-identical copies under several
 // names), in priority order, falling back to the first *.s3db found.
 Result<std::string> FindV1Db(const std::string& source_dir) {
@@ -245,8 +251,8 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
       // a very high finite band, NOT the base_fl==0 && top_fl==0 "no recorded
       // band" sentinel AltitudeBandConstraint exempts; harmless since no query
       // cruises above FL999.
-      seg.base_fl = prev_min_alt / 100;
-      seg.top_fl = prev_max_alt / 100;
+      seg.base_fl = prev_min_alt / kFeetPerFlightLevel;
+      seg.top_fl = prev_max_alt / kFeetPerFlightLevel;
       data.airways.push_back(
           AirwayConnection{Ident(prev_ident, prev_icao), Ident(ident, icao), seg});
     }
@@ -310,7 +316,7 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
     h.min_alt_ft = ColumnInt(stmt, 7);
     // DFD uses 99999 for "no upper limit"; HoldFix uses 0 (matching X-Plane).
     const int max_alt = ColumnInt(stmt, 8);
-    h.max_alt_ft = (max_alt >= 99999) ? 0 : max_alt;
+    h.max_alt_ft = (max_alt >= kUnknownAltitudeFt) ? 0 : max_alt;
     h.speed_limit_kt = ColumnInt(stmt, 9);
     data.hold_fixes.push_back(std::move(h));
   });

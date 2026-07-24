@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
     worker_threads = 4;
   }
   uint64_t max_body = 1u << 20;  // 1 MiB
-  int io_timeout_sec = 30;
+  int io_timeout_sec = bf::http_server::kDefaultIoTimeoutSec;
 
   // Parse CLI options. --version (and parse errors) are handled by CLI11 and
   // exit before any cache scan, so `bf-mcp --version` works with no data.
