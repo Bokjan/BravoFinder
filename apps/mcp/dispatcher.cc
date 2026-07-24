@@ -332,8 +332,11 @@ std::string Dispatcher::HandleToolsCall(const rapidjson::Value& id,
   }
 
   // A missing/non-object "arguments" is treated as empty: tools validate their
-  // own required fields and report a tool error if needed.
-  rapidjson::Value null_args;
+  // own required fields and report a tool error if needed. This must be an
+  // empty object (not the default kNullType): the code below calls HasMember /
+  // Is* / Get* on it, and rapidjson asserts IsObject() inside FindMember, so a
+  // null value would abort() in a debug build (NDEBUG undefined).
+  rapidjson::Value null_args(rapidjson::kObjectType);
   const rapidjson::Value& args = params.HasMember("arguments") && params["arguments"].IsObject()
                                      ? params["arguments"]
                                      : null_args;

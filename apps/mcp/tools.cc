@@ -59,7 +59,7 @@ const ToolMeta kToolMeta[] = {
      R"("arrival_star":{"type":"string","description":"Pin a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS. Empty=auto."},)"
      R"("avoid_waypoints":{"type":"array","items":{"type":"string"},"description":"Waypoints to route around, each an ident (BOTON) or IDENT/REGION (BOTON/LF). A bare ident avoids all regions' matches."},)"
      R"("avoid_airways":{"type":"array","items":{"type":"string"},"description":"Airway designators to route around, e.g. J60. Also blocks concurrency segments recorded as J60-V123."},)"
-     R"("random_seed":{"type":"integer","minimum":0,"description":"Seed for reproducible route diversity. The same seed always yields the same route; different seeds explore alternatives. Omit for the plain optimal route."},)"
+     R"("random_seed":{"type":"integer","minimum":0,"maximum":4294967295,"description":"Seed for reproducible route diversity. The same seed always yields the same route; different seeds explore alternatives. Omit for the plain optimal route."},)"
      R"("forced_points":{"type":"array","items":{"type":"string"},"description":"Ordered waypoints the route must pass through (via points), each an ident (PSB) or IDENT/REGION (PSB/K6). The response echoes them resolved as IDENT/REGION."}},)"
      R"("required":["departure","arrival"]})"},
     {"parse_route",
