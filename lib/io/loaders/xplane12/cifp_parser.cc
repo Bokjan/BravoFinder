@@ -55,6 +55,10 @@ constexpr int kAltDesc = 22;     // altitude descriptor: + - @ B (or blank)
 constexpr int kAlt1 = 23;        // altitude one, feet
 constexpr int kAlt2 = 24;        // altitude two, feet (lower bound for 'B')
 constexpr int kSpeedLimit = 27;  // speed limit, knots (0/blank if none)
+// Row-length gate for a leg record. Intentionally 25 (not kSpeedLimit+1=28):
+// speed_limit is the only field past index 24, and FieldInt() bounds-checks its
+// index, so a 25-27 field row is accepted and reads speed_limit as 0 rather than
+// being dropped for lacking a trailing (optional) speed-limit column.
 constexpr int kMinLegFields = 25;
 
 // Read a field as an integer, treating blank/non-numeric as 0.

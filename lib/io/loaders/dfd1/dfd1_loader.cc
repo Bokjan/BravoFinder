@@ -375,7 +375,10 @@ Result<void> LoadGridMora(sqlite3* conn, NavData& data) {
         continue;  // inner loop: skip this cell, not the whole row
       }
       int value = 0;
-      std::from_chars(v.data(), v.data() + v.size(), value);
+      const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), value);
+      if (ec != std::errc{}) {
+        continue;  // non-numeric cell (not empty / not "UNK"): skip, keep no MORA
+      }
       if (value > 0) {
         data.mora.SetCell(lat, lon0 + i, static_cast<int16_t>(value));
       }
@@ -768,6 +771,13 @@ Result<std::vector<AirportProcedureData>> Dfd1Loader::LoadProcedures(
   Result<sqlite3*> conn = AcquireConn(kLoaderName, db_path.value());
   if (!conn) {
     return Result<std::vector<AirportProcedureData>>::Err(std::move(conn).error());
+  }
+  // Defensive: LoadProcedures is only reached after NavDatabase::Open ->
+  // LoadNavData already validated the header, but validate here too so a future
+  // caller that invokes the loader directly (bypassing Open) gets the actionable
+  // "for DFD v2 use --loader dfd2" error instead of an obscure kParseError.
+  if (Result<void> header = CheckV1Header(conn.value()); !header) {
+    return Result<std::vector<AirportProcedureData>>::Err(std::move(header).error());
   }
   std::vector<AirportProcedureData> out;
   Result<void> load = Result<void>::Ok();

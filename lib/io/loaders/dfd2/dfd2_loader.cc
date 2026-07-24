@@ -119,8 +119,16 @@ int ParseHemiCoord(const std::string& s) {
     return 0;
   }
   const char hemi = s[0];
+  // Only N/S/E/W are valid hemispheres; anything else is malformed. Guarding it
+  // stops an unexpected leading byte from being treated as a positive N/E value.
+  if (hemi != 'N' && hemi != 'S' && hemi != 'E' && hemi != 'W') {
+    return 0;
+  }
   int value = 0;
-  std::from_chars(s.data() + 1, s.data() + s.size(), value);
+  const auto [ptr, ec] = std::from_chars(s.data() + 1, s.data() + s.size(), value);
+  if (ec != std::errc{}) {
+    return 0;  // non-numeric magnitude: let the caller skip this MORA row
+  }
   if (hemi == 'S' || hemi == 'W') {
     return -value;
   }
@@ -417,7 +425,10 @@ Result<void> LoadGridMora(sqlite3* conn, NavData& data) {
         continue;  // inner loop: skip this cell, not the whole row
       }
       int value = 0;
-      std::from_chars(v.data(), v.data() + v.size(), value);
+      const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), value);
+      if (ec != std::errc{}) {
+        continue;  // non-numeric cell (not empty / not "UNK"): skip, keep no MORA
+      }
       if (value > 0) {
         data.mora.SetCell(lat, lon0 + i, static_cast<int16_t>(value));
       }
@@ -807,6 +818,13 @@ Result<std::vector<AirportProcedureData>> Dfd2Loader::LoadProcedures(
   Result<sqlite3*> conn = AcquireConn(kLoaderName, db_path.value());
   if (!conn) {
     return Result<std::vector<AirportProcedureData>>::Err(std::move(conn).error());
+  }
+  // Defensive: LoadProcedures is only reached after NavDatabase::Open ->
+  // LoadNavData already validated the header, but validate here too so a future
+  // caller that invokes the loader directly (bypassing Open) gets the actionable
+  // "for DFD v1 use --loader dfd1" error instead of an obscure kParseError.
+  if (Result<void> header = CheckV2Header(conn.value()); !header) {
+    return Result<std::vector<AirportProcedureData>>::Err(std::move(header).error());
   }
   // magvar is needed for course_flag='T' legs; read just the (airport, magvar)
   // pairs rather than re-running the full airports load.
