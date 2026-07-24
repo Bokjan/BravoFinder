@@ -201,7 +201,13 @@ void NavDatabase::BuildAirwayIndex() {
   // kept: AirwayInfo represents reversals honestly. The key is the full leg
   // identity (endpoints + level + FL band), not just (from, to).
   auto leg_key = [](const AirwayLeg& l) {
-    return l.from + '\0' + l.to + (l.high ? "\1" : "\0") + std::to_string(l.base_fl) + '\0' +
+    // Use the char '\0'/'\1' overload of operator+, NOT the C-string literals
+    // "\0"/"\1": "\0" is an EMPTY string (length 0), which would drop the
+    // separator entirely for low airways and let (to="WPT", base_fl=120) collide
+    // with (to="WPT1", base_fl=20) on the same key "...WPT120..." -- silently
+    // discarding the second leg as a false duplicate. A char appends the real
+    // null/0x01 byte and keeps every field boundary intact.
+    return l.from + '\0' + l.to + (l.high ? '\1' : '\0') + std::to_string(l.base_fl) + '\0' +
            std::to_string(l.top_fl);
   };
   std::unordered_map<std::string, std::unordered_set<std::string>> seen;

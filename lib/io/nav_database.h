@@ -36,11 +36,17 @@ enum class CifpLoad {
 // multiple instances (e.g. different AIRAC cycles) can coexist safely.
 //
 // Thread-safety contract: after Open() succeeds, an instance is read-only except
-// for an internally synchronized procedure cache. FindRoutes() and
-// MsaForAirport() are const and may be called concurrently from multiple threads
-// on the SAME instance. The only shared mutable state is procedure_cache_, which
-// is guarded by cache_mutex_; everything else (graph, MORA, MSA) is immutable
-// after Open().
+// for an internally synchronized procedure cache. EVERY const query method --
+// FindRoutes(), MsaForAirport(), ParseRoute(), the batch lookups (LookupWaypoints,
+// LookupAirports, LookupAirways, LookupHolds, ...) and ProceduresFor() -- is safe
+// to call concurrently from multiple threads on the SAME instance. The only shared
+// mutable state is procedure_cache_, which is guarded by cache_mutex_; everything
+// else (graph, MORA, MSA) is immutable after Open().
+//
+// Moved-from instances are NOT queryable: the move ops are `= default`, so a
+// moved-from database has a null cache_mutex_ (a unique_ptr member) and any query
+// touching the procedure cache would null-deref. Current call sites never query a
+// moved-from instance; treat "moved from" as "consumed", not "reset for reuse".
 class NavDatabase {
  public:
   NavDatabase();
