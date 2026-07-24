@@ -113,12 +113,12 @@ http_server::WorkResult BuildMcpWorkResult(const Dispatcher& dispatcher,
   if (!r.has_response) {
     // Pure notification(s): acknowledge with 202 and no body.
     http_server::WorkResult out;
-    out.status = 202;
+    out.status = http_server::kStatusAccepted;
     return out;
   }
 
   http_server::WorkResult out;
-  out.status = 200;
+  out.status = http_server::kStatusOk;
   if (wants_sse) {
     out.content_type = "text/event-stream";
     out.body = "data: " + r.body + "\n\n";
@@ -137,7 +137,8 @@ http_server::WorkResult BuildMcpWorkResult(const Dispatcher& dispatcher,
 void McpHttpHandler::Handle(std::shared_ptr<http_server::Connection> conn,
                             const http_server::HttpRequest& req) {
   if (req.path != "/mcp") {
-    conn->WriteResponse(404, http_server::JsonError("not found"), req.keep_alive);
+    conn->WriteResponse(http_server::kStatusNotFound, http_server::JsonError("not found"),
+                        req.keep_alive);
     return;
   }
   if (req.method == "POST") {
@@ -148,27 +149,30 @@ void McpHttpHandler::Handle(std::shared_ptr<http_server::Connection> conn,
     // Open an SSE stream. There is no server-push today (no progress events, no
     // notifications), so this is a placeholder: send one keepalive comment and
     // let the idle timer or a client disconnect close the stream.
-    conn->BeginStream(200, "text/event-stream", {});
+    conn->BeginStream(http_server::kStatusOk, "text/event-stream", {});
     conn->WriteEvent(": keepalive\n\n");
     return;
   }
   if (req.method == "DELETE") {
     // Stateless: acknowledge the session teardown without tracking anything.
-    conn->WriteResponse(200, "", req.keep_alive);
+    conn->WriteResponse(http_server::kStatusOk, "", req.keep_alive);
     return;
   }
-  conn->WriteResponse(405, http_server::JsonError("method not allowed"), req.keep_alive);
+  conn->WriteResponse(http_server::kStatusMethodNotAllowed,
+                      http_server::JsonError("method not allowed"), req.keep_alive);
 }
 
 void McpHttpHandler::HandlePost(std::shared_ptr<http_server::Connection> conn,
                                 const http_server::HttpRequest& req) {
   // Shed load before parsing if the offload queue is full.
   if (inflight_.load(std::memory_order_relaxed) >= kMaxInflightWork) {
-    conn->WriteResponse(503, http_server::JsonError("server busy"), req.keep_alive);
+    conn->WriteResponse(http_server::kStatusServiceUnavailable,
+                        http_server::JsonError("server busy"), req.keep_alive);
     return;
   }
   if (req.body.empty()) {
-    conn->WriteResponse(400, JsonRpcFramingError(jsonrpc::kParseError, "empty request body"),
+    conn->WriteResponse(http_server::kStatusBadRequest,
+                        JsonRpcFramingError(jsonrpc::kParseError, "empty request body"),
                         req.keep_alive);
     return;
   }
@@ -179,14 +183,14 @@ void McpHttpHandler::HandlePost(std::shared_ptr<http_server::Connection> conn,
   auto doc = std::make_shared<rapidjson::Document>();
   doc->Parse<rapidjson::kParseIterativeFlag>(req.body.data(), req.body.size());
   if (doc->HasParseError()) {
-    conn->WriteResponse(400, JsonRpcFramingError(jsonrpc::kParseError, "parse error"),
-                        req.keep_alive);
+    conn->WriteResponse(http_server::kStatusBadRequest,
+                        JsonRpcFramingError(jsonrpc::kParseError, "parse error"), req.keep_alive);
     return;
   }
   if (!doc->IsObject() && !doc->IsArray()) {
     // Valid JSON, but not a JSON-RPC message at all: a framing-level 400.
     conn->WriteResponse(
-        400,
+        http_server::kStatusBadRequest,
         JsonRpcFramingError(jsonrpc::kInvalidRequest, "request must be a JSON object or array"),
         req.keep_alive);
     return;

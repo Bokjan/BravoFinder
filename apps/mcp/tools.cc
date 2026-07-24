@@ -134,7 +134,8 @@ ToolHandler AdaptHandler(bf::service::QueryHandler handler) {
   return [handler = std::move(handler)](const rapidjson::Value& args,
                                         const bf::NavDatabase& db) -> ToolResult {
     bf::service::HandlerResult result = handler(args, db);
-    return {std::move(result.body), result.status >= 400, result.elapsed_ms};
+    return {std::move(result.body), result.status >= bf::service::kErrorStatusThreshold,
+            result.elapsed_ms};
   };
 }
 

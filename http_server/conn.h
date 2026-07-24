@@ -30,6 +30,7 @@
 #include <memory>
 #include <string>
 
+#include "http_status.h"  // kStatusNone
 #include "llhttp.h"
 #include "transport.h"  // HttpRequest, Limits, Headers, RequestHandler
 
@@ -180,11 +181,11 @@ class Connection : public std::enable_shared_from_this<Connection> {
   std::string body_;
   bool request_ready_ = false;
   bool keep_alive_ = false;
-  bool awaiting_response_ = false;  // request dispatched; ignore further input bytes
-  bool pipelined_ = false;          // a second request began in the same buffer; close after reply
-  bool streaming_ = false;          // an open stream is active; writes leave the connection open
-  int reject_status_ = 0;           // non-zero => a hardening limit tripped; response + close
-  std::string reject_message_;      // human-readable reason paired with reject_status_
+  bool awaiting_response_ = false;   // request dispatched; ignore further input bytes
+  bool pipelined_ = false;           // a second request began in the same buffer; close after reply
+  bool streaming_ = false;           // an open stream is active; writes leave the connection open
+  int reject_status_ = kStatusNone;  // non-zero => a hardening limit tripped; response + close
+  std::string reject_message_;       // human-readable reason paired with reject_status_
 
   // A fixed read buffer; reads are one-at-a-time per connection on the loop
   // thread, so a single owned buffer suffices (no per-read allocation).

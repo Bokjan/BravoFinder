@@ -19,6 +19,7 @@
 #include "core/version.h"
 #include "handlers.h"
 #include "jsonrpc.h"
+#include "render.h"  // bf::service::JsonError
 
 namespace bf::mcp {
 

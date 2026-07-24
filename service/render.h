@@ -70,4 +70,11 @@ std::string RenderProceduresMixed(
 // JSON: {"error":"<message>"}. Text: "error: <message>\n".
 std::string RenderError(OutputFormat fmt, const std::string& message);
 
+// Build an error JSON payload `{"error":"<message>"}` with RapidJSON's Writer so
+// the message is auto-escaped. Handler error messages may carry user-controlled
+// strings (an unknown departure airport, a bad route token, an unknown id), so
+// this is the only sanctioned way to emit such a payload. Lives here (not in
+// handlers.h) so render.cc no longer has to reach back into the handlers layer.
+std::string JsonError(const std::string& message);
+
 }  // namespace bf::service

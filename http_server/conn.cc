@@ -33,6 +33,8 @@
 #include <string_view>
 #include <utility>
 
+#include "http_status.h"
+
 namespace bf::http_server {
 
 namespace {
@@ -46,44 +48,44 @@ constexpr size_t kMaxUrlBytes = 8 * 1024;
 
 const char* ReasonPhrase(int status) {
   switch (status) {
-    case 200:
+    case kStatusOk:
       return "OK";
-    case 202:
+    case kStatusAccepted:
       return "Accepted";
-    case 400:
+    case kStatusBadRequest:
       return "Bad Request";
-    case 404:
+    case kStatusNotFound:
       return "Not Found";
-    case 405:
+    case kStatusMethodNotAllowed:
       return "Method Not Allowed";
-    case 408:
+    case kStatusRequestTimeout:
       return "Request Timeout";
-    case 413:
+    case kStatusPayloadTooLarge:
       return "Payload Too Large";
-    case 414:
+    case kStatusUriTooLong:
       return "URI Too Long";
-    case 422:
+    case kStatusUnprocessableEntity:
       return "Unprocessable Entity";
-    case 431:
+    case kStatusRequestHeaderFieldsTooLarge:
       return "Request Header Fields Too Large";
-    case 500:
+    case kStatusInternalServerError:
       return "Internal Server Error";
-    case 503:
+    case kStatusServiceUnavailable:
       return "Service Unavailable";
     default:
       // An unmapped status is unexpected (every status we emit is listed above).
       // Fall back by class so a future unmapped code still yields a sane phrase
       // rather than a misleading "200 OK" style line or a bare "Error".
-      if (status < 200) {
+      if (status < kStatusSuccessMin) {
         return "Informational";
       }
-      if (status < 300) {
+      if (status < kStatusRedirectionMin) {
         return "OK";
       }
-      if (status < 400) {
+      if (status < kStatusClientErrorMin) {
         return "Redirection";
       }
-      if (status < 500) {
+      if (status < kStatusServerErrorMin) {
         return "Client Error";
       }
       return "Server Error";
@@ -293,7 +295,7 @@ void Connection::ResetForNextRequest() {
   awaiting_response_ = false;
   pipelined_ = false;
   streaming_ = false;
-  reject_status_ = 0;
+  reject_status_ = kStatusNone;
   reject_message_.clear();
   RestartTimer();
 }
@@ -326,7 +328,7 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
   }
   conn->RestartTimer();
   const llhttp_errno_t err = llhttp_execute(&conn->parser_, buf->base, static_cast<size_t>(nread));
-  if (conn->reject_status_ != 0) {
+  if (conn->reject_status_ != kStatusNone) {
     // A hardening limit tripped (body/header cap, chunked): answer and close.
     conn->awaiting_response_ = true;
     conn->WriteResponse(conn->reject_status_, JsonError(conn->reject_message_), false);
@@ -352,7 +354,7 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
   }
   if (err != HPE_OK && err != HPE_PAUSED) {
     conn->awaiting_response_ = true;
-    conn->WriteResponse(400, JsonError("malformed HTTP request"), false);
+    conn->WriteResponse(kStatusBadRequest, JsonError("malformed HTTP request"), false);
     return;
   }
   // Otherwise the request is still arriving; keep reading.
@@ -368,7 +370,7 @@ void Connection::OnTimeout(uv_timer_t* t) {
   // completion callback will find IsAlive() false and drop its response.
   if (!conn->closing_ && !conn->awaiting_response_) {
     conn->awaiting_response_ = true;
-    conn->WriteResponse(408, JsonError("request timeout"), false);
+    conn->WriteResponse(kStatusRequestTimeout, JsonError("request timeout"), false);
     return;
   }
   conn->StartClose();
@@ -393,7 +395,7 @@ int Connection::OnUrl(llhttp_t* p, const char* at, size_t len) {
   // Cap the request-line URL incrementally: without this a multi-megabyte
   // "GET /AAAA..." grows url_ unbounded before the message even completes.
   if (conn->url_.size() > kMaxUrlBytes) {
-    conn->reject_status_ = 414;
+    conn->reject_status_ = kStatusUriTooLong;
     conn->reject_message_ = "request URI too long";
     return -1;
   }
@@ -416,7 +418,7 @@ void Connection::FinishHeaderPair() {
   ++header_count_;
   header_bytes_ += cur_field_.size() + cur_value_.size();
   if (header_bytes_ > kMaxHeaderBytes || header_count_ > kMaxHeaderCount) {
-    reject_status_ = 431;
+    reject_status_ = kStatusRequestHeaderFieldsTooLarge;
     reject_message_ = "request headers too large";
   }
   // Store the header (lower-cased name) so the handler can read it -- e.g. the
@@ -441,32 +443,32 @@ int Connection::OnHeaderField(llhttp_t* p, const char* at, size_t len) {
     conn->FinishHeaderPair();  // a new field means the previous pair is complete
   }
   conn->cur_field_.append(at, len);
-  if (conn->reject_status_ == 0 && conn->HeaderBudgetExceeded()) {
-    conn->reject_status_ = 431;
+  if (conn->reject_status_ == kStatusNone && conn->HeaderBudgetExceeded()) {
+    conn->reject_status_ = kStatusRequestHeaderFieldsTooLarge;
     conn->reject_message_ = "request headers too large";
   }
-  return conn->reject_status_ != 0 ? -1 : 0;
+  return conn->reject_status_ != kStatusNone ? -1 : 0;
 }
 
 int Connection::OnHeaderValue(llhttp_t* p, const char* at, size_t len) {
   auto* conn = static_cast<Connection*>(p->data);
   conn->reading_value_ = true;
   conn->cur_value_.append(at, len);
-  if (conn->reject_status_ == 0 && conn->HeaderBudgetExceeded()) {
-    conn->reject_status_ = 431;
+  if (conn->reject_status_ == kStatusNone && conn->HeaderBudgetExceeded()) {
+    conn->reject_status_ = kStatusRequestHeaderFieldsTooLarge;
     conn->reject_message_ = "request headers too large";
   }
-  return conn->reject_status_ != 0 ? -1 : 0;
+  return conn->reject_status_ != kStatusNone ? -1 : 0;
 }
 
 int Connection::OnHeadersComplete(llhttp_t* p) {
   auto* conn = static_cast<Connection*>(p->data);
   conn->FinishHeaderPair();  // finalize the last header pair
-  if (conn->reject_status_ != 0) {
+  if (conn->reject_status_ != kStatusNone) {
     return -1;
   }
   if (conn->saw_transfer_encoding_) {
-    conn->reject_status_ = 400;
+    conn->reject_status_ = kStatusBadRequest;
     conn->reject_message_ = "chunked transfer-encoding is not supported";
     return -1;
   }
@@ -476,7 +478,7 @@ int Connection::OnHeadersComplete(llhttp_t* p) {
 int Connection::OnBody(llhttp_t* p, const char* at, size_t len) {
   auto* conn = static_cast<Connection*>(p->data);
   if (conn->body_.size() + len > conn->limits_.max_body_bytes) {
-    conn->reject_status_ = 413;
+    conn->reject_status_ = kStatusPayloadTooLarge;
     conn->reject_message_ = "request body exceeds the configured limit";
     return -1;
   }

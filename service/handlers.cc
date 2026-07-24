@@ -18,24 +18,9 @@
 #include "core/routing/route_request.h"
 #include "queries.h"
 #include "rapidjson/document.h"
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/writer.h"
 #include "render.h"
 
 namespace bf::service {
-
-// Build `{"error":"<message>"}` via RapidJSON's Writer so the message is
-// auto-escaped; hand-rolling it is unsafe (see JsonError in the header). Shared
-// by the adapters here and by render.cc's RenderError.
-std::string JsonError(const std::string& message) {
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  writer.StartObject();
-  writer.Key("error");
-  writer.String(message.c_str(), static_cast<unsigned>(message.size()));
-  writer.EndObject();
-  return buffer.GetString();
-}
 
 namespace {
 
@@ -114,6 +99,11 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     } else if (level == "high") {
       request.level = bf::LevelPreference::kHigh;
     }
+    // Any other string (including "none", or an invalid "medium"/miscased value)
+    // intentionally leaves request.level at its kNone default. MCP clients get a
+    // first line of defense from the schema enum; HTTP has none, so silently
+    // mapping an unknown level to the no-preference default is the accepted
+    // fallback rather than a hard error.
   }
   if (args.HasMember("k") && args["k"].IsInt()) {
     request.k = args["k"].GetInt();

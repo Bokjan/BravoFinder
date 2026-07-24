@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -20,5 +21,10 @@ Result<NavDatabase> OpenForRead(const std::string& db_path, const std::string& d
 // level ("350" -> {350, 350}) or a hyphenated range ("300-400" -> {300, 400}).
 // Returns nullopt on malformed input or an inverted range (min > max).
 std::optional<FlRange> ParseAltSpec(const std::string& spec);
+
+// Wrap a rendered routes array (the bare transport-shape body the query layer
+// returns) in the CLI's {"routes": <body>, "elapsed_ms": <n>} envelope, built
+// with a RapidJSON Writer + RawValue so the outer object is not hand-rolled.
+std::string WrapRoutesEnvelope(const std::string& routes_body, uint32_t elapsed_ms);
 
 }  // namespace bf::cli

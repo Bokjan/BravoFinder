@@ -34,10 +34,10 @@ void OnWork(uv_work_t* req) {
   } catch (const std::exception& e) {
     // The closure should go through Result, but never let an unexpected
     // exception cross the thread boundary: turn it into a 500.
-    w->result.status = 500;
+    w->result.status = kStatusInternalServerError;
     w->result.body = JsonError(std::string("internal error: ") + e.what());
   } catch (...) {
-    w->result.status = 500;
+    w->result.status = kStatusInternalServerError;
     w->result.body = JsonError("internal error");
   }
 }
@@ -81,7 +81,7 @@ void QueueWork(std::shared_ptr<Connection> conn, uv_loop_t* loop, std::function<
     // The threadpool queue is unavailable: answer 503 inline and clean up. No
     // increment happened, so nothing to undo.
     if (w->conn->IsAlive()) {
-      w->conn->WriteResponse(503, JsonError("server busy"), keep_alive);
+      w->conn->WriteResponse(kStatusServiceUnavailable, JsonError("server busy"), keep_alive);
     }
     delete w;
     return;

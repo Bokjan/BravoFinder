@@ -20,7 +20,6 @@
 #include "core/routing/route.h"
 #include "core/routing/route_json.h"
 #include "core/routing/route_metrics.h"
-#include "handlers.h"
 
 namespace bf::service {
 
@@ -428,6 +427,16 @@ std::string RenderProceduresMixed(
 }
 
 // ---- Error payload ----------------------------------------------------------
+
+std::string JsonError(const std::string& message) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("error");
+  writer.String(message.c_str(), static_cast<unsigned>(message.size()));
+  writer.EndObject();
+  return buffer.GetString();
+}
 
 std::string RenderError(OutputFormat fmt, const std::string& message) {
   if (fmt == OutputFormat::kJson) {

@@ -1,5 +1,8 @@
 #include "cli_common.h"
 
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+
 #include <charconv>
 
 namespace bf::cli {
@@ -44,6 +47,20 @@ std::optional<FlRange> ParseAltSpec(const std::string& spec) {
     return std::nullopt;
   }
   return FlRange{lo, hi};
+}
+
+std::string WrapRoutesEnvelope(const std::string& routes_body, uint32_t elapsed_ms) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("routes");
+  // routes_body is already valid RapidJSON output from the query layer; splice
+  // it in verbatim rather than re-parsing it.
+  writer.RawValue(routes_body.data(), routes_body.size(), rapidjson::kArrayType);
+  writer.Key("elapsed_ms");
+  writer.Uint(elapsed_ms);
+  writer.EndObject();
+  return buffer.GetString();
 }
 
 }  // namespace bf::cli

@@ -23,6 +23,8 @@
 #include <utility>
 #include <vector>
 
+#include "http_status.h"  // kStatusOk
+
 namespace bf::http_server {
 
 class Connection;
@@ -63,7 +65,7 @@ struct HttpRequest {
 // extra_headers are appended verbatim (e.g. an MCP Mcp-Session-Id). Transport-
 // local by design so the core does not depend on bf_service_lib.
 struct WorkResult {
-  int status = 200;
+  int status = kStatusOk;
   std::string body;
   uint32_t elapsed_ms = 0;
   std::string content_type;  // empty => "application/json"

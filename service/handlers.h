@@ -33,6 +33,11 @@ struct HandlerResult {
   uint32_t elapsed_ms = 0;
 };
 
+// A HandlerResult.status at or above this is an error (4xx/5xx); below it is a
+// success (2xx). MCP maps is_error = (status >= kErrorStatusThreshold); the CLI
+// maps it to a non-zero exit code; HTTP passes the code through directly.
+inline constexpr int kErrorStatusThreshold = 400;
+
 using QueryHandler =
     std::function<HandlerResult(const rapidjson::Value& args, const bf::NavDatabase& db)>;
 
@@ -48,11 +53,5 @@ struct NamedHandler {
 // parse_route, then the batch lookups). Returned by value so callers own the
 // vector -- no function-level static mutable state.
 std::vector<NamedHandler> MakeHandlers();
-
-// Build an error JSON payload `{"error":"<message>"}` with RapidJSON's Writer so
-// the message is auto-escaped. Handler error messages may carry user-controlled
-// strings (an unknown departure airport, a bad route token, an unknown id), so
-// this is the only sanctioned way to emit such a payload.
-std::string JsonError(const std::string& message);
 
 }  // namespace bf::service
