@@ -32,7 +32,7 @@ X-Plane 数据全量解析 + 建图有成本（解析 ARINC 424 尤甚）。冷�
 
 v3 起磁盘改为**逐顶点一条自包含 record**（`coord + ident 引用 + flags + kind`）：加一个 per-vertex 字段就是 record 里多一个字段，没有新平行数组、没有 size 不变量。**机场专属字段** （如 elevation）单独放一个**机场 record 段**（只 `[first_airport_vertex, V)` 的 ~1.5 万条）， 不摊到 25 万顶点上——语义与布局对齐，机场字段各归其位。
 
-刻意不上 TLV/字段级段目录：`.bfdb` 是本地 `bf build` 产物、非跨版本分发，加字段时 bump 容器 `format_version` + 重建缓存即可，跨版本兼容的价值不足以抵消其复杂度。（最近一次即 `format_version` 5→6：CIFP 每条 leg 增补 RNP / 转向 / 速度限制三字段，旧缓存被拒、`bf build` 重建。容器层确有一个**固定 3 项的段表**定位 graph/cifp/detail 三段，见第 8 节——那是分段容器 的必需骨架，不是可扩展的字段级 TLV。）
+刻意不上 TLV/字段级段目录：`.bfdb` 是本地 `bf build` 产物、非跨版本分发，加字段时 bump 容器 `format_version` + 重建缓存即可，跨版本兼容的价值不足以抵消其复杂度。（最近一次**布局变更**是 `format_version` 5→6：CIFP 每条 leg 增补 RNP / 转向 / 速度限制三字段，旧缓存被拒、`bf build` 重建；此后多为**无布局变更**的保护性 bump——写侧 bug 修好后退役旧版强制重建，完整演进与当前值以 `unified_cache.h` 的 `kFormatVersion` 注释为准，不在此复述以免过期。容器层确有一个**固定 3 项的段表**定位 graph/cifp/detail 三段，见第 8 节——那是分段容器 的必需骨架，不是可扩展的字段级 TLV。）
 
 ## 4. 与 protobuf 的异同
 
@@ -70,7 +70,7 @@ int32  to           // 目标顶点
 float  distance_nm  // 存 float；A* 的 g 值/路径长用 double 累加，精度无损
 uint16 airway_id    // 唯一 airway 名 ~12k << 65535，建表加 >65535 保险丝
 int16  base_fl, top_fl
-uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
+uint8  level        // AirwayLevel low/high/both 的原始 enum 值（三态互斥，故非位标志）
 ```
 
 边数组体积腰斩，A* 遍历时一条 cache 行能装的边数翻倍。注意磁盘上 GraphEdge 是 **15B** （4+4+2+2+2+1，无内存对齐 padding），比内存 16B 更紧。
@@ -128,7 +128,7 @@ uint8  flags        // bit0=is_high，余位 RAD/CDR 预留
 缓存格式会演进，必须能干净拒绝不兼容的旧文件而非崩溃。三层版本：
 
 1. **程序 version**（CMake `project VERSION` → `lib/core/version.h` 的 `kBravoFinderVersion` → `bf --version`）；
-2. **容器 `format_version`**（magic 「BFDB」，当前 = 4），机器校验，不符走 `Result::Err(kFormatMismatch)`，提示重跑 `bf build`。**只此一个版本号**管全部布局—— 统一容器一次性产出三段，不存在「只改 graph 段但 CIFP 段保持旧版」的场景，故不设 per-section 版本号（那是过度设计）；
+2. **容器 `format_version`**（magic 「BFDB」，具体值以 `unified_cache.h` 的 `kFormatVersion` 为准，不在此复述以免过期），机器校验，不符走 `Result::Err(kFormatMismatch)`，提示重跑 `bf build`。**只此一个版本号**管全部布局—— 统一容器一次性产出三段，不存在「只改 graph 段但 CIFP 段保持旧版」的场景，故不设 per-section 版本号（那是过度设计）；
 3. **provenance**：程序 version + source_loader + AIRAC cycle 写进容器头。
 
 > 注：`build`（X-Plane `.dat` 头行的 `build YYYYMMDD`）已从格式中删除——它是 X-Plane 专有字段， Navigraph 通用元数据（`cycle_info.txt`/`cycle.json`）只有 `cycle` 和 `revision`，其余格式 （iFMS、Little Navmap、CustomData）均无 `build`。统一格式只保留 `cycle` 作主键，`cycle=0` 表示无 AIRAC 出处。
