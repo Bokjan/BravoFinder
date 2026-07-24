@@ -89,7 +89,7 @@ std::vector<double> BuildSeedTable(const std::vector<SeededEndpoint>& endpoints,
 }
 
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
-                              const SearchOptions& options) {
+                              const SearchOptions& options, SearchWorkspace& ws) {
   ShortestPath result;
   const int n = graph.VertexCount();
   if (start < 0 || goal < 0 || start >= n || goal >= n) {
@@ -103,7 +103,6 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
   // Heuristic: straight-line great-circle distance to the goal.
   auto heuristic = [&](int v) { return graph.CoordOf(v).DistanceTo(goal_coord); };
 
-  SearchWorkspace ws;
   ws.Reset(n);
   ws.NextGeneration();
 
@@ -158,6 +157,12 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
   result.cost = ws.G(goal);
   result.found = true;
   return result;
+}
+
+ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
+                              const SearchOptions& options) {
+  SearchWorkspace ws;
+  return FindShortestPath(graph, start, goal, options, ws);
 }
 
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal) {

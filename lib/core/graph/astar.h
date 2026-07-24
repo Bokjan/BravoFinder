@@ -33,6 +33,10 @@ struct SearchOptions {
   std::function<bool(int from, int to)> edge_blocked;
 };
 
+// Reusable per-vertex A* scratch, defined below; forward-declared here so the
+// hot-path FindShortestPath overload can take it by reference.
+class SearchWorkspace;
+
 // Among the parallel edges from `from` to `to`, return the one the search would
 // have traversed: the cheapest ALLOWED edge by effective cost (distance_nm + soft
 // penalties), evaluating `options.constraints` exactly as A* relaxation and Yen's
@@ -49,6 +53,16 @@ const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const Searc
 // (penalized) cost. Returns found=false when no path exists.
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
                               const SearchOptions& options);
+
+// Reused form for Yen: the caller supplies a workspace whose per-vertex arrays
+// are allocated once and cleared in O(1) between searches via a generation stamp.
+// Yen's single-source variant spurs the search hundreds of times over the same
+// graph; without a shared workspace each spur re-ran the O(V) Reset (five arrays
+// sized to ~270k vertices), which is exactly the cost the stamp design removes.
+// The workspace is reset to a fresh generation on entry, so callers may pass a
+// dirty one; it must not be shared across concurrent searches.
+ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
+                              const SearchOptions& options, SearchWorkspace& ws);
 
 // Convenience overload: unconstrained shortest path.
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal);
@@ -127,6 +141,9 @@ class SearchWorkspace {
   std::vector<uint32_t> stamp_;         // value-slot generation tag
   std::vector<uint32_t> closed_stamp_;  // == generation_ => closed this search
   uint32_t generation_ = 0;             // bumped per search; 0 = no search run yet
+  // generation_ wraps after 2^32 searches; unreachable in practice (a workspace
+  // is per-query stack-local and sees at most a few thousand spur searches before
+  // it is destroyed), so no wrap handling is needed.
 };
 
 // A memoized admissible heuristic for the multi-source/multi-goal search: for a

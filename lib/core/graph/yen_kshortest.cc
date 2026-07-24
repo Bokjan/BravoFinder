@@ -1,14 +1,24 @@
 #include "core/graph/yen_kshortest.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <set>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace bf {
 
 namespace {
+
+// Pack a directed edge (from, to) into one 64-bit key for the banned-edge set.
+// Vertex ids are small non-negative ints, so a flat integer key lets the ban set
+// be a hash set (O(1) lookup) without a std::pair hash, and stays cache-friendly
+// for the per-edge lookup in the spur search's hot loop.
+inline int64_t EdgeKey(int from, int to) {
+  return (static_cast<int64_t>(from) << 32) | static_cast<uint32_t>(to);
+}
 
 // Compute the effective cost (geographic distance + soft penalties) of a fully
 // specified path, and its geographic distance. Returns false if any step has no
@@ -84,13 +94,6 @@ struct Candidate {
   }
 };
 
-// Per-vertex seed lookup built from a list of seeded endpoints: maps a vertex to
-// its smallest seed cost, or -1 when the vertex is not an endpoint. Shared with
-// the A* search via BuildSeedTable so both agree on endpoint membership and cost.
-std::vector<double> SeedTable(const std::vector<SeededEndpoint>& endpoints, int n) {
-  return BuildSeedTable(endpoints, n);
-}
-
 // Effective cost and geographic distance of a full source..goal path, including
 // both endpoints' seed costs. Returns false if any interior step is not a real
 // edge, is blocked by a constraint, or an endpoint is not actually seeded.
@@ -130,6 +133,13 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
   }
   result.push_back(std::move(first));
 
+  // One workspace reused by every spur search: its per-vertex arrays are
+  // allocated once and cleared in O(1) between searches via a generation stamp,
+  // instead of each spur reallocating and O(V)-initializing fresh arrays (the
+  // same optimization FindKShortestPathsMulti already applies). Stack-local to
+  // this call, so concurrent queries never share it.
+  SearchWorkspace ws;
+
   // Candidate set B, kept sorted/deduped by (cost, vertices). B persists across
   // the outer k iterations (Lawler): candidates not chosen this round stay for
   // the next.
@@ -143,7 +153,7 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
   int last_deviation = 0;
 
   for (int kth = 1; kth < k; ++kth) {
-    const std::vector<int> prev_path = result.back().vertices;
+    const std::vector<int>& prev_path = result.back().vertices;
 
     // Spur from the previous path's deviation index onward (Lawler), not from 0.
     for (size_t i = static_cast<size_t>(last_deviation); i + 1 < prev_path.size(); ++i) {
@@ -153,14 +163,14 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
 
       // Ban the (i -> i+1) edge of every accepted/known path that shares this
       // root, so the spur search must diverge here.
-      std::set<std::pair<int, int>> banned_edges;
+      std::unordered_set<int64_t> banned_edges;
       for (const ShortestPath& p : result) {
         if (p.vertices.size() > i + 1 && std::equal(root.begin(), root.end(), p.vertices.begin())) {
-          banned_edges.emplace(p.vertices[i], p.vertices[i + 1]);
+          banned_edges.insert(EdgeKey(p.vertices[i], p.vertices[i + 1]));
         }
       }
       // Root nodes (except the spur node) are off-limits to keep paths loopless.
-      const std::set<int> banned_nodes(root.begin(), root.end() - 1);
+      const std::unordered_set<int> banned_nodes(root.begin(), root.end() - 1);
 
       SearchOptions spur_opts = base_options;
       // Compose Yen's bans with any caller-supplied node/edge filter (e.g. the
@@ -174,11 +184,11 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
         return banned_nodes.count(v) != 0 || (base_node_blocked && base_node_blocked(v));
       };
       spur_opts.edge_blocked = [banned_edges, base_edge_blocked](int from, int to) {
-        return banned_edges.count({from, to}) != 0 ||
+        return banned_edges.count(EdgeKey(from, to)) != 0 ||
                (base_edge_blocked && base_edge_blocked(from, to));
       };
 
-      const ShortestPath spur = FindShortestPath(graph, spur_node, goal, spur_opts);
+      const ShortestPath spur = FindShortestPath(graph, spur_node, goal, spur_opts, ws);
       if (!spur.found) {
         continue;
       }
@@ -221,8 +231,8 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
     return result;
   }
   const int n = graph.VertexCount();
-  const std::vector<double> source_seed = SeedTable(sources, n);
-  const std::vector<double> goal_seed = SeedTable(goals, n);
+  const std::vector<double> source_seed = BuildSeedTable(sources, n);
+  const std::vector<double> goal_seed = BuildSeedTable(goals, n);
 
   // The goal set is fixed for the whole run, so h(v) is constant per vertex.
   // Build one memoized heuristic and share it across the first search and every
@@ -273,7 +283,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   int last_deviation = -1;
 
   for (int kth = 1; kth < k; ++kth) {
-    const std::vector<int> prev_path = result.back().vertices;
+    const std::vector<int>& prev_path = result.back().vertices;
 
     // Spur nodes are every node of the previous path except the goal, plus a
     // conceptual super-source at index -1 whose "edge" to the first node selects
@@ -313,15 +323,15 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
 
       // Ban the (i -> i+1) edge of every accepted/known path that shares this
       // root, so the spur search must diverge here.
-      std::set<std::pair<int, int>> banned_edges;
+      std::unordered_set<int64_t> banned_edges;
       for (const ShortestPath& p : result) {
         if (p.vertices.size() > static_cast<size_t>(i) + 1 &&
             std::equal(root.begin(), root.end(), p.vertices.begin())) {
-          banned_edges.emplace(p.vertices[i], p.vertices[i + 1]);
+          banned_edges.insert(EdgeKey(p.vertices[i], p.vertices[i + 1]));
         }
       }
       // Root nodes (except the spur node) are off-limits to keep paths loopless.
-      const std::set<int> banned_nodes(root.begin(), root.end() - 1);
+      const std::unordered_set<int> banned_nodes(root.begin(), root.end() - 1);
 
       SearchOptions spur_opts = base_options;
       // Compose Yen's bans with any caller-supplied filter, capturing the ban
@@ -333,7 +343,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
         return banned_nodes.count(v) != 0 || (base_node_blocked && base_node_blocked(v));
       };
       spur_opts.edge_blocked = [banned_edges, base_edge_blocked](int from, int to) {
-        return banned_edges.count({from, to}) != 0 ||
+        return banned_edges.count(EdgeKey(from, to)) != 0 ||
                (base_edge_blocked && base_edge_blocked(from, to));
       };
 
