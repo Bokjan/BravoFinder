@@ -103,6 +103,7 @@ bf-mcp --db-dir /path/to/caches
 # Serve MCP over HTTP instead of stdio (Streamable HTTP, single endpoint /mcp):
 bf-mcp --transport http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
 # HTTP-mode flags mirror bf-http: --worker-threads N, --max-body BYTES, --io-timeout SEC.
+# --cifp-load on-demand|eager applies to both transports (eager = lock-free reads, ~100 MB/cycle).
 ```
 
 Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the `lookup_waypoints` / `lookup_airports` / `lookup_procedures` / `lookup_airways` / `lookup_navaid_detail` / `lookup_holds` batch lookups plus `lookup_procedure_legs` (a named procedure's per-leg detail; mirroring `bf query`), and `list_cycles`. See [apps/mcp/README.md](apps/mcp/README.md) for the full tool reference, argument semantics, and client configuration.
@@ -124,7 +125,8 @@ cmake --preset release && cmake --build --preset release   # or: debug
 # The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
 bf-http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
 # Other flags: --worker-threads N (threadpool size), --max-body BYTES,
-# --io-timeout SEC (header/body read + idle keep-alive).
+# --io-timeout SEC (header/body read + idle keep-alive),
+# --cifp-load on-demand|eager (eager = lock-free procedure reads, ~100 MB/cycle).
 ```
 
 Endpoints (all query endpoints are `POST` with a JSON body; a batch lookup takes `{"ids":[...]}`, a single lookup is a one-element array):

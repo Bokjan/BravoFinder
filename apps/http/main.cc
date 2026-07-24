@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
   }
   uint64_t max_body = 1u << 20;  // 1 MiB
   int io_timeout_sec = bf::http_server::kDefaultIoTimeoutSec;
+  std::string cifp_load = "on-demand";
 
   app.add_option("--db-dir", db_dir, "Directory of nav_<cycle>.bfdb caches")->capture_default_str();
   app.add_option("--host", host, "Bind address")->capture_default_str();
@@ -58,6 +59,11 @@ int main(int argc, char** argv) {
   app.add_option("--io-timeout", io_timeout_sec,
                  "Header/body read and idle keep-alive timeout, in seconds")
       ->capture_default_str();
+  app.add_option("--cifp-load", cifp_load,
+                 "CIFP procedure loading: on-demand (low memory) or eager "
+                 "(lock-free reads, ~100 MB per cycle)")
+      ->capture_default_str()
+      ->check(CLI::IsMember({"on-demand", "eager"}));
   app.set_version_flag("--version", bf::kBravoFinderVersion);
   CLI11_PARSE(app, argc, argv);
 
@@ -83,7 +89,9 @@ int main(int argc, char** argv) {
     std::cerr << "warning: ignoring unreadable cache '" << skipped << "'\n";
   }
   const size_t cycle_count = inventory.value().entries().size();
-  bf::service::NavDatabaseRegistry registry(std::move(inventory.value()));
+  const auto cifp_mode =
+      cifp_load == "eager" ? bf::CifpLoad::kEager : bf::CifpLoad::kOnDemand;
+  bf::service::NavDatabaseRegistry registry(std::move(inventory.value()), cifp_mode);
 
   // Set up the loop, the router, and the TCP listener.
   uv_loop_t loop;

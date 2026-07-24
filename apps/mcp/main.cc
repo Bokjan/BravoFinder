@@ -114,6 +114,7 @@ int main(int argc, char** argv) {
   }
   uint64_t max_body = 1u << 20;  // 1 MiB
   int io_timeout_sec = bf::http_server::kDefaultIoTimeoutSec;
+  std::string cifp_load = "on-demand";
 
   // Parse CLI options. --version (and parse errors) are handled by CLI11 and
   // exit before any cache scan, so `bf-mcp --version` works with no data.
@@ -133,6 +134,11 @@ int main(int argc, char** argv) {
   app.add_option("--io-timeout", io_timeout_sec,
                  "Header/body read and idle keep-alive timeout in seconds (http transport)")
       ->capture_default_str();
+  app.add_option("--cifp-load", cifp_load,
+                 "CIFP procedure loading: on-demand (low memory) or eager "
+                 "(lock-free reads, ~100 MB per cycle)")
+      ->capture_default_str()
+      ->check(CLI::IsMember({"on-demand", "eager"}));
   app.set_version_flag("--version", bf::kBravoFinderVersion);
   CLI11_PARSE(app, argc, argv);
   const std::string dir = db_dir;
@@ -153,7 +159,9 @@ int main(int argc, char** argv) {
     std::cerr << "warning: ignoring unreadable cache '" << skipped << "'\n";
   }
   const size_t cycle_count = inventory.value().entries().size();
-  bf::service::NavDatabaseRegistry registry(std::move(inventory.value()));
+  const auto cifp_mode =
+      cifp_load == "eager" ? bf::CifpLoad::kEager : bf::CifpLoad::kOnDemand;
+  bf::service::NavDatabaseRegistry registry(std::move(inventory.value()), cifp_mode);
 
   if (transport == "http") {
     return RunHttp(registry, host, port, worker_threads, max_body, io_timeout_sec, cycle_count);

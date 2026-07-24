@@ -5,9 +5,11 @@
 //
 // Built from a BfdbInventory (the directory scan). A Get(cycle) call opens and
 // caches that cycle's NavDatabase on first access, then returns the cached
-// instance; Get() with no cycle serves the newest (latest) cycle. Opening is
-// on-demand for CIFP (a server may touch many cycles; eager loading each would
-// cost ~100 MB apiece).
+// instance; Get() with no cycle serves the newest (latest) cycle. The CIFP load
+// mode is chosen once at construction and applies to every cycle: on-demand by
+// default (a server may touch many cycles; eager loading each would cost ~100 MB
+// apiece), or eager for lock-free procedure reads when the deployment serves a
+// small, fixed set of cycles and wants to avoid the per-airport lock/pread.
 //
 // Thread-safety: Get is safe to call concurrently. A mutex guards only the map
 // lookup/insert, never the disk open, mirroring NavDatabase's procedure cache.
@@ -33,7 +35,10 @@ class NavDatabaseRegistry {
  public:
   // Take ownership of the directory inventory. Databases are opened lazily; the
   // constructor does no I/O beyond what building the inventory already did.
-  explicit NavDatabaseRegistry(BfdbInventory inventory);
+  // `cifp_load` selects on-demand (default) or eager CIFP loading for every
+  // cycle this registry opens (see CifpLoad).
+  explicit NavDatabaseRegistry(BfdbInventory inventory,
+                               CifpLoad cifp_load = CifpLoad::kOnDemand);
 
   // The database for `cycle`, or the latest cycle when nullopt. Opens and
   // caches it on first use. Returns an error if the cycle is unknown, the
@@ -46,6 +51,7 @@ class NavDatabaseRegistry {
 
  private:
   BfdbInventory inventory_;
+  CifpLoad cifp_load_;  // CIFP load mode applied to every cycle opened here
   // cycle -> opened database. Append-only under mutex_; unique_ptr values keep
   // returned pointers stable across rehash.
   std::unordered_map<uint32_t, std::unique_ptr<NavDatabase>> cache_;

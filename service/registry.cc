@@ -4,8 +4,8 @@
 
 namespace bf::service {
 
-NavDatabaseRegistry::NavDatabaseRegistry(BfdbInventory inventory)
-    : inventory_(std::move(inventory)) {}
+NavDatabaseRegistry::NavDatabaseRegistry(BfdbInventory inventory, CifpLoad cifp_load)
+    : inventory_(std::move(inventory)), cifp_load_(cifp_load) {}
 
 Result<const NavDatabase*> NavDatabaseRegistry::Get(std::optional<uint32_t> cycle) {
   // Resolve which cache to serve: an explicit cycle, else the newest one.
@@ -30,9 +30,10 @@ Result<const NavDatabase*> NavDatabaseRegistry::Get(std::optional<uint32_t> cycl
   }
 
   // Open outside the lock so concurrent Gets for different cycles parse in
-  // parallel. CIFP procedures live in the same unified .bfdb and load
-  // on-demand (per-airport on first query) after OpenCached.
-  Result<NavDatabase> opened = NavDatabase::OpenCached(entry->path);
+  // parallel. CIFP procedures live in the same unified .bfdb; cifp_load_ selects
+  // on-demand (per-airport on first query) or eager (all up front, then
+  // lock-free) loading after OpenCached.
+  Result<NavDatabase> opened = NavDatabase::OpenCached(entry->path, cifp_load_);
   if (!opened) {
     return Result<const NavDatabase*>::Err(std::move(opened).error());
   }
