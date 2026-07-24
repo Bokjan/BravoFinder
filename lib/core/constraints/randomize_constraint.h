@@ -34,11 +34,17 @@ class RandomizeConstraint : public Constraint {
   // Map (seed, to, airway_id) to a value in [0, 1) via a splitmix64-style
   // finalizer. Pure and stable across platforms (fixed-width integer math only).
   static double Hash01(uint32_t seed, int32_t to, uint16_t airway_id) {
-    uint64_t x = (static_cast<uint64_t>(seed) << 32) ^
-                 (static_cast<uint64_t>(static_cast<uint32_t>(to)) << 16) ^
-                 static_cast<uint64_t>(airway_id);
+    // Pack seed and `to` into the two non-overlapping halves of a 64-bit word,
+    // then fold airway_id in through a separate mixing round. An earlier layout
+    // XOR-ed seed<<32, to<<16 and airway_id, whose bits 32-47 overlapped, so
+    // distinct (seed, to) pairs could cancel to the same value and collapse
+    // route diversity (correctness was unaffected -- the jitter stays
+    // non-negative and admissible either way).
+    uint64_t x = (static_cast<uint64_t>(seed) << 32) |
+                 static_cast<uint64_t>(static_cast<uint32_t>(to));
     x += 0x9e3779b97f4a7c15ULL;
     x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x ^= static_cast<uint64_t>(airway_id) + 0x9e3779b97f4a7c15ULL;
     x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
     x = x ^ (x >> 31);
     // Take the top 53 bits for a uniform double in [0, 1).

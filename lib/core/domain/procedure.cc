@@ -10,6 +10,7 @@ bool TerminatesAtFix(PathTerminator t) {
     case PathTerminator::kCF:
     case PathTerminator::kAF:  // Arc to Fix: ends at a named fix
     case PathTerminator::kRF:  // Radius to Fix: ends at a named fix
+    case PathTerminator::kHF:  // Hold to Fix: ends at a named fix
       return true;
     default:
       return false;

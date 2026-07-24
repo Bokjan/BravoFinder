@@ -42,7 +42,7 @@ struct Error {
 // Construct via the Ok/Err factories. The success and error types must differ
 // so the active alternative is unambiguous.
 template <class T, class E = Error>
-class Result {
+class [[nodiscard]] Result {
   static_assert(!std::is_same_v<T, E>, "Result<T, E> requires distinct value and error types");
 
  public:
@@ -81,7 +81,7 @@ class Result {
 // an error (e.g. writing a file). Mirrors std::expected<void, E>: Ok() takes no
 // argument, has_value() reports success, error() yields the failure.
 template <class E>
-class Result<void, E> {
+class [[nodiscard]] Result<void, E> {
  public:
   static Result Ok() { return Result(std::monostate{}); }
   static Result Err(E error) { return Result(std::move(error)); }

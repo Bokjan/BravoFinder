@@ -44,9 +44,10 @@ enum class PathTerminator {
   kUnknown,  // unrecognized code (kept so parsing never silently drops a leg)
 };
 
-// True for the "fly to a definite fix" terminators (TF/IF/DF/CF). Their fix is
-// a real navigation point that can be resolved to a graph vertex; the others
-// terminate on a heading/altitude/arc/hold and must be estimated.
+// True for the "fly to a definite fix" terminators (TF/IF/DF/CF/AF/RF/HF -- the
+// ARINC 424 codes ending in "F", to Fix). Their fix is a real navigation point
+// that can be resolved to a graph vertex; the others terminate on a
+// heading/altitude/arc/manual/hold-to-non-fix and must be estimated.
 bool TerminatesAtFix(PathTerminator t);
 
 // Parse a two-letter CIFP path-terminator token (e.g. "TF"). Returns kUnknown

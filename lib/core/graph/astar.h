@@ -88,8 +88,10 @@ class SearchWorkspace {
   // Effective cost from a source. Reads +inf until written this generation.
   double G(int v) const { return Live(v) ? g_[v] : kInfinity_; }
   // Geographic distance along the best path. Valid only for vertices relaxed
-  // this generation (the path-reconstruction walk only ever visits those).
-  double Geo(int v) const { return geo_[v]; }
+  // this generation (the path-reconstruction walk only ever visits those);
+  // guarded like G()/Prev() so a stray read of an untouched vertex returns 0
+  // rather than a stale value from a previous generation.
+  double Geo(int v) const { return Live(v) ? geo_[v] : 0.0; }
   // Predecessor on the best path, or -1 until written this generation.
   int Prev(int v) const { return Live(v) ? prev_[v] : -1; }
   // Closed is its own generation stamp, so it clears in O(1) with the rest and

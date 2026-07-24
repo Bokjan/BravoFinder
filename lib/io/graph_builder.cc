@@ -157,6 +157,14 @@ GraphBuilder::GraphBuilder(const NavData& data, int airport_dct_count) {
     const Airport& a = data.airports[i];
     const int v = waypoint_count + i;
     // Expand the search radius until enough on-network candidates are found.
+    // NOTE: these airport DCT edges are effectively dead in routing -- airport
+    // vertices are node_blocked for every search role, and search endpoints are
+    // always seeded connection fixes, so the edges added just below are never
+    // traversed. They are kept for graph completeness/inspection. Do NOT
+    // "widen" the candidate filter to has_outbound || has_inbound to fix
+    // asymmetry: that only adds more unreachable dead edges. The real fix is to
+    // rethink the airport connectivity model (or drop these edges); the DCT
+    // fallback path (NearestOnNetwork) already selects candidates directionally.
     std::vector<int> candidates;
     for (int radius = 2; radius <= 16 && candidates.empty(); radius += 2) {
       for (int cand : grid.Near(a.coord, radius)) {
