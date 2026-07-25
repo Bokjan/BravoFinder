@@ -184,6 +184,6 @@ if(BRAVOFINDER_INSTALL)
           FILE bravofinderTargets.cmake
           NAMESPACE bf::
           DESTINATION lib/cmake/bravofinder)
-  install(FILES LICENSE THIRD_PARTY_LICENSES.md libs/engine/LICENSE libs/engine/LICENSE.GPLv3
+  install(FILES LICENSE LICENSE.MIT THIRD_PARTY_LICENSES.md libs/engine/LICENSE libs/engine/LICENSE.GPLv3
           DESTINATION share/doc/BravoFinder)
 endif()

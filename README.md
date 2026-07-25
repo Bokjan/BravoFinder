@@ -237,6 +237,6 @@ In-depth technical articles (in Chinese) live under [docs/](docs/README.md) — 
 
 ## License
 
-This project is dual-licensed. The core route engine library under `libs/engine/` is distributed under the **GNU Lesser General Public License v3.0-or-later** (see [`libs/engine/LICENSE`](libs/engine/LICENSE)); everything else is **MIT** (text in [`LICENSE`](LICENSE)). Third-party dependencies: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Contributing conventions: see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+This project is dual-licensed. The core route engine library under `libs/engine/` is distributed under the **GNU Lesser General Public License v3.0-or-later** (see [`libs/engine/LICENSE`](libs/engine/LICENSE)); everything else is **MIT** (text in [`LICENSE.MIT`](LICENSE.MIT)). Third-party dependencies: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Contributing conventions: see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 The `libs/engine` library is statically linked into the `bf` / `bf-http` / `bf-mcp` binaries. Under the LGPL, if you modify `libs/engine` you may relink it into those binaries; the complete corresponding source (including the engine) is published with every release and in this repository.

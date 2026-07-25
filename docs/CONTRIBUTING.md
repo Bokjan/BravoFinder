@@ -105,7 +105,7 @@ build: wire up Catch2 and CLI11 via FetchContent
 
 ## 4. License and Data Compliance
 
-- This project is **dual-licensed**. Files under `libs/engine/` are distributed under the **GNU Lesser General Public License v3.0-or-later** (see `libs/engine/LICENSE`); all other files are **MIT** (see `LICENSE` at the root).
+- This project is **dual-licensed**. Files under `libs/engine/` are distributed under the **GNU Lesser General Public License v3.0-or-later** (see `libs/engine/LICENSE`); all other files are **MIT** (see `LICENSE.MIT` at the root).
 - **Inbound = outbound**: contributions to `libs/engine/` are licensed under LGPL-3.0-or-later; contributions elsewhere are licensed under MIT. Do not submit code whose license is incompatible with the target directory — in particular, **do not** introduce any GPL-only dependency into `libs/engine/`.
 - All third-party dependencies use permissive licenses (see `THIRD_PARTY_LICENSES.md`) and are fetched at build time via FetchContent; **their source is not committed to this repository**.
 - **Navigation data compliance**: Navigraph / Jeppesen data is copyrighted and may not be redistributed. Real `.dat` / `.bfdb` data is **never committed** (blocked by `.gitignore`). Local real data lives in `navdata/` (ignored).

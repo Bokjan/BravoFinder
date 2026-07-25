@@ -148,6 +148,7 @@ jobs:
           # libs/engine is LGPL-3.0 (statically linked into the binaries); ship its license text too.
           cp libs/engine/LICENSE pkg/share/doc/BravoFinder/
           cp libs/engine/LICENSE.GPLv3 pkg/share/doc/BravoFinder/
+          cp LICENSE.MIT pkg/share/doc/BravoFinder/
 
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
