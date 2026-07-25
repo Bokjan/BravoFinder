@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/loaders/dfd2/dfd2_loader.h"
 
 #include <sqlite3.h>

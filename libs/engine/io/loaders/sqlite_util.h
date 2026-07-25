@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
 // Generic SQLite plumbing shared by the DFD loaders (DFD v1.0 and DFD v2):

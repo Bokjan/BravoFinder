@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // bf-http: a hand-rolled HTTP query server exposing BravoFinder's route-finding
 // and navigation-data lookups over HTTP+JSON, for an internal (Go) gateway.
 //

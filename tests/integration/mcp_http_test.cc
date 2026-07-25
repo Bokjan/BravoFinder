@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // mcp_http_test.cc — end-to-end coverage of the MCP-over-HTTP (Streamable HTTP)
 // transport: a real McpHttpHandler on a libuv server bound to a loopback port,
 // driven over an actual socket. It exercises the Streamable HTTP surface:

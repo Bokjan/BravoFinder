@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // http_test.cc — end-to-end coverage of the bf-http transport: a real
 // libuv server on a loopback port, driven over an actual socket, exercising the
 // hardening paths llhttp does not handle. This is where the "does the whole

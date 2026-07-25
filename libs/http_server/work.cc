@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // work.cc — the uv_queue_work offload and its liveness-guarded completion.
 
 #include "work.h"

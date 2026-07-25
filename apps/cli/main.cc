@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <CLI/CLI.hpp>
 #include <cstdlib>
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
 // BfdbInventory: the set of `.bfdb` caches found in a directory, indexed by

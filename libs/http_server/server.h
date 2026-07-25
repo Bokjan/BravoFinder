@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // server.h — the TCP listener + accept loop for the shared HTTP core.
 //
 // Server owns the listening uv_tcp_t and turns each accepted socket into a

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "core/domain/fixed_ident.h"
 
 #include <algorithm>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/loaders/xplane12/xplane12_loader.h"
 
 #include <cctype>

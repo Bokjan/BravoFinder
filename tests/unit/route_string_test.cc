@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "core/routing/route_string.h"
 
 #include <catch2/catch_test_macros.hpp>

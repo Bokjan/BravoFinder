@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // queries.cc — typed query entry points (see queries.h).
 //
 // Each entry times the engine call, renders via render.h, and maps the outcome

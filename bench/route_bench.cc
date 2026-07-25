@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // In-process microbenchmark for the K-shortest route search.
 //
 // Isolates pure search cost from process startup and cache loading: it opens the

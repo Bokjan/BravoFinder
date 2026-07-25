@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "core/domain/mora_grid.h"
 
 #include <catch2/catch_test_macros.hpp>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // query_render_test.cc — unit tests for the query-layer renderers (render.cc).
 //
 // The text renderers were ported verbatim from the former CLI printers, and the

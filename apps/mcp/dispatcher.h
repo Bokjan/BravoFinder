@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // dispatcher.h — the transport-neutral MCP JSON-RPC dispatcher for bf-mcp.
 //
 // Dispatcher owns everything about MCP that does not depend on how bytes move:

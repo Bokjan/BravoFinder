@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // render.h — result rendering for the query layer, shared by the JSON-args
 // handlers (MCP / HTTP) and the CLI.
 //

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // http_handlers_test.cc — the "router mapping layer": each shared bf::service
 // handler, given parsed args + a real NavDatabase, returns the right
 // HTTP-style status. This is the fast, socket-free coverage of the 200 / 400 /

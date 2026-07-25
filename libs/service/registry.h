@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #pragma once
 
 // NavDatabaseRegistry: serves multiple AIRAC cycles from one directory of

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "io/loaders/loader_registry.h"
 
 #include <catch2/catch_test_macros.hpp>

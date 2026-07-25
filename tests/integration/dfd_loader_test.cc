@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Integration tests for the DFD SQLite loaders (DFD v1.0 and DFD v2). Uses the
 // real cycle-2601 Navigraph SQLite databases (PMDG e_dfd_PMDG.s3db for v1,
 // Inibuilds db.s3db for v2) located under navdata/dfd1/ and navdata/dfd2/. Real

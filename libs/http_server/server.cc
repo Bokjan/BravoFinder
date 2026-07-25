@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // server.cc — bind/listen and accept-to-Connection for the shared HTTP core.
 
 #include "server.h"

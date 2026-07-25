@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "io/cache/nav_detail_codec.h"
 
 #include <catch2/catch_test_macros.hpp>

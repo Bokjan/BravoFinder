@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // dispatcher.cc — the transport-neutral MCP method dispatch for bf-mcp.
 //
 // This is the protocol logic only: it takes a parsed JSON-RPC request, runs the

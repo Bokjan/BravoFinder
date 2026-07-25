@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // jsonrpc.h — JSON-RPC 2.0 protocol constants, in one place.
 //
 // The pre-defined error codes below are not invented here: they are the reserved

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "core/routing/route_json.h"
 
 #include <catch2/catch_approx.hpp>

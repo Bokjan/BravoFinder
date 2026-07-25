@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <random>

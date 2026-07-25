@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tools.h — the MCP tool abstraction for bf-mcp.
 //
 // A Tool is fully self-describing: it carries its MCP name, a human/LLM-facing

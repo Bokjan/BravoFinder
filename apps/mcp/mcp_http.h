@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // mcp_http.h — the MCP-over-HTTP (Streamable HTTP, 2025-03-26) transport for
 // bf-mcp.
 //

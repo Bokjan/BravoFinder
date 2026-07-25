@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
 // Internal little-endian byte serialization helpers shared by the cache

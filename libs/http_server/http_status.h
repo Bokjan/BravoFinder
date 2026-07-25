@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // http_status.h — canonical HTTP status codes for the transport core and the
 // apps that speak HTTP (bf-http REST, bf-mcp over HTTP). Centralized so no
 // endpoint hard-codes a bare integer status. The bf::service layer keeps its own

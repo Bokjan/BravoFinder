@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "core/graph/yen_kshortest.h"
 
 #include <algorithm>

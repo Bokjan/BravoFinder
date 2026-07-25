@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
 #include "core/routing/route_parser.h"
 
 #include <cctype>

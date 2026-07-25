@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // mcp_dispatch_test.cc — unit coverage of the transport-neutral MCP Dispatcher.
 //
 // The Dispatcher is the protocol core shared by the stdio and HTTP transports:

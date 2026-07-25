@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // stdio_runner.cc — the stdio JSON-RPC transport for bf-mcp.
 //
 // This file is the transport layer only: it reads JSON-RPC requests from stdin

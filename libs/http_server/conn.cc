@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // conn.cc — the per-connection HTTP/1.1 state machine and the safety hardening
 // that llhttp (a pure parser) does not do. The checklist implemented here:
 //

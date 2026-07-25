@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // handlers.h — the transport-neutral query handlers shared by the MCP and HTTP
 // apps.
 //

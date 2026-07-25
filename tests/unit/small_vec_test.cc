@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "core/util/small_vec.h"
 
 #include <algorithm>

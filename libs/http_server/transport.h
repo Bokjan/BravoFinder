@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // transport.h — the transport-neutral surface of the shared HTTP core.
 //
 // http_server/ is the hand-rolled HTTP/1.1 transport (libuv event loop + llhttp

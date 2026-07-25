@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // router.cc — endpoint table, ?cycle= parsing, and status selection for bf-http.
 
 #include "router.h"

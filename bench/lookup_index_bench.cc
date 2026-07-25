@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Microbenchmark for issue #3: does replacing GraphBuilder's three lookup maps
 // (unordered_map) with a sorted vector + binary search regress lookup latency?
 //

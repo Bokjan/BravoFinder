@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // handlers.cc — the JSON-args adapter layer over the typed query entries.
 //
 // Each handler parses the request "arguments" object (the wire shape the MCP and

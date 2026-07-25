@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // bf-mcp: an MCP server exposing BravoFinder's route-finding and navigation-data
 // lookup as MCP tools, over one of two transports:
 //

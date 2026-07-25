@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
 // Naming conventions for `.bfdb` caches, so a directory of caches from different

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "core/graph/astar.h"
 
 #include <algorithm>

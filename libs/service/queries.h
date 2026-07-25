@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // queries.h — the typed query entry points of the query layer.
 //
 // Each entry runs the engine call, renders the result in the requested

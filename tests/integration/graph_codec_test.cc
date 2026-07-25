@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "io/cache/graph_codec.h"
 
 #include <catch2/catch_approx.hpp>

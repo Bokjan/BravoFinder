@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // work.h — offload a unit of work to the libuv worker threadpool for the shared
 // HTTP core.
 //

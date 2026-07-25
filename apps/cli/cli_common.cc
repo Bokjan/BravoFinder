@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "cli_common.h"
 
 #include <rapidjson/stringbuffer.h>

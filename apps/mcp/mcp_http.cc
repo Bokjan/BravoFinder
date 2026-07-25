@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // mcp_http.cc — the MCP-over-HTTP (Streamable HTTP, 2025-03-26) transport.
 //
 // Serves the single /mcp endpoint over the shared HTTP core. POST carries a

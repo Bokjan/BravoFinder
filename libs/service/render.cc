@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // render.cc — implementation of the query-layer renderers (see render.h).
 //
 // The JSON branch of each renderer is the serialization the transports ship

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // tools.cc — the MCP capabilities exposed by bf-mcp.
 //
 // The query logic itself lives in bf::service (libs/service/), shared with the

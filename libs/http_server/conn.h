@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // conn.h — one TCP connection's HTTP/1.1 state machine for the shared HTTP core.
 //
 // A Connection owns a libuv TCP handle, an llhttp parser, and the per-request
