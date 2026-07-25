@@ -110,7 +110,14 @@ set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 # static target we consume, and skips the shared uv target). Setting it only
 # before llhttp -- as this used to -- left libuv's static-only behavior implicit
 # and order-fragile.
-set(BUILD_SHARED_LIBS OFF)
+#
+# Must be a CACHE var (with FORCE): llhttp's CMakeLists uses
+# `option(BUILD_SHARED_LIBS "..." ON)`, and option() only consults the CACHE.
+# A plain `set(... OFF)` (non-cache) is invisible to that option(), so it falls
+# back to its default ON -- building llhttp_shared too. Both variants then emit
+# to the same Debug llhttp.pdb and race under /MP (MSVC C1041). CACHE+FORCE makes
+# option() see the OFF and skip the shared target (we only consume llhttp_static).
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LIBUV_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LIBUV_BUILD_BENCH OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
