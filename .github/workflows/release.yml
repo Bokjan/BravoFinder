@@ -145,6 +145,9 @@ jobs:
           # carry their license text; THIRD_PARTY_LICENSES.md covers every dep.
           cp staging/share/doc/BravoFinder/LICENSE pkg/share/doc/BravoFinder/
           cp staging/share/doc/BravoFinder/THIRD_PARTY_LICENSES.md pkg/share/doc/BravoFinder/
+          # libs/engine is LGPL-3.0 (statically linked into the binaries); ship its license text too.
+          cp libs/engine/LICENSE pkg/share/doc/BravoFinder/
+          cp libs/engine/LICENSE.GPLv3 pkg/share/doc/BravoFinder/
 
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
