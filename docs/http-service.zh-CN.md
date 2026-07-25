@@ -6,8 +6,8 @@
 
 `bf-http` 是一个**内网航路查询服务**：上层业务（Go 网关）通过 HTTP+JSON 调用它，而不是把 C++ 库以 cgo/pybind 方式嵌进业务进程。理由：
 
-- 一次路由查询本身是 **~10ms(k=1) ~ 13–30ms(k=10)** 的纯计算（见 [性能测试](performance.zh-CN.md)）， 相比之下 JSON 序列化（µs 级）、localhost 往返（亚 ms）都低 1–3 个数量级——"为省编组开销选 in-process"不成立。
-- 数据模型天然"加载一次、服务多次"：`OpenCached(kEager)` 常驻后无锁并发（[线程安全契约 B](thread-safety.zh-CN.md)）。
+- 一次路由查询本身是 **~10ms(k=1) ~ 13–30ms(k=10)** 的纯计算（见 [性能测试](performance.zh-CN.md)）， 相比之下 JSON 序列化（µs 级）、localhost 往返（亚 ms）都低 1–3 个数量级——「为省编组开销选 in-process」不成立。
+- 数据模型天然「加载一次、服务多次」：`OpenCached(kEager)` 常驻后无锁并发（[线程安全契约 B](thread-safety.zh-CN.md)）。
 - 进程隔离：C++ 崩溃不连坐 Go 网关，Go 保持 `CGO_ENABLED=0`。
 - 消费侧要强类型对象时，Go 的 `encoding/json` 反序列化即得——比 cgo 手写 C-struct 镜像省事得多。
 
@@ -47,7 +47,7 @@ loop 线程：连接仍存活则写响应，否则丢弃结果
 - `after_work` 回到 loop 线程后先查 `IsAlive()`：连接已关就**丢弃响应**，不写。
 - `self_` 只在两个 handle（tcp + timer）都关完后释放，对象随最后一个在途引用消失而析构。
 
-集成测试专门覆盖"计算途中断开不崩"（`tests/integration/http_test.cc`），并跑 tsan。
+集成测试专门覆盖「计算途中断开不崩」（`tests/integration/http_test.cc`），并跑 tsan。
 
 ### 手搓 HTTP 的安全硬化
 
@@ -74,7 +74,7 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 | **400** | `Transfer-Encoding: chunked` 请求体（显式拒绝） |
 | **500** | worker 未捕获异常 |
 
-区分"你传错了"(400) 与"你没传错但无解"(422)，是错误模型的核心。
+区分「你传错了」(400) 与「你没传错但无解」(422)，是错误模型的核心。
 
 探针：`/healthz` 恒 200（进程存活）；`/readyz` 最新周期可打开才 200，否则 503（且开库可能有磁盘 I/O，故 readyz 也走 offload）。
 
