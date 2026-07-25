@@ -1,6 +1,6 @@
 # 领域建模与内存设计：值类型、Result、紧凑表示
 
-> BravoFinder 的领域类型为什么这么设计——不可变值类型、自研 `Result<T,E>`、无 `static`/无裸 `new`、以及数据驱动的紧凑内存表示（一度是 `SmallVec`，后为定长 `FixedIdent`）。这些不是零散的 风格偏好，而是 v2→v3 重写的核心动机的直接体现。面向想读源码、理解设计宪法的读者。相关代码： `lib/core/domain/`、`lib/core/result.h`、`lib/core/util/small_vec.h`。
+> BravoFinder 的领域类型为什么这么设计——不可变值类型、自研 `Result<T,E>`、无 `static`/无裸 `new`、以及数据驱动的紧凑内存表示（一度是 `SmallVec`，后为定长 `FixedIdent`）。这些不是零散的 风格偏好，而是 v2→v3 重写的核心动机的直接体现。面向想读源码、理解设计宪法的读者。相关代码： `libs/engine/core/domain/`、`libs/engine/core/result.h`、`libs/engine/core/util/small_vec.h`。
 
 ## 1. 一条主线：v2 的 static 共享 bug
 

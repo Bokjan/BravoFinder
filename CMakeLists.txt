@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.16.20
+        VERSION 3.16.21
         DESCRIPTION "A realistic / compliant flight route engine"
         LANGUAGES C CXX)
 
@@ -86,14 +86,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(sqlite3)
 
 # SQLite amalgamation (read-only, used by the DFD loaders). Compiled directly as
-# a bravofinder source (lib/CMakeLists.txt adds ${_sqlite3_dir}/sqlite3.c), so
+# a bravofinder source (libs/engine/CMakeLists.txt adds ${_sqlite3_dir}/sqlite3.c), so
 # the shipped libbravofinder.a is self-contained -- sqlite3.o lives in the
 # archive with no external bf::sqlite3 dependency leaking into the export set.
 # (A separate OBJECT lib linked via $<TARGET_OBJECTS:> does NOT fold its objects
 # into a static archive: they are only pulled in at final executable link,
 # leaving the archive with undefined sqlite3 symbols.) Third-party-C warnings and
 # SQLITE_* defines are scoped to sqlite3.c via set_source_files_properties in
-# lib/CMakeLists.txt.
+# libs/engine/CMakeLists.txt.
 set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 
 # libuv (event-loop async I/O + a built-in worker threadpool) and llhttp (Node's
@@ -153,9 +153,9 @@ endforeach()
 # ---------------------------------------------------------------------------
 # Subdirectories
 # ---------------------------------------------------------------------------
-add_subdirectory(lib)
-add_subdirectory(service)
-add_subdirectory(http_server)
+add_subdirectory(libs/engine)
+add_subdirectory(libs/service)
+add_subdirectory(libs/http_server)
 add_subdirectory(apps/cli)
 add_subdirectory(apps/mcp)
 add_subdirectory(apps/http)

@@ -7,7 +7,7 @@
 // via http_server::QueueWork, so the 10-30 ms route computation never blocks the
 // loop. Endpoint -> handler wiring, ?cycle= parsing, and status-code selection
 // all live here; the transport (connection state machine, listener, offload
-// plumbing) lives in the shared http_server/ library.
+// plumbing) lives in the shared libs/http_server/ library.
 
 #pragma once
 

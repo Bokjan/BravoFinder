@@ -1,6 +1,6 @@
 # 跨平台二进制缓存：统一 。bfdb
 
-> 把 ~1.5s 的「解析 + 建图」变成 ~50ms 的「读文件」，且文件在 x86/ARM 之间可移植、单文件 部署。面向想理解缓存格式取舍的读者。相关代码：`lib/io/cache/`（`byte_io.h`、`unified_cache.*` 容器 + `graph_codec.*`／`cifp_codec.*`／`nav_detail_codec.*` 三段 codec、`graph_snapshot.h`）、 `lib/io/graph_builder.cc`（`FromSnapshot`/`ToSnapshot`）。
+> 把 ~1.5s 的「解析 + 建图」变成 ~50ms 的「读文件」，且文件在 x86/ARM 之间可移植、单文件 部署。面向想理解缓存格式取舍的读者。相关代码：`libs/engine/io/cache/`（`byte_io.h`、`unified_cache.*` 容器 + `graph_codec.*`／`cifp_codec.*`／`nav_detail_codec.*` 三段 codec、`graph_snapshot.h`）、 `libs/engine/io/graph_builder.cc`（`FromSnapshot`/`ToSnapshot`）。
 
 ## 1. 问题：每次启动都要重新解析建图
 
@@ -51,7 +51,7 @@ v3 起磁盘改为**逐顶点一条自包含 record**（`coord + ident 引用 + 
 
 > **为什么从 `unordered_map` 换成排序数组**：一个隔离微基准（真实 27 万 idents）量出查找只慢 ~49ns/op、而内存从 ~26MB 降到 ~4MB，且查找不在 A\* 热路径（只在端点解析）——拿确定的内存收益换 不可感知的延迟。key 用定长 `FixedIdent`(12B) / `FixedIdentNoRegion`(8B，无 region 的 ICAO/bare ident)，`pair<key,int>` 因此保持 12–16B。`RebuildIndices` 末尾有 `is_sorted` 断言，防「未排序 → 二分静默错」。
 
-`FromSnapshot`/`ToSnapshot`（`lib/io/graph_builder.cc`）是图与缓存快照 `GraphSnapshot` 之间的转换点。
+`FromSnapshot`/`ToSnapshot`（`libs/engine/io/graph_builder.cc`）是图与缓存快照 `GraphSnapshot` 之间的转换点。
 
 ## 6. 字符串：文件层用池引用，运行时按体量分层
 
@@ -127,7 +127,7 @@ uint8  level        // AirwayLevel low/high/both 的原始 enum 值（三态互�
 
 缓存格式会演进，必须能干净拒绝不兼容的旧文件而非崩溃。三层版本：
 
-1. **程序 version**（CMake `project VERSION` → `lib/core/version.h` 的 `kBravoFinderVersion` → `bf --version`）；
+1. **程序 version**（CMake `project VERSION` → `libs/engine/core/version.h` 的 `kBravoFinderVersion` → `bf --version`）；
 2. **容器 `format_version`**（magic 「BFDB」，具体值以 `unified_cache.h` 的 `kFormatVersion` 为准，不在此复述以免过期），机器校验，不符走 `Result::Err(kFormatMismatch)`，提示重跑 `bf build`。**只此一个版本号**管全部布局—— 统一容器一次性产出三段，不存在「只改 graph 段但 CIFP 段保持旧版」的场景，故不设 per-section 版本号（那是过度设计）；
 3. **provenance**：程序 version + source_loader + AIRAC cycle 写进容器头。
 

@@ -1,6 +1,6 @@
 # 地形安全：MORA 网格与 MSA 扇区
 
-> BravoFinder 的两种最低安全高度数据——航路级的 MORA 与终端级的 MSA——它们怎么建模、 怎么参与算路、又为什么用两套完全不同的数据结构。面向关心「这条航路飞得够不够高」的读者。 相关代码：`lib/core/domain/mora_grid.h`、`lib/core/domain/msa.h`、`lib/core/constraints/mora_constraint.h`、 `lib/io/nav_database_query.cc`。
+> BravoFinder 的两种最低安全高度数据——航路级的 MORA 与终端级的 MSA——它们怎么建模、 怎么参与算路、又为什么用两套完全不同的数据结构。面向关心「这条航路飞得够不够高」的读者。 相关代码：`libs/engine/core/domain/mora_grid.h`、`libs/engine/core/domain/msa.h`、`libs/engine/core/constraints/mora_constraint.h`、 `libs/engine/io/nav_database_query.cc`。
 
 ## 1. 两种「最低安全高度」，两种尺度
 

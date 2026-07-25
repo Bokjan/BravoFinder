@@ -8,7 +8,7 @@ A flight route finder written in modern C++ (v3).
 
 BravoFinder builds a graph from navigation data (waypoints, navaids, airways, and SID/STAR/approach procedures) and finds routes between two airports. Unlike earlier versions, which computed a purely geographic shortest path, v3 is a **realistic / compliant route engine**: routes respect real-world constraints such as airway directionality, high/low airway levels, segment altitude bands, and terminal procedures.
 
-Navigation data is read through a **pluggable `Loader` interface** (`lib/io/loaders/`) that abstracts the source format. Three loaders ship today: `xplane12` (the default — X-Plane 12 native `.dat`), and `dfd1` / `dfd2` for the DFD SQLite databases shipped by RealTraffic / SimToolkitPro / PMDG MSFS and Inibuilds A350 respectively. Adding a format means adding a loader; the route engine is untouched. The selected loader is recorded as `source_loader` provenance in every `.bfdb` cache header.
+Navigation data is read through a **pluggable `Loader` interface** (`libs/engine/io/loaders/`) that abstracts the source format. Three loaders ship today: `xplane12` (the default — X-Plane 12 native `.dat`), and `dfd1` / `dfd2` for the DFD SQLite databases shipped by RealTraffic / SimToolkitPro / PMDG MSFS and Inibuilds A350 respectively. Adding a format means adding a loader; the route engine is untouched. The selected loader is recorded as `source_loader` provenance in every `.bfdb` cache header.
 
 ## Status
 
@@ -16,7 +16,7 @@ The tool builds a directed graph honoring airway directionality and high/low lev
 
 A single loaded database is safe to query concurrently from multiple threads.
 
-The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` CLI, an MCP server (`bf-mcp`) for LLM clients — over **stdio** (default) or **HTTP** (Streamable HTTP, `--transport http`) — and a REST+JSON server (`bf-http`) for network callers. They share one service layer (`service/`, namespace `bf::service`); the two HTTP transports (`bf-http` REST and `bf-mcp` HTTP) share one transport core (`http_server/`, namespace `bf::http_server`).
+The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` CLI, an MCP server (`bf-mcp`) for LLM clients — over **stdio** (default) or **HTTP** (Streamable HTTP, `--transport http`) — and a REST+JSON server (`bf-http`) for network callers. They share one service layer (`libs/service/`, namespace `bf::service`); the two HTTP transports (`bf-http` REST and `bf-mcp` HTTP) share one transport core (`libs/http_server/`, namespace `bf::http_server`).
 
 ## Building
 
@@ -38,7 +38,7 @@ Build only what you need with `--target`:
 | `bf_http` | HTTP query server (`apps/http/`) |
 | `bf_service_lib` | Shared service layer: registry + handlers + typed entries, `bf::service` (static) |
 | `bf_tests` | Test runner |
-| `bravofinder` | The unified static library (`lib/`, alias `bf::bravofinder`) |
+| `bravofinder` | The unified static library (`libs/engine/`, alias `bf::bravofinder`) |
 
 ```bash
 cmake --build --preset debug --target bf_mcp    # just the MCP server

@@ -1,6 +1,6 @@
 # 合规航路引擎：不只是地理最短
 
-> BravoFinder 与「玩具版最短路」最根本的区别。面向想理解「为什么这条航路是这么走的」 的读者。相关代码：`lib/core/constraints/`、`lib/io/graph_builder.cc`、`lib/core/graph/`。
+> BravoFinder 与「玩具版最短路」最根本的区别。面向想理解「为什么这条航路是这么走的」 的读者。相关代码：`libs/engine/core/constraints/`、`libs/engine/io/graph_builder.cc`、`libs/engine/core/graph/`。
 
 ## 1. 出发点：地理最短 ≠ 可飞/合规
 
@@ -20,7 +20,7 @@ v3 是一次完全重写，目标从「算最短」变成**「算真实、合规
 
 航路的方向性不是查询期才判断的，而是**建图时就编码进边**。X-Plane `earth_awy.dat` 每段 航路有一个方向字段：`N`=双向、`F`=仅正向（from→to）、`B`=仅反向（to→from）。
 
-`GraphBuilder` 据此决定给这条航路段生成哪些有向边（`lib/io/graph_builder.cc`）：
+`GraphBuilder` 据此决定给这条航路段生成哪些有向边（`libs/engine/io/graph_builder.cc`）：
 
 - `N`（双向）→ 生成 from→to **和** to→from 两条边；
 - `F`（仅正向）→ 只生成 from→to；
@@ -30,7 +30,7 @@ v3 是一次完全重写，目标从「算最短」变成**「算真实、合规
 
 ## 3. 可插拔约束框架：硬过滤 + 软代价
 
-除了方向性（图结构层），其余约束是**查询期**的、按巡航高度/偏好变化的，所以做成一个 可插拔框架（`lib/core/constraints/constraint.h`）。每个约束对一条边给出一个 `EdgeVerdict`：
+除了方向性（图结构层），其余约束是**查询期**的、按巡航高度/偏好变化的，所以做成一个 可插拔框架（`libs/engine/core/constraints/constraint.h`）。每个约束对一条边给出一个 `EdgeVerdict`：
 
 ```cpp
 struct EdgeVerdict {
@@ -42,11 +42,11 @@ struct EdgeVerdict {
 - **硬过滤**（`allowed=false`）：直接禁掉边，搜索绕开它。
 - **软代价**（`extra_cost>0`）：边仍可用，但更「贵」，搜索倾向避开——用于「偏好」而非「禁止」。
 
-搜索在松弛每条边时，对所有激活的约束求值：**任一约束 block 则边不可用；软代价累加** （`lib/core/graph/astar.cc` 的 `EdgeAllowed`）。约束彼此独立、无状态，组合方式由搜索统一处理。 这是 §4.5 设计里「可插拔」的落点：以后要加欧控 RAD/CDR 之类的限制航路约束，只需新增一个 `Constraint` 子类，**不动图与算法**。
+搜索在松弛每条边时，对所有激活的约束求值：**任一约束 block 则边不可用；软代价累加** （`libs/engine/core/graph/astar.cc` 的 `EdgeAllowed`）。约束彼此独立、无状态，组合方式由搜索统一处理。 这是 §4.5 设计里「可插拔」的落点：以后要加欧控 RAD/CDR 之类的限制航路约束，只需新增一个 `Constraint` 子类，**不动图与算法**。
 
 ## 4. 三个内置约束
 
-`lib/io/nav_database.cc` 的 `FindRoutes` 按查询请求组装激活哪些约束：
+`libs/engine/io/nav_database.cc` 的 `FindRoutes` 按查询请求组装激活哪些约束：
 
 | 约束 | 类型 | 作用 |
 |---|---|---|
@@ -62,7 +62,7 @@ struct EdgeVerdict {
 
 ## 5. Yen K-shortest：为「择优合规」留出候选
 
-最短的那一条未必是你想要的——可能它擦着某个约束边界、或换个 SID/STAR 更顺。所以引擎不只 返回一条，而是用 **Yen K-shortest** 返回前 K 条候选（`lib/core/graph/yen_kshortest.cc`），按 （含软代价的）有效成本排序。约束在每条候选的搜索中都参与，所以**每条候选本身就是合规的**； K 条给了用户/上层在合规集合里择优的空间。
+最短的那一条未必是你想要的——可能它擦着某个约束边界、或换个 SID/STAR 更顺。所以引擎不只 返回一条，而是用 **Yen K-shortest** 返回前 K 条候选（`libs/engine/core/graph/yen_kshortest.cc`），按 （含软代价的）有效成本排序。约束在每条候选的搜索中都参与，所以**每条候选本身就是合规的**； K 条给了用户/上层在合规集合里择优的空间。
 
 > Yen 在大图上有性能挑战，我们做了 Lawler 优化 + heuristic memoization，见 [yen-lawler-optimization.zh-CN.md](yen-lawler-optimization.zh-CN.md)。
 

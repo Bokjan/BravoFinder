@@ -1,7 +1,7 @@
 # BravoFinder unified library: the graph + A* search (formerly core/) and the
 # I/O layer (formerly io/) merged into a single static target bravofinder.
 # Headers are included as "core/..." / "io/..." so the include root is this
-# directory (lib/).
+# directory (engine/).
 #
 # sqlite3.c (the SQLite amalgamation) is compiled directly as a bravofinder
 # source so the shipped libbravofinder.a is self-contained: sqlite3.o lives in
@@ -61,7 +61,7 @@ add_library(bravofinder STATIC
   io/nav_database_parse.cc
   io/nav_database_query.cc)
 
-# When a variant is selected, its headers must win over lib/core/graph/*.h. A
+# When a variant is selected, its headers must win over engine/core/graph/*.h. A
 # BEFORE include dir mirroring the "core/graph/" path shadows the two headers
 # only. PRIVATE (not PUBLIC): the shadow is for compiling bravofinder's own
 # variant sources; it must not leak into bravofinder's INTERFACE_INCLUDE_DIRECTORIES,
@@ -75,7 +75,7 @@ endif()
 configure_file(core/version.h.in
   ${CMAKE_CURRENT_BINARY_DIR}/core/version.h @ONLY)
 
-# Include root is lib/ (build) so "#include core/..." and "#include io/..."
+# Include root is engine/ (build) so "#include core/..." and "#include io/..."
 # resolve; the binary dir exposes the generated core/version.h. Install-tree
 # include root is include/bf/ (see the install block below).
 target_include_directories(bravofinder PUBLIC

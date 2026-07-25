@@ -89,7 +89,7 @@ build: wire up Catch2 and CLI11 via FetchContent
 
 ### 2.2 Error Handling
 
-- Use the in-house `bf::Result<T, E>` (`lib/core/result.h`); do not use `std::expected` or `tl::expected`.
+- Use the in-house `bf::Result<T, E>` (`libs/engine/core/result.h`); do not use `std::expected` or `tl::expected`.
 - Expected failures (e.g. "no route found") go through `Result`; exceptions are reserved for truly exceptional situations.
 - No raw `new`/`delete` (use RAII / smart pointers), no `goto`, no catch-by-value.
 

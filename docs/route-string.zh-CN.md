@@ -1,6 +1,6 @@
 # 航路串压缩：ICAO filed-flight-plan 与并线航路
 
-> 为什么 BravoFinder 输出的航路串不是「逐点全列」，而是像真实飞行计划那样只在进出点列航路名—— 以及处理并线航路(concurrent airways)时一个不折叠就会出假转接点的陷阱。面向想理解航路串 输出格式的读者。相关代码：`lib/core/routing/route_string.{h,cc}`、`lib/core/routing/route.h`。
+> 为什么 BravoFinder 输出的航路串不是「逐点全列」，而是像真实飞行计划那样只在进出点列航路名—— 以及处理并线航路(concurrent airways)时一个不折叠就会出假转接点的陷阱。面向想理解航路串 输出格式的读者。相关代码：`libs/engine/core/routing/route_string.{h,cc}`、`libs/engine/core/routing/route.h`。
 
 ## 1. 两种航路串：全列 vs 压缩
 

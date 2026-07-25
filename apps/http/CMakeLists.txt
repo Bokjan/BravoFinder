@@ -2,7 +2,7 @@
 # bf_service_lib handlers, carried by the shared bf_http_server transport core
 # (libuv event loop + llhttp parser + hardening). Only the router lives here now;
 # the connection state machine, listener, and work offload live in
-# http_server/, shared with the MCP-over-HTTP transport (apps/mcp).
+# libs/http_server/, shared with the MCP-over-HTTP transport (apps/mcp).
 #
 # bf_service_lib is linked PUBLIC, carrying bf::bravofinder, rapidjson, and the
 # rapidjson pointer-overflow UBSan exemption to consumers; bf_http_server is

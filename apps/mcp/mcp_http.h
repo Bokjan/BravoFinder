@@ -1,7 +1,7 @@
 // mcp_http.h — the MCP-over-HTTP (Streamable HTTP, 2025-03-26) transport for
 // bf-mcp.
 //
-// McpHttpHandler is the RequestHandler for the shared HTTP core (http_server/),
+// McpHttpHandler is the RequestHandler for the shared HTTP core (libs/http_server/),
 // serving the single MCP endpoint /mcp. It reuses the transport-neutral
 // Dispatcher (the same one the stdio transport uses) for all protocol decisions,
 // and offloads the 10-30 ms tools/call compute to the libuv threadpool exactly

@@ -5,7 +5,7 @@
 //     spawns the process. This is the backward-compatible default.
 //   * http: MCP-over-HTTP (Streamable HTTP, 2025-03-26) on a TCP port, for
 //     remote / multi-client MCP clients. Built on the same shared HTTP core
-//     (http_server/) as the REST server, so the 10-30 ms route compute is
+//     (libs/http_server/) as the REST server, so the 10-30 ms route compute is
 //     offloaded to the libuv threadpool and never blocks the loop.
 //
 // Both transports share the same Dispatcher (protocol + capabilities); this file

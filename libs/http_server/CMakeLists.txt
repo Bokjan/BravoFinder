@@ -5,7 +5,7 @@
 # JSON-schema knowledge -- it defines the RequestHandler interface and the
 # WorkResult value type, and a consumer gives requests meaning -- so it does NOT
 # depend on bf_service_lib (keeping the transport core independent of the query
-# layer, mirroring how lib/ stays JSON-/network-free).
+# layer, mirroring how libs/engine/ stays JSON-/network-free).
 add_library(bf_http_server STATIC conn.cc server.cc work.cc)
 # libuv + llhttp headers appear in the public headers (conn.h / server.h /
 # work.h), so link them PUBLIC to propagate to consumers. rapidjson is used only
@@ -15,7 +15,7 @@ target_link_libraries(bf_http_server PRIVATE rapidjson::rapidjson)
 target_include_directories(bf_http_server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # conn.cc touches rapidjson, which trips UBSan's pointer-overflow sub-check on a
-# benign `nullPtr + 0` inside the header (see service/CMakeLists.txt). Narrow off
+# benign `nullPtr + 0` inside the header (see libs/service/CMakeLists.txt). Narrow off
 # just that one sub-check for this library's TUs; ASan and the rest of UBSan stay
 # on. A no-op in release / on MSVC.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")

@@ -1,6 +1,6 @@
 # 性能测试
 
-> BravoFinder 的性能数据、测试方法与可复现步骤。所有数字都在同一台机器、同一份数据、 同一轮测量下取得，并写明口径。相关代码：`lib/core/graph/`、`lib/io/cache/`、`apps/cli/main.cc`。
+> BravoFinder 的性能数据、测试方法与可复现步骤。所有数字都在同一台机器、同一份数据、 同一轮测量下取得，并写明口径。相关代码：`libs/engine/core/graph/`、`libs/engine/io/cache/`、`apps/cli/main.cc`。
 
 ## 1. 测试环境
 
@@ -134,7 +134,7 @@ for i in 1 2 3 4 5; do /usr/bin/time -p bf route KJFK KLAX --db /tmp/nav.bfdb >/
 /usr/bin/time -v bf route KJFK KLAX --db /tmp/nav.bfdb --cifp-load eager >/dev/null
 ```
 
-纯搜索的分解用进程内微基准 `bench/route_bench.cc`（`OpenCached` 一次 + 循环 `FindRoutes` 10 城市对 × 30 轮，`steady_clock` 只包 `FindRoutes`）。四版对照的算法源码 （`lib/core/graph/astar.*` + `yen_kshortest.*`）已固化在 `bench/variants/{baseline,memoize,lawler,workspace}/`， `bench/decompose.sh` 用 `-DBRAVOFINDER_BENCH_VARIANT` 分别编译对照二进制，无需 checkout git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编译微基准（把 `lib/core/`+`lib/io/` 的 。cc 与基准一起编，需 `-I build/<preset>/core` 找生成的 `version.h`），跑一轮后 `gprof <bin> gmon.out`。基准工具默认不入构建（`BRAVOFINDER_BUILD_BENCH=OFF`），复现步骤见 `bench/README.md`。
+纯搜索的分解用进程内微基准 `bench/route_bench.cc`（`OpenCached` 一次 + 循环 `FindRoutes` 10 城市对 × 30 轮，`steady_clock` 只包 `FindRoutes`）。四版对照的算法源码 （`libs/engine/core/graph/astar.*` + `yen_kshortest.*`）已固化在 `bench/variants/{baseline,memoize,lawler,workspace}/`， `bench/decompose.sh` 用 `-DBRAVOFINDER_BENCH_VARIANT` 分别编译对照二进制，无需 checkout git 历史、也不污染主工作区。profile 用 gprof：`-pg -O2` 全量编译微基准（把 `libs/engine/core/`+`libs/engine/io/` 的 。cc 与基准一起编，需 `-I build/<preset>/core` 找生成的 `version.h`），跑一轮后 `gprof <bin> gmon.out`。基准工具默认不入构建（`BRAVOFINDER_BUILD_BENCH=OFF`），复现步骤见 `bench/README.md`。
 
 ## 8. 小结
 

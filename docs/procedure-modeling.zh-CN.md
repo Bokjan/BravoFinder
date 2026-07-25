@@ -1,6 +1,6 @@
 # 程序建模与航路网衔接：ARINC 424 / CIFP
 
-> 这是 BravoFinder 工作量最大、也最能体现「真实」的部分：解析真实的 SID/STAR/进近程序， 并把机场正确接入航路网。面向想理解「机场是怎么连上航路的」的读者。相关代码： `lib/io/loaders/xplane12/cifp/`（解析器 + 衔接器）、`lib/core/domain/procedure.h`。
+> 这是 BravoFinder 工作量最大、也最能体现「真实」的部分：解析真实的 SID/STAR/进近程序， 并把机场正确接入航路网。面向想理解「机场是怎么连上航路的」的读者。相关代码： `libs/engine/io/loaders/xplane12/cifp/`（解析器 + 衔接器）、`libs/engine/core/domain/procedure.h`。
 
 ## 1. 为什么机场不能「直连最近航路点」
 
@@ -14,7 +14,7 @@ M1 阶段的实测发现（DESIGN §9）：机场坐标附近最近的航路点�
 
 X-Plane 的 `CIFP/<ICAO>.dat` 是 ARINC 424 派生的终端程序格式，每个机场一个文件。每行是 `记录类型:序号,逗号分隔字段...;`，记录类型有 SID / STAR / APPCH / RWY / PRDAT。一条命名 程序（如 `DEEZZ5`）由多条 **leg** 组成，每条 leg 有一个 **path terminator**（航段类型）， 决定这段怎么飞、以什么结束。
 
-全量 14838 机场的语料里用到 **23 种** path terminator（`lib/core/domain/procedure.h` 全部识别， 未知码归为 `kUnknown`，绝不静默丢 leg）。它们分两类：
+全量 14838 机场的语料里用到 **23 种** path terminator（`libs/engine/core/domain/procedure.h` 全部识别， 未知码归为 `kUnknown`，绝不静默丢 leg）。它们分两类：
 
 - **「飞到定点」型**（TF/IF/DF/CF）：终点是确定的航路点，能解析成图顶点。占绝大多数。
 - **「飞航向/弧/高度/等待」型**（VA/VM/CA/VI/VR/FM/RF/HM/…）：终点不是固定航点（飞到某高度、 航向截获、等待），无法直接对应一个顶点。
@@ -45,7 +45,7 @@ DESIGN §4.4 最初设想：非定点 leg 会挡住程序接入，需要用航�
 
 ## 5. 多源 K-shortest：候选可用不同程序
 
-把每个衔接 fix 当作一个带 seed 的搜索端点后，K 条候选就不再局限于「固定一对 fix 之间变航路」， 而是**每条候选都能走不同的 SID/STAR 衔接 fix**。`FindKShortestPathsMulti` （`lib/core/graph/yen_kshortest.cc`）用概念超源/超汇在多源 A* 之上做 Yen：
+把每个衔接 fix 当作一个带 seed 的搜索端点后，K 条候选就不再局限于「固定一对 fix 之间变航路」， 而是**每条候选都能走不同的 SID/STAR 衔接 fix**。`FindKShortestPathsMulti` （`libs/engine/core/graph/yen_kshortest.cc`）用概念超源/超汇在多源 A* 之上做 Yen：
 
 - source 级 spur 禁掉已用的起始 fix、重跑多源搜索 → 换一个衔接 fix/程序；
 - 每条候选用 `CostOfPathMulti` 端到端重算（含两端 seed），使不同 fix 对之间仍能正确排序。
