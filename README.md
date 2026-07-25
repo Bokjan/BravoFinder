@@ -1,6 +1,6 @@
 # BravoFinder
 
-[![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases) [![license](https://img.shields.io/github/license/Bokjan/BravoFinder)](LICENSE) ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
+[![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases) [![license](https://img.shields.io/badge/license-MIT%20%2F%20LGPL--3.0-blue)](LICENSE) ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
 
 A flight route finder written in modern C++ (v3).
 
@@ -237,4 +237,6 @@ In-depth technical articles (in Chinese) live under [docs/](docs/README.md) — 
 
 ## License
 
-[MIT](LICENSE). Third-party dependencies: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Contributing conventions: see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+This project is dual-licensed. The core route engine library under `libs/engine/` is distributed under the **GNU Lesser General Public License v3.0-or-later** (see [`libs/engine/LICENSE`](libs/engine/LICENSE)); everything else is **MIT** (text in [`LICENSE`](LICENSE)). Third-party dependencies: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Contributing conventions: see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+
+The `libs/engine` library is statically linked into the `bf` / `bf-http` / `bf-mcp` binaries. Under the LGPL, if you modify `libs/engine` you may relink it into those binaries; the complete corresponding source (including the engine) is published with every release and in this repository.

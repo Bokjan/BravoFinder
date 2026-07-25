@@ -1,8 +1,8 @@
 # Third-Party Licenses
 
-BravoFinder v3 is licensed under the MIT License (see `LICENSE`).
+BravoFinder v3 is dual-licensed: files under `libs/engine/` use the GNU Lesser General Public License v3.0-or-later (see `libs/engine/LICENSE`), and all other files use the MIT License (see `LICENSE`).
 
-It depends on the following third-party libraries, fetched at build time via CMake FetchContent. Their source is **not** vendored into this repository. All of them use permissive licenses compatible with MIT.
+It depends on the following third-party libraries, fetched at build time via CMake FetchContent. Their source is **not** vendored into this repository. All of them use permissive licenses compatible with the project's MIT and LGPL-3.0 licenses.
 
 | Library | Purpose | License | License URL |
 |---|---|---|---|
