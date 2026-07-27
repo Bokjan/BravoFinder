@@ -46,7 +46,7 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
   if (start < 0 || goal < 0 || start >= n || goal >= n) {
     return result;
   }
-  if (options.node_blocked && (options.node_blocked(start) || options.node_blocked(goal))) {
+  if (options.node_filter.Blocks(start) || options.node_filter.Blocks(goal)) {
     return result;
   }
 
@@ -79,10 +79,10 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
       if (closed[v]) {
         continue;
       }
-      if (options.node_blocked && options.node_blocked(v)) {
+      if (options.node_filter.Blocks(v)) {
         continue;
       }
-      if (options.edge_blocked && options.edge_blocked(u, v)) {
+      if (options.edge_filter.Blocks(u, v)) {
         continue;
       }
       double extra_cost = 0.0;
@@ -179,7 +179,7 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
     if (s.vertex < 0 || s.vertex >= n) {
       continue;
     }
-    if (options.node_blocked && options.node_blocked(s.vertex)) {
+    if (options.node_filter.Blocks(s.vertex)) {
       continue;
     }
     // A source's seed cost is the procedure distance already flown to reach it;
@@ -222,10 +222,10 @@ ShortestPath RunMultiSearch(const NavGraph& graph, const std::vector<SeededEndpo
       if (closed[v]) {
         continue;
       }
-      if (options.node_blocked && options.node_blocked(v)) {
+      if (options.node_filter.Blocks(v)) {
         continue;
       }
-      if (options.edge_blocked && options.edge_blocked(u, v)) {
+      if (options.edge_filter.Blocks(u, v)) {
         continue;
       }
       double extra_cost = 0.0;
@@ -273,6 +273,30 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const SearchOptions& options,
                                    const MultiGoalHeuristic& heuristic) {
   return RunMultiSearch(graph, sources, goals, options, heuristic);
+}
+
+const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options,
+                            double* out_cost) {
+  const GraphEdge* best = nullptr;
+  double best_cost = kInfinity;
+  for (const GraphEdge* e = graph.EdgesBegin(from); e != graph.EdgesEnd(from); ++e) {
+    if (e->to != to) {
+      continue;
+    }
+    double extra_cost = 0.0;
+    if (!EdgeAllowed(options, *e, graph.CoordOf(to), extra_cost)) {
+      continue;
+    }
+    const double total = e->distance_nm + extra_cost;
+    if (total < best_cost) {
+      best_cost = total;
+      best = e;
+    }
+  }
+  if (out_cost != nullptr && best != nullptr) {
+    *out_cost = best_cost;
+  }
+  return best;
 }
 
 }  // namespace bf

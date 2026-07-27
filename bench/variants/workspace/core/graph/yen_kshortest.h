@@ -16,7 +16,7 @@ namespace bf {
 //
 // `base_options` carries the constraints/request applied to every search; Yen
 // adds its own node/edge bans internally, so callers should not set the
-// node_blocked / edge_blocked fields.
+// node_filter / edge_filter fields.
 std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, int goal, int k,
                                              const SearchOptions& base_options);
 
@@ -31,7 +31,7 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
 // costs, matching FindShortestPathMulti. `base_options` carries the
 // constraints/request and any caller node/edge bans (e.g. "no transit through
 // airports"); Yen composes its own bans on top, so callers should not preset the
-// node_blocked / edge_blocked fields with Yen-specific bans.
+// node_filter / edge_filter fields with Yen-specific bans.
 std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
                                                   const std::vector<SeededEndpoint>& sources,
                                                   const std::vector<SeededEndpoint>& goals, int k,

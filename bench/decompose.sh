@@ -36,7 +36,7 @@ STATES=(
   "baseline:Yen without heuristic memoization or Lawler"
   "memoize:multi-goal heuristic memoized across spur searches"
   "lawler:Lawler's optimization on top"
-  "workspace:generation-stamped search workspace reused across spurs (current HEAD)"
+  "workspace:generation-stamped search workspace reused across spurs (workspace-reuse stage)"
 )
 
 for state in "${STATES[@]}"; do

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -23,6 +24,45 @@ struct ShortestPath {
 // Optional inputs that shape a search: routing constraints and the bans Yen's
 // algorithm uses to carve out alternative paths. All fields are optional; an
 // empty SearchOptions reproduces a plain shortest-path search.
+// Pack a directed edge (from, to) into one 64-bit key. Vertex ids are small
+// non-negative ints, so a flat integer key lets a banned-edge set be a sorted
+// vector with binary_search -- no std::pair ordering, no hashing, no
+// std::function type erasure on the A* hot loop.
+inline int64_t EdgeKey(int from, int to) {
+  return (static_cast<int64_t>(from) << 32) | static_cast<uint32_t>(to);
+}
+
+// A node block filter for the A* hot loop. Combines an optional airport-range
+// block (airports occupy the contiguous tail [airport_first, airport_last) of
+// the vertex range, so this is a two-compare range check) with an optional
+// sorted banned-vertex set (Yen's per-spur root-node ban). An empty NodeFilter
+// blocks nothing. Blocks() is straight-line code (range check + binary_search),
+// inlinable with no type-erased call.
+struct NodeFilter {
+  int airport_first = -1;                    // first airport vertex (inclusive), or -1 if none
+  int airport_last = -1;                     // one-past-last airport vertex (exclusive)
+  const std::vector<int>* banned = nullptr;  // sorted ascending, or nullptr
+
+  bool Blocks(int v) const {
+    if (airport_first >= 0 && v >= airport_first && v < airport_last) {
+      return true;
+    }
+    return banned != nullptr && std::binary_search(banned->begin(), banned->end(), v);
+  }
+};
+
+// An edge block filter, the directed-edge counterpart to NodeFilter. Holds an
+// optional sorted set of banned EdgeKey values (Yen's per-spur ban). An empty
+// EdgeFilter blocks nothing.
+struct EdgeFilter {
+  const std::vector<int64_t>* banned = nullptr;  // sorted ascending, or nullptr
+
+  bool Blocks(int from, int to) const {
+    return banned != nullptr &&
+           std::binary_search(banned->begin(), banned->end(), EdgeKey(from, to));
+  }
+};
+
 struct SearchOptions {
   // Constraints applied to every edge (hard filter + soft penalty). The request
   // they are evaluated against must be supplied when constraints are present.
@@ -30,9 +70,20 @@ struct SearchOptions {
   const RouteRequest* request = nullptr;
 
   // Yen support: vertices and directed edges that must not be used.
-  std::function<bool(int)> node_blocked;
-  std::function<bool(int from, int to)> edge_blocked;
+  NodeFilter node_filter;
+  EdgeFilter edge_filter;
 };
+
+// Among the parallel edges from `from` to `to`, return the one the search would
+// have traversed: the cheapest ALLOWED edge by effective cost (distance_nm +
+// soft penalties), evaluating `options.constraints` exactly as A* relaxation
+// does. Returns nullptr if there is no such edge (none exists, or every parallel
+// edge is blocked). Because every constraint is a deterministic function of the
+// edge, this reproduces the search's choice, so a route's leg labels match the
+// path the search actually cost. `out_cost` receives the selected edge's
+// effective cost when non-null.
+const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options,
+                            double* out_cost = nullptr);
 
 // Find the shortest path from `start` to `goal` using A* with an admissible
 // great-circle heuristic. Soft penalties only add cost, so the geographic
