@@ -28,6 +28,16 @@ inline int64_t EdgeKey(int from, int to) {
   return (static_cast<int64_t>(from) << 32) | static_cast<uint32_t>(to);
 }
 
+// An entry in the A* open set, ordered by f = g + h (ascending). Stored in the
+// workspace's reusable heap vector so Yen's many spur searches share one
+// allocation (cleared per search, capacity retained) instead of each creating
+// and growing a fresh priority_queue.
+struct QueueNode {
+  double f = 0.0;
+  int vertex = -1;
+  bool operator>(const QueueNode& other) const { return f > other.f; }
+};
+
 // A node block filter for the A* hot loop. Combines an optional airport-range
 // block (the common "no transit through airports" rule -- airports occupy the
 // contiguous tail [airport_first, airport_last) of the vertex range, so this is
@@ -147,6 +157,12 @@ class SearchWorkspace {
   // Begin a fresh search: every slot now reads as its initial value. O(1).
   void NextGeneration() { ++generation_; }
 
+  // The A* open set's backing store, reused across spur searches: cleared per
+  // search (capacity retained) so the hundreds of Yen spurs share one
+  // allocation. Driven with std::push_heap / std::pop_heap (std::greater) by the
+  // search, which is exactly what std::priority_queue does internally.
+  std::vector<QueueNode>& heap() { return heap_; }
+
   // Effective cost from a source. Reads +inf until written this generation.
   double G(int v) const { return Live(v) ? g_[v] : kInfinity_; }
   // Geographic distance along the best path. Valid only for vertices relaxed
@@ -188,6 +204,7 @@ class SearchWorkspace {
   std::vector<int> prev_;
   std::vector<uint32_t> stamp_;         // value-slot generation tag
   std::vector<uint32_t> closed_stamp_;  // == generation_ => closed this search
+  std::vector<QueueNode> heap_;         // open-set backing store, reused across spurs
   uint32_t generation_ = 0;             // bumped per search; 0 = no search run yet
   // generation_ wraps after 2^32 searches; unreachable in practice (a workspace
   // is per-query stack-local and sees at most a few thousand spur searches before

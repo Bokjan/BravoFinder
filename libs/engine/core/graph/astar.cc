@@ -3,8 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
-#include <queue>
 
 namespace bf {
 
@@ -24,13 +24,6 @@ UnitVec ProjectUnitSphere(const Coordinate& c) {
   const double cos_lat = std::cos(lat_r);
   return UnitVec{cos_lat * std::cos(lon_r), cos_lat * std::sin(lon_r), std::sin(lat_r)};
 }
-
-// An entry in the open set's priority queue, ordered by f = g + h (ascending).
-struct QueueNode {
-  double f = 0.0;
-  int vertex = -1;
-  bool operator>(const QueueNode& other) const { return f > other.f; }
-};
 
 // Evaluate all constraints for an edge. Returns false if any blocks it;
 // otherwise accumulates soft penalties into `extra_cost`.
@@ -137,13 +130,19 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
   ws.Reset(n);
   ws.NextGeneration();
 
-  std::priority_queue<QueueNode, std::vector<QueueNode>, std::greater<>> open;
+  // Reuse the workspace's open-set vector across spur searches (clear() keeps
+  // capacity); drive it as a min-heap on f with push_heap/pop_heap, exactly as
+  // std::priority_queue does internally.
+  auto& open = ws.heap();
+  open.clear();
   ws.Relax(start, 0.0, 0.0, -1);
-  open.push(QueueNode{heuristic(start), start});
+  open.push_back(QueueNode{heuristic(start), start});
+  std::push_heap(open.begin(), open.end(), std::greater<>());
 
   while (!open.empty()) {
-    const int u = open.top().vertex;
-    open.pop();
+    std::pop_heap(open.begin(), open.end(), std::greater<>());
+    const int u = open.back().vertex;
+    open.pop_back();
     if (ws.Closed(u)) {
       continue;  // stale queue entry
     }
@@ -173,7 +172,8 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
       const double tentative = ws.G(u) + e->distance_nm + extra_cost;
       if (tentative < ws.G(v)) {
         ws.Relax(v, tentative, ws.Geo(u) + e->distance_nm, u);
-        open.push(QueueNode{tentative + heuristic(v), v});
+        open.push_back(QueueNode{tentative + heuristic(v), v});
+        std::push_heap(open.begin(), open.end(), std::greater<>());
       }
     }
   }
@@ -265,7 +265,11 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
   ws.Reset(n);
   ws.NextGeneration();
 
-  std::priority_queue<QueueNode, std::vector<QueueNode>, std::greater<>> open;
+  // Reuse the workspace's open-set vector across spur searches (clear() keeps
+  // capacity); drive it as a min-heap on f with push_heap/pop_heap, exactly as
+  // std::priority_queue does internally.
+  auto& open = ws.heap();
+  open.clear();
   for (const SeededEndpoint& s : sources) {
     if (s.vertex < 0 || s.vertex >= n) {
       continue;
@@ -277,7 +281,8 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
     // it counts as both effective cost and geographic distance.
     if (s.cost < ws.G(s.vertex)) {
       ws.Relax(s.vertex, s.cost, s.cost, -1);
-      open.push(QueueNode{s.cost + heuristic(s.vertex), s.vertex});
+      open.push_back(QueueNode{s.cost + heuristic(s.vertex), s.vertex});
+      std::push_heap(open.begin(), open.end(), std::greater<>());
     }
   }
 
@@ -285,8 +290,9 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
   int best_goal = -1;
 
   while (!open.empty()) {
-    const QueueNode top = open.top();
-    open.pop();
+    const QueueNode top = open.front();
+    std::pop_heap(open.begin(), open.end(), std::greater<>());
+    open.pop_back();
     const int u = top.vertex;
     if (ws.Closed(u)) {
       continue;
@@ -328,7 +334,8 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
       const double tentative = ws.G(u) + e->distance_nm + extra_cost;
       if (tentative < ws.G(v)) {
         ws.Relax(v, tentative, ws.Geo(u) + e->distance_nm, u);
-        open.push(QueueNode{tentative + heuristic(v), v});
+        open.push_back(QueueNode{tentative + heuristic(v), v});
+        std::push_heap(open.begin(), open.end(), std::greater<>());
       }
     }
   }
