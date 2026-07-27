@@ -67,6 +67,11 @@ class GraphBuilder {
   // unrelated airport.
   bool IsAirport(int vertex) const;
 
+  // The first vertex id of the contiguous airport tail [first_airport_vertex(),
+  // VertexCount()). Exposed so callers (e.g. the A* node filter) can do an
+  // inlined range check instead of a method call per neighbor on the hot loop.
+  int first_airport_vertex() const { return first_airport_vertex_; }
+
   // Whether `vertex` participates in the enroute airway network, i.e. has at
   // least one airway edge in either direction (as opposed to only synthetic DCT
   // edges or none). This is the union of HasInbound / HasOutbound and is the

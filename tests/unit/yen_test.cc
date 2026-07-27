@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <random>
 #include <set>
 #include <string>
@@ -355,17 +356,18 @@ std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int star
     const std::vector<int> prev = result.back().vertices;
     for (size_t i = 0; i + 1 < prev.size(); ++i) {
       const std::vector<int> root(prev.begin(), prev.begin() + i + 1);
-      std::set<std::pair<int, int>> banned_edges;
+      std::vector<int64_t> banned_edges;
       for (const bf::ShortestPath& p : result) {
         if (p.vertices.size() > i + 1 && std::equal(root.begin(), root.end(), p.vertices.begin())) {
-          banned_edges.emplace(p.vertices[i], p.vertices[i + 1]);
+          banned_edges.push_back(bf::EdgeKey(p.vertices[i], p.vertices[i + 1]));
         }
       }
-      const std::set<int> banned_nodes(root.begin(), root.end() - 1);
+      std::sort(banned_edges.begin(), banned_edges.end());
+      std::vector<int> banned_nodes(root.begin(), root.end() - 1);
+      std::sort(banned_nodes.begin(), banned_nodes.end());
       bf::SearchOptions opts;
-      opts.node_blocked = [banned_nodes](int v) { return banned_nodes.count(v) != 0; };
-      opts.edge_blocked = [banned_edges](int f, int t) { return banned_edges.count({f, t}) != 0; };
-      const bf::ShortestPath spur = bf::FindShortestPath(graph, prev[i], goal, opts);
+      opts.node_filter.banned = &banned_nodes;
+      opts.edge_filter.banned = &banned_edges;      const bf::ShortestPath spur = bf::FindShortestPath(graph, prev[i], goal, opts);
       if (!spur.found) {
         continue;
       }
@@ -477,17 +479,19 @@ std::vector<bf::ShortestPath> NaiveKShortestMulti(const bf::NavGraph& graph,
         continue;
       }
       const std::vector<int> root(prev.begin(), prev.begin() + i + 1);
-      std::set<std::pair<int, int>> banned_edges;
+      std::vector<int64_t> banned_edges;
       for (const bf::ShortestPath& p : result) {
         if (p.vertices.size() > static_cast<size_t>(i) + 1 &&
             std::equal(root.begin(), root.end(), p.vertices.begin())) {
-          banned_edges.emplace(p.vertices[i], p.vertices[i + 1]);
+          banned_edges.push_back(bf::EdgeKey(p.vertices[i], p.vertices[i + 1]));
         }
       }
-      const std::set<int> banned_nodes(root.begin(), root.end() - 1);
+      std::sort(banned_edges.begin(), banned_edges.end());
+      std::vector<int> banned_nodes(root.begin(), root.end() - 1);
+      std::sort(banned_nodes.begin(), banned_nodes.end());
       bf::SearchOptions opts;
-      opts.node_blocked = [banned_nodes](int v) { return banned_nodes.count(v) != 0; };
-      opts.edge_blocked = [banned_edges](int f, int t) { return banned_edges.count({f, t}) != 0; };
+      opts.node_filter.banned = &banned_nodes;
+      opts.edge_filter.banned = &banned_edges;
       add(root, bf::FindShortestPathMulti(graph, {bf::SeededEndpoint{prev[i], 0.0}}, goals, opts));
     }
     if (candidates.empty()) {

@@ -4,21 +4,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <set>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace bf {
 
 namespace {
-
-// Pack a directed edge (from, to) into one 64-bit key for the banned-edge set.
-// Vertex ids are small non-negative ints, so a flat integer key lets the ban set
-// be a hash set (O(1) lookup) without a std::pair hash, and stays cache-friendly
-// for the per-edge lookup in the spur search's hot loop.
-inline int64_t EdgeKey(int from, int to) {
-  return (static_cast<int64_t>(from) << 32) | static_cast<uint32_t>(to);
-}
 
 // Compute the effective cost (geographic distance + soft penalties) of a fully
 // specified path, and its geographic distance. Returns false if any step has no
@@ -138,31 +129,37 @@ std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, i
       const std::vector<int> root(prev_path.begin(), prev_path.begin() + i + 1);
 
       // Ban the (i -> i+1) edge of every accepted/known path that shares this
-      // root, so the spur search must diverge here.
-      std::unordered_set<int64_t> banned_edges;
-      for (const ShortestPath& p : result) {
-        if (p.vertices.size() > i + 1 && std::equal(root.begin(), root.end(), p.vertices.begin())) {
-          banned_edges.insert(EdgeKey(p.vertices[i], p.vertices[i + 1]));
+      // root, so the spur search must diverge here. Built as a const sorted
+      // vector (the IIFE sorts in place, then binds to const) so binary_search
+      // is valid by construction -- the type system prevents any later write.
+      const std::vector<int64_t> banned_edges = [&] {
+        std::vector<int64_t> v;
+        v.reserve(result.size());
+        for (const ShortestPath& p : result) {
+          if (p.vertices.size() > i + 1 &&
+              std::equal(root.begin(), root.end(), p.vertices.begin())) {
+            v.push_back(EdgeKey(p.vertices[i], p.vertices[i + 1]));
+          }
         }
-      }
+        std::sort(v.begin(), v.end());
+        return v;
+      }();
       // Root nodes (except the spur node) are off-limits to keep paths loopless.
-      const std::unordered_set<int> banned_nodes(root.begin(), root.end() - 1);
+      const std::vector<int> banned_nodes = [&] {
+        std::vector<int> v(root.begin(), root.end() - 1);
+        std::sort(v.begin(), v.end());
+        return v;
+      }();
 
       SearchOptions spur_opts = base_options;
-      // Compose Yen's bans with any caller-supplied node/edge filter (e.g. the
-      // "no transit through airports" rule) rather than overwriting it. Capture
-      // the ban sets BY VALUE so the std::functions stored in spur_opts are
-      // self-contained: they hold no references to these loop-local sets and are
-      // therefore safe to copy, move, or hold across threads.
-      auto base_node_blocked = base_options.node_blocked;
-      auto base_edge_blocked = base_options.edge_blocked;
-      spur_opts.node_blocked = [banned_nodes, base_node_blocked](int v) {
-        return banned_nodes.count(v) != 0 || (base_node_blocked && base_node_blocked(v));
-      };
-      spur_opts.edge_blocked = [banned_edges, base_edge_blocked](int from, int to) {
-        return banned_edges.count(EdgeKey(from, to)) != 0 ||
-               (base_edge_blocked && base_edge_blocked(from, to));
-      };
+      // Compose Yen's bans with any caller-supplied filter (e.g. the "no transit
+      // through airports" rule) rather than overwriting it: spur_opts starts as
+      // a copy of base_options (so the base node_filter's airport range is
+      // inherited), then this spur's banned nodes/edges are layered on as sorted
+      // vectors the filters binary_search. The const vectors outlive the spur
+      // search -- same loop iteration, stack-local.
+      spur_opts.node_filter.banned = &banned_nodes;
+      spur_opts.edge_filter.banned = &banned_edges;
 
       const ShortestPath spur = FindShortestPath(graph, spur_node, goal, spur_opts, ws);
       if (!spur.found) {
@@ -298,30 +295,39 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
       const std::vector<int> root(prev_path.begin(), prev_path.begin() + i + 1);
 
       // Ban the (i -> i+1) edge of every accepted/known path that shares this
-      // root, so the spur search must diverge here.
-      std::unordered_set<int64_t> banned_edges;
-      for (const ShortestPath& p : result) {
-        if (p.vertices.size() > static_cast<size_t>(i) + 1 &&
-            std::equal(root.begin(), root.end(), p.vertices.begin())) {
-          banned_edges.insert(EdgeKey(p.vertices[i], p.vertices[i + 1]));
+      // root, so the spur search must diverge here. Built as a const sorted
+      // vector (the IIFE sorts in place, then binds to const) so binary_search
+      // is valid by construction -- the type system prevents any later write.
+      const std::vector<int64_t> banned_edges = [&] {
+        std::vector<int64_t> v;
+        v.reserve(result.size());
+        for (const ShortestPath& p : result) {
+          if (p.vertices.size() > static_cast<size_t>(i) + 1 &&
+              std::equal(root.begin(), root.end(), p.vertices.begin())) {
+            v.push_back(EdgeKey(p.vertices[i], p.vertices[i + 1]));
+          }
         }
-      }
+        std::sort(v.begin(), v.end());
+        return v;
+      }();
       // Root nodes (except the spur node) are off-limits to keep paths loopless.
-      const std::unordered_set<int> banned_nodes(root.begin(), root.end() - 1);
+      const std::vector<int> banned_nodes = [&] {
+        std::vector<int> v(root.begin(), root.end() - 1);
+        std::sort(v.begin(), v.end());
+        return v;
+      }();
 
       SearchOptions spur_opts = base_options;
-      // Compose Yen's bans with any caller-supplied filter, capturing the ban
-      // sets BY VALUE so the stored std::functions are self-contained (safe to
-      // copy/move/hold across threads), per the concurrency contract.
-      auto base_node_blocked = base_options.node_blocked;
-      auto base_edge_blocked = base_options.edge_blocked;
-      spur_opts.node_blocked = [banned_nodes, base_node_blocked](int v) {
-        return banned_nodes.count(v) != 0 || (base_node_blocked && base_node_blocked(v));
-      };
-      spur_opts.edge_blocked = [banned_edges, base_edge_blocked](int from, int to) {
-        return banned_edges.count(EdgeKey(from, to)) != 0 ||
-               (base_edge_blocked && base_edge_blocked(from, to));
-      };
+      // Compose Yen's bans with any caller-supplied filter (e.g. the "no transit
+      // through airports" rule): spur_opts starts as a copy of base_options (so
+      // the base node_filter's airport range is inherited), then this spur's
+      // banned nodes/edges are layered on as sorted vectors the filters
+      // binary_search. The const vectors outlive the spur search -- same loop
+      // iteration, stack-local. No std::function is stored, so there is no
+      // self-contained-copy concern and no shared mutable state (concurrency
+      // contract intact).
+      spur_opts.node_filter.banned = &banned_nodes;
+      spur_opts.edge_filter.banned = &banned_edges;
 
       // Single-source (the spur node) -> any goal. The spur node's own seed is
       // irrelevant here; CostOfPathMulti re-applies the true source seed from the

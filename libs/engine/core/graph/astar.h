@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <vector>
 
@@ -20,6 +20,47 @@ struct ShortestPath {
   bool found = false;
 };
 
+// Pack a directed edge (from, to) into one 64-bit key. Vertex ids are small
+// non-negative ints, so a flat integer key lets a banned-edge set be a sorted
+// vector with binary_search -- no std::pair ordering, no hashing, no
+// std::function type erasure on the A* hot loop.
+inline int64_t EdgeKey(int from, int to) {
+  return (static_cast<int64_t>(from) << 32) | static_cast<uint32_t>(to);
+}
+
+// A node block filter for the A* hot loop. Combines an optional airport-range
+// block (the common "no transit through airports" rule -- airports occupy the
+// contiguous tail [airport_first, airport_last) of the vertex range, so this is
+// a two-compare range check) with an optional sorted banned-vertex set (Yen's
+// per-spur root-node ban). An empty NodeFilter blocks nothing. Blocks() is
+// straight-line code (range check + binary_search), inlinable with no
+// type-erased call -- this replaces a std::function<bool(int)> that profiling
+// showed at ~10% of the multi-source search.
+struct NodeFilter {
+  int airport_first = -1;  // first airport vertex (inclusive), or -1 if none
+  int airport_last = -1;   // one-past-last airport vertex (exclusive)
+  const std::vector<int>* banned = nullptr;  // sorted ascending, or nullptr
+
+  bool Blocks(int v) const {
+    if (airport_first >= 0 && v >= airport_first && v < airport_last) {
+      return true;
+    }
+    return banned != nullptr && std::binary_search(banned->begin(), banned->end(), v);
+  }
+};
+
+// An edge block filter, the directed-edge counterpart to NodeFilter. Holds an
+// optional sorted set of banned EdgeKey values (Yen's per-spur ban). An empty
+// EdgeFilter blocks nothing. Replaces a std::function<bool(int,int)>.
+struct EdgeFilter {
+  const std::vector<int64_t>* banned = nullptr;  // sorted ascending, or nullptr
+
+  bool Blocks(int from, int to) const {
+    return banned != nullptr &&
+           std::binary_search(banned->begin(), banned->end(), EdgeKey(from, to));
+  }
+};
+
 // Optional inputs that shape a search: routing constraints and the bans Yen's
 // algorithm uses to carve out alternative paths. All fields are optional; an
 // empty SearchOptions reproduces a plain shortest-path search.
@@ -29,9 +70,12 @@ struct SearchOptions {
   std::vector<const Constraint*> constraints;
   const RouteRequest* request = nullptr;
 
-  // Yen support: vertices and directed edges that must not be used.
-  std::function<bool(int)> node_blocked;
-  std::function<bool(int from, int to)> edge_blocked;
+  // Yen support: vertices and directed edges that must not be used. These are
+  // concrete filters (NodeFilter / EdgeFilter), not std::function, so the hot
+  // loop's per-neighbor block check is an inlined range check + binary_search
+  // rather than a type-erased call.
+  NodeFilter node_filter;
+  EdgeFilter edge_filter;
 };
 
 // Reusable per-vertex A* scratch, defined below; forward-declared here so the

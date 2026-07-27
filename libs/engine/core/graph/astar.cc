@@ -126,7 +126,7 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
   if (start < 0 || goal < 0 || start >= n || goal >= n) {
     return result;
   }
-  if (options.node_blocked && (options.node_blocked(start) || options.node_blocked(goal))) {
+  if (options.node_filter.Blocks(start) || options.node_filter.Blocks(goal)) {
     return result;
   }
 
@@ -160,10 +160,10 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
       if (ws.Closed(v)) {
         continue;
       }
-      if (options.node_blocked && options.node_blocked(v)) {
+      if (options.node_filter.Blocks(v)) {
         continue;
       }
-      if (options.edge_blocked && options.edge_blocked(u, v)) {
+      if (options.edge_filter.Blocks(u, v)) {
         continue;
       }
       double extra_cost = 0.0;
@@ -270,7 +270,7 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
     if (s.vertex < 0 || s.vertex >= n) {
       continue;
     }
-    if (options.node_blocked && options.node_blocked(s.vertex)) {
+    if (options.node_filter.Blocks(s.vertex)) {
       continue;
     }
     // A source's seed cost is the procedure distance already flown to reach it;
@@ -315,10 +315,10 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
       if (ws.Closed(v)) {
         continue;
       }
-      if (options.node_blocked && options.node_blocked(v)) {
+      if (options.node_filter.Blocks(v)) {
         continue;
       }
-      if (options.edge_blocked && options.edge_blocked(u, v)) {
+      if (options.edge_filter.Blocks(u, v)) {
         continue;
       }
       double extra_cost = 0.0;

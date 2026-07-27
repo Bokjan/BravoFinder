@@ -575,11 +575,12 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   // Airports must not be transit nodes: their synthetic DCT links would let the
   // search cut through an unrelated airport (e.g. ...MIE DCT KMIE SNKPT...).
   // Endpoints connect via seeded connection fixes, not airport vertices, so
-  // blocking all airport vertices as intermediate nodes is safe.
-  const GraphBuilder* builder_ptr = builder_.get();
-  options.node_blocked = [builder_ptr](int v) { return builder_ptr->IsAirport(v); };
-
+  // blocking all airport vertices as intermediate nodes is safe. Airports occupy
+  // the contiguous tail [first_airport_vertex, VertexCount), so a NodeFilter
+  // range check replaces the old IsAirport std::function -- an inlined
+  // two-compare on the hot loop instead of a type-erased call per neighbor.
   const NavGraph& graph = builder_->graph();
+  options.node_filter = NodeFilter{builder_->first_airport_vertex(), graph.VertexCount(), nullptr};
   std::vector<SeededEndpoint> sources = ProcedureConnector::ToEndpoints(dep.connections);
   std::vector<SeededEndpoint> goals = ProcedureConnector::ToEndpoints(arr.connections);
   // Drop any seeded connection fix the request asks to avoid: it would otherwise
