@@ -6,7 +6,7 @@
 
 | 项 | 配置 |
 |---|---|
-| 机器 | AMD EPYC 9K65（单路，本会话分到 16 物理核 / 32 逻辑核） |
+| 机器 | AMD EPYC 9K65（单路，本机分配到 16 物理核 / 32 逻辑核） |
 | 内存 | 64 GB |
 | 系统 | Linux（内核 6.6） |
 | 编译器 | gcc 12.3，`x86_64-linux` |
@@ -68,7 +68,7 @@ X-Plane 数据的解析 + 建图有固定成本（ARINC 424 解析尤重）。`b
 
 ### 3.1 第二轮：profiling 驱动的启发式与热路径优化（2026-07-27，v3.16.29→3.17.1）
 
-`+workspace` 之后再做两轮 perf（inclusive callgraph，`-g -fno-omit-frame-pointer --call-graph dwarf`），揭示新的支配成本：启发式 haversine 的 `atan2`（inclusive ~34%）、`node_blocked`/`edge_blocked` 的 `std::function` 类型擦除（~12.6%）、每 spur 堆重分配。据此落地三项，详尽分析与实测见 `.notes/research/2026-07-27_engine_perf_analysis.md`。
+`+workspace` 之后再做两轮 perf（inclusive callgraph，`-g -fno-omit-frame-pointer --call-graph dwarf`），揭示新的支配成本：启发式 haversine 的 `atan2`（inclusive ~34%）、`node_blocked`/`edge_blocked` 的 `std::function` 类型擦除（~12.6%）、每 spur 堆重分配。据此落地三项，分解与实测如下。
 
 **方法**：同 `bench/route_bench.cc`，10 城市对 × 60 轮无 altitude，同机取平均。本机与第 3 节上表不同机器，绝对值不跨表比，看本表内倍率；起点 `+workspace` 即上表当前档在本机的复测值。
 
@@ -82,12 +82,12 @@ X-Plane 数据的解析 + 建图有固定成本（ARINC 424 解析尤重）。`b
 - **+chord（G2）**：启发式从大圆 haversine（`atan2`+`sin`/`cos`）改为单位球弦长 `R·|unit(v)−unit(g)|`。弦长 ≤ 弧长，仍 admissible、最优代价不变；goal 单位向量构造时预算、顶点向量借 `cache_` memo 每顶点只算一次，`atan2` 彻底消除。k=10 4.90→4.14。
 - **+NodeFilter（G3，MINOR：移除 `SearchOptions` 的 `node_blocked`/`edge_blocked` 字段，破坏性 API 变更）**：`SearchOptions` 的两个 `std::function` 换成 `NodeFilter`（机场范围检查 + `binary_search`）/`EdgeFilter`（`EdgeKey` `binary_search`）；Yen spur 的 `unordered_set` 禁集改排序 `const vector`（IIFE 排序绑 `const`，类型系统保有序）。热路径每邻居从类型擦除调用变内联范围检查。k=10 4.14→3.51。
 - **+heap（A.3）**：A* 开放集的 `priority_queue` 底层 vector 移入 `SearchWorkspace`，跨 spur `clear()` 复用容量；搜索改 `push_heap`/`pop_heap`（与 `priority_queue` 内部等价）。k=10 3.51→3.34。三项（chord / NodeFilter / heap）+ `AvoidConstraint` 排序向量化同批合入，版本自 3.16.29 一次性 bump 至 3.17.1（MINOR，因 `SearchOptions` 公开字段为破坏性 API 变更）。
-- **A.8（SoA→AoS）验证否决**：`SearchWorkspace` 五路 SoA 合 `VertexState` AoS，perf `-e cache-misses` 公平 A/B 显示 miss 率降（6.52→5.14%）但总 miss/refs 升、墙钟轻微回退（k=1 +6%）——SoA 每 line 装 8 double 密度更高，CPU OOO 已隐藏 miss 延迟，workspace 非瓶颈。不提交。
+- **A.8（SoA→AoS）验证否决**：`SearchWorkspace` 五路 SoA 合 `VertexState` AoS，perf `-e cache-misses` 公平 A/B 显示 miss 率降（6.52→5.14%）但总 miss/refs 升、墙钟轻微回退（k=1 +6%）——SoA 每 line 装 8 double 密度更高，CPU OOO 已隐藏 miss 延迟，workspace 非瓶颈，故未采纳。
 - **k=1 多数项持平**：单搜索无 Yen spur，spur 级优化（NodeFilter 的 std::function 占比小、heap 无复用）无收益；chord 仍吃 atan2（k=1 1.31→0.70）。
 
 > 教训延续（第 4 节 gprof/perf 偏差）：A.3 的堆重分配 gprof 曾估 <1%（不采 malloc），perf 显示 alloc ~7%、实占更大——profiler 偏差第四次现身。A.8 则相反：cache-miss 率下降未必带来墙钟（OOO 隐藏），结构优化须以墙钟为准、cache 指标仅作诊断。
 
-**G5（ALT landmarks）已验证、待实现**：完美启发式探针（反向 Dijkstra 算精确剩余距离）显示更紧启发式可再砍 ~85% 扩展顶点（k=1 464→43、k=10 13898→2198）——chord 偏松是瓶颈，ALT 上限很高。但需 bump `format_version`（landmark 距离落 cache）+ 重建 bfdb，是独立大里程碑，下会话进 plan 实现。
+**G5（ALT landmarks）已验证、待实现**：完美启发式探针（反向 Dijkstra 算精确剩余距离）显示更紧启发式可再砍 ~85% 扩展顶点（k=1 464→43、k=10 13898→2198）——chord 偏松是瓶颈，ALT 上限很高。但需 bump `format_version`（landmark 距离落 cache）+ 重建 bfdb，是独立大里程碑，留待后续规划实现。
 
 ## 4. 已止步：profile 指向的固有成本
 
@@ -125,7 +125,7 @@ Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O
 | eager（`--cifp-load eager`） | ~169 MB | 全量程序反序列化，+~67 MB |
 
 - 峰值 RSS 含图（lookup 排序数组 ~4MB + CSR 数组）、进程基线、以及程序段部分。
-- 内存紧凑化（2026-07）：per-vertex ident 与 ProcedureLeg.fix 改 12B `FixedIdent`、lookup 哈希表改 排序数组 + 二分、WaypointKind 收窄 U8——on-demand 约省 ~27MB、eager 再省 ~41MB（fix 字段是 eager 的 大头）。详见 `.notes/plans/2026-07-09_memory_compaction.md`。
+- 内存紧凑化（2026-07）：per-vertex ident 与 ProcedureLeg.fix 改 12B `FixedIdent`、lookup 哈希表改 排序数组 + 二分、WaypointKind 收窄 U8——on-demand 约省 ~27MB、eager 再省 ~41MB（fix 字段是 eager 的 大头）。
 - CIFP 三字段（2026-07-14，`format_version` 6）：每条 leg 增补 RNP / 转向 / 速度限制（紧凑 u16/u16/char），整文件 +~3.6MB、eager RSS +~1MB；on-demand 不物化全 leg 故基本不变。
 - on-demand 适合一次性 CLI 查询（启动省、只加载查到的机场）；eager 适合长驻服务/批量并发 （全量常驻、之后无锁读），见 [thread-safety.zh-CN.md](thread-safety.zh-CN.md)。
 
