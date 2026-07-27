@@ -66,6 +66,29 @@ X-Plane 数据的解析 + 建图有固定成本（ARINC 424 解析尤重）。`b
 
 > 两个优化的原理与正确性论证分别见 [yen-lawler-optimization.zh-CN.md](yen-lawler-optimization.zh-CN.md)（Lawler + memoize）。
 
+### 3.1 第二轮：profiling 驱动的启发式与热路径优化（2026-07-27，v3.16.30→3.17.1）
+
+`+workspace` 之后再做两轮 perf（inclusive callgraph，`-g -fno-omit-frame-pointer --call-graph dwarf`），揭示新的支配成本：启发式 haversine 的 `atan2`（inclusive ~34%）、`node_blocked`/`edge_blocked` 的 `std::function` 类型擦除（~12.6%）、每 spur 堆重分配。据此落地三项，详尽分析与实测见 `.notes/research/2026-07-27_engine_perf_analysis.md`。
+
+**方法**：同 `bench/route_bench.cc`，10 城市对 × 60 轮无 altitude，同机取平均。本机与第 3 节上表不同机器，绝对值不跨表比，看本表内倍率；起点 `+workspace` 即上表当前档在本机的复测值。
+
+| k | +workspace（起点） | +chord（G2） | +NodeFilter（G3） | +heap（A.3，当前） | 本轮累计 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 1.31 | 0.70 | 0.71 | 0.70 | 1.87× |
+| 3 | 3.02 | 2.15 | 1.93 | 1.86 | 1.63× |
+| 5 | 3.63 | 2.80 | 2.45 | 2.35 | 1.54× |
+| 10 | 4.90 | 4.14 | 3.51 | 3.34 | **1.47×** |
+
+- **+chord（G2，PATCH 3.16.31）**：启发式从大圆 haversine（`atan2`+`sin`/`cos`）改为单位球弦长 `R·|unit(v)−unit(g)|`。弦长 ≤ 弧长，仍 admissible、最优代价不变；goal 单位向量构造时预算、顶点向量借 `cache_` memo 每顶点只算一次，`atan2` 彻底消除。k=10 4.90→4.14。
+- **+NodeFilter（G3，MINOR 3.17.0）**：`SearchOptions` 的 `node_blocked`/`edge_blocked` 两个 `std::function` 换成 `NodeFilter`（机场范围检查 + `binary_search`）/`EdgeFilter`（`EdgeKey` `binary_search`）；Yen spur 的 `unordered_set` 禁集改排序 `const vector`（IIFE 排序绑 `const`，类型系统保有序）。热路径每邻居从类型擦除调用变内联范围检查。k=10 4.14→3.51。
+- **+heap（A.3，PATCH 3.17.1）**：A* 开放集的 `priority_queue` 底层 vector 移入 `SearchWorkspace`，跨 spur `clear()` 复用容量；搜索改 `push_heap`/`pop_heap`（与 `priority_queue` 内部等价）。k=10 3.51→3.34。
+- **A.8（SoA→AoS）验证否决**：`SearchWorkspace` 五路 SoA 合 `VertexState` AoS，perf `-e cache-misses` 公平 A/B 显示 miss 率降（6.52→5.14%）但总 miss/refs 升、墙钟轻微回退（k=1 +6%）——SoA 每 line 装 8 double 密度更高，CPU OOO 已隐藏 miss 延迟，workspace 非瓶颈。不提交。
+- **k=1 多数项持平**：单搜索无 Yen spur，spur 级优化（NodeFilter 的 std::function 占比小、heap 无复用）无收益；chord 仍吃 atan2（k=1 1.31→0.70）。
+
+> 教训延续（第 4 节 gprof/perf 偏差）：A.3 的堆重分配 gprof 曾估 <1%（不采 malloc），perf 显示 alloc ~7%、实占更大——profiler 偏差第四次现身。A.8 则相反：cache-miss 率下降未必带来墙钟（OOO 隐藏），结构优化须以墙钟为准、cache 指标仅作诊断。
+
+**G5（ALT landmarks）已验证、待实现**：完美启发式探针（反向 Dijkstra 算精确剩余距离）显示更紧启发式可再砍 ~85% 扩展顶点（k=1 464→43、k=10 13898→2198）——chord 偏松是瓶颈，ALT 上限很高。但需 bump `format_version`（landmark 距离落 cache）+ 重建 bfdb，是独立大里程碑，下会话进 plan 实现。
+
 ## 4. 已止步：profile 指向的固有成本
 
 Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O2` 全量编译）。按符号 归类 self time：
