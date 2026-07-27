@@ -3,6 +3,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -82,11 +83,13 @@ bf::GraphSnapshot MakeValidSnapshot() {
 // Encode a snapshot to its section body + the shared string-pool blob. REQUIREs
 // the encode to succeed (the corruption cases all keep array sizes consistent,
 // which is all Encode validates).
-void EncodeSnapshot(const bf::GraphSnapshot& s, std::string* body, std::string* pool_blob) {
+void EncodeSnapshot(const bf::GraphSnapshot& s, std::vector<uint8_t>* body,
+                    std::vector<uint8_t>* pool_blob) {
   bf::ByteWriter w(*body);
   bf::StringPool pool;
   REQUIRE(bf::GraphCodec::Encode(s, w, pool));
-  *pool_blob = pool.blob();
+  const auto blob = pool.blob();
+  pool_blob->assign(blob.begin(), blob.end());
 }
 
 }  // namespace
@@ -95,10 +98,9 @@ TEST_CASE("graph decode: a semantically corrupt section is rejected, not read ou
           "[unit][bfdb]") {
   // Control: the valid snapshot round-trips through Encode/Decode.
   {
-    std::string body, pool;
+    std::vector<uint8_t> body, pool;
     EncodeSnapshot(MakeValidSnapshot(), &body, &pool);
-    bf::Result<bf::GraphSnapshot> r =
-        bf::GraphCodec::Decode(body.data(), body.size(), pool.data(), pool.size());
+    bf::Result<bf::GraphSnapshot> r = bf::GraphCodec::Decode(body, pool);
     REQUIRE(r);
     CHECK(r.value().coords.size() == 2);
   }
@@ -106,10 +108,9 @@ TEST_CASE("graph decode: a semantically corrupt section is rejected, not read ou
   // Each case corrupts exactly one field of an otherwise valid snapshot; Decode
   // must fail through Result (kCacheCorrupt), never index the graph out of range.
   auto expect_corrupt = [](const bf::GraphSnapshot& s) {
-    std::string body, pool;
+    std::vector<uint8_t> body, pool;
     EncodeSnapshot(s, &body, &pool);
-    bf::Result<bf::GraphSnapshot> r =
-        bf::GraphCodec::Decode(body.data(), body.size(), pool.data(), pool.size());
+    bf::Result<bf::GraphSnapshot> r = bf::GraphCodec::Decode(body, pool);
     CHECK_FALSE(r);
     if (!r) {
       CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
@@ -154,11 +155,10 @@ TEST_CASE("graph decode: a semantically corrupt section is rejected, not read ou
   }
 
   SECTION("trailing bytes after a valid section") {
-    std::string body, pool;
+    std::vector<uint8_t> body, pool;
     EncodeSnapshot(MakeValidSnapshot(), &body, &pool);
-    body.push_back('\0');  // one extra byte the decoder should not have to read
-    bf::Result<bf::GraphSnapshot> r =
-        bf::GraphCodec::Decode(body.data(), body.size(), pool.data(), pool.size());
+    body.push_back(0);  // one extra byte the decoder should not have to read
+    bf::Result<bf::GraphSnapshot> r = bf::GraphCodec::Decode(body, pool);
     CHECK_FALSE(r);
     if (!r) {
       CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);

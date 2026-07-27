@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
+#include <span>
 #include <string>
 
 #include "core/result.h"
@@ -33,12 +34,10 @@ class GraphCodec {
   // or its arrays are internally inconsistent.
   static Result<void> Encode(const GraphSnapshot& snapshot, ByteWriter& w, StringPool& pool);
 
-  // Decode a graph section body (`data`/`size`) into a GraphSnapshot, resolving
-  // string references against the global pool blob (`pool`/`pool_len`). Returns
-  // kCacheCorrupt if the body is malformed/truncated or a reference is out of
-  // range.
-  static Result<GraphSnapshot> Decode(const char* data, size_t size, const char* pool,
-                                      size_t pool_len);
+  // Decode a graph section body (`body`) into a GraphSnapshot, resolving string
+  // references against the global pool blob (`pool`). Returns kCacheCorrupt if
+  // the body is malformed/truncated or a reference is out of range.
+  static Result<GraphSnapshot> Decode(std::span<const uint8_t> body, std::span<const uint8_t> pool);
 };
 
 }  // namespace bf

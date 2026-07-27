@@ -76,8 +76,8 @@ static_assert(kDirEntrySize == 20, "directory-entry wire layout drifted");
 // segment therefore cannot be deserialized in isolation -- it needs the global
 // pool blob, which the CifpArchive holds in memory.
 
-std::string SerializeSegment(const CifpData& data, StringPool& pool) {
-  std::string body;
+std::vector<uint8_t> SerializeSegment(const CifpData& data, StringPool& pool) {
+  std::vector<uint8_t> body;
   ByteWriter w(body);
 
   auto ref = [&](const std::string& s) {
@@ -121,23 +121,23 @@ std::string SerializeSegment(const CifpData& data, StringPool& pool) {
 }
 
 // Deserialize a bare segment body, resolving string references against the
-// global pool blob (`pool`/`pool_len`).
-std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const char* pool,
-                                           size_t pool_len) {
-  ByteReader br(data, size);
+// global pool blob (`pool`).
+std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
+                                           std::span<const uint8_t> pool) {
+  ByteReader br(data);
 
   bool refs_ok = true;
   auto ref = [&](std::string& s) {
     const uint32_t off = br.U32();
     const uint32_t len = br.U32();
-    s = ResolveRef(pool, pool_len, off, len, refs_ok);
+    s = ResolveRef(pool, off, len, refs_ok);
   };
   // Same read, returning the resolved string by value -- used for the fix, which
   // is a FixedIdent (cannot bind to std::string&) built via FromParts.
   auto read_ref = [&]() -> std::string {
     const uint32_t off = br.U32();
     const uint32_t len = br.U32();
-    return ResolveRef(pool, pool_len, off, len, refs_ok);
+    return ResolveRef(pool, off, len, refs_ok);
   };
 
   // Minimum on-disk bytes per record, used to reject an absurd count before
@@ -222,7 +222,7 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
   // on how many bytes preceding sections already wrote to `w`.
   struct Entry {
     const std::string* icao;
-    std::string body;
+    std::vector<uint8_t> body;
   };
   std::vector<Entry> entries;
   entries.reserve(procedures.size());
@@ -242,7 +242,7 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
   const uint64_t segments_start =
       4 /*airport_count*/ + static_cast<uint64_t>(entries.size()) * kDirEntrySize;
 
-  std::string section;
+  std::vector<uint8_t> section;
   ByteWriter sw(section);
   sw.U32(static_cast<uint32_t>(entries.size()));
   uint64_t running = segments_start;
@@ -254,7 +254,7 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
     running += entries[i].body.size();
   }
   for (const Entry& e : entries) {
-    section.append(e.body);
+    section.insert(section.end(), e.body.begin(), e.body.end());
   }
 
   w.Bytes(section.data(), section.size());
@@ -262,7 +262,8 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
 }
 
 Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t section_offset,
-                                           uint64_t section_length, std::string pool_blob) {
+                                           uint64_t section_length,
+                                           std::vector<uint8_t> pool_blob) {
   auto bad = [&](const char* why) {
     return Result<CifpArchive>::Err(
         Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
@@ -282,26 +283,26 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
     return bad("corrupt CIFP section: too short");
   }
   // Read airport_count.
-  char count_buf[4];
-  if (!archive.file_.ReadAt(count_buf, 4, section_offset)) {
+  uint8_t count_buf[4];
+  if (!archive.file_.ReadAt(count_buf, section_offset)) {
     return bad("truncated CIFP section directory");
   }
-  ByteReader cr(count_buf, 4);
+  ByteReader cr(count_buf);
   const uint32_t airport_count = cr.U32();
-  // A directory row is 20 bytes; reject a count that could not fit in the section
-  // before allocating.
+  // A directory row is kDirEntrySize bytes; reject a count that could not fit in
+  // the section before allocating.
   if (static_cast<uint64_t>(airport_count) > (section_length - 4) / kDirEntrySize) {
     return bad("corrupt CIFP section: directory count exceeds section size");
   }
 
   // Read the whole directory region in one positional read.
   const size_t dir_bytes = static_cast<size_t>(airport_count) * kDirEntrySize;
-  std::string dir(dir_bytes, '\0');
-  if (dir_bytes > 0 && !archive.file_.ReadAt(dir.data(), dir_bytes, section_offset + 4)) {
+  std::vector<uint8_t> dir(dir_bytes);
+  if (dir_bytes > 0 && !archive.file_.ReadAt(dir, section_offset + 4)) {
     return bad("truncated CIFP section directory");
   }
 
-  ByteReader dr(dir.data(), dir.size());
+  ByteReader dr(dir);
   archive.index_.reserve(airport_count);
   for (uint32_t i = 0; i < airport_count; ++i) {
     const uint32_t icao_off = dr.U32();
@@ -331,7 +332,8 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
       return bad("corrupt CIFP section: segment overlaps directory");
     }
     const uint64_t abs_off = section_offset + seg_rel;
-    std::string icao = archive.pool_.substr(icao_off, icao_len);
+    // ICAO bounds were validated above, so the slice is in range.
+    std::string icao(reinterpret_cast<const char*>(archive.pool_.data() + icao_off), icao_len);
     archive.index_.emplace(std::move(icao), std::make_pair(abs_off, seg_len));
   }
   return Result<CifpArchive>::Ok(std::move(archive));
@@ -343,12 +345,11 @@ std::unordered_map<std::string, CifpData> CifpArchive::FetchAll() const {
   for (const auto& entry : index_) {
     const uint64_t offset = entry.second.first;
     const uint32_t length = entry.second.second;
-    std::string bytes(length, '\0');
-    if (length > 0 && !file_.ReadAt(bytes.data(), length, offset)) {
+    std::vector<uint8_t> bytes(length);
+    if (length > 0 && !file_.ReadAt(bytes, offset)) {
       continue;
     }
-    std::optional<CifpData> data =
-        DeserializeSegment(bytes.data(), bytes.size(), pool_.data(), pool_.size());
+    std::optional<CifpData> data = DeserializeSegment(bytes, pool_);
     if (data.has_value()) {
       out.emplace(entry.first, std::move(*data));
     }
@@ -366,11 +367,11 @@ std::optional<CifpData> CifpArchive::Fetch(const std::string& icao) const {
   // Positional read on the shared handle: pread/ReadFile take an explicit offset
   // and touch no shared cursor, so concurrent fetches for different airports are
   // race-free without a lock (contract B). Bounds were validated at OpenSection.
-  std::string bytes(length, '\0');
-  if (length > 0 && !file_.ReadAt(bytes.data(), length, offset)) {
+  std::vector<uint8_t> bytes(length);
+  if (length > 0 && !file_.ReadAt(bytes, offset)) {
     return std::nullopt;
   }
-  return DeserializeSegment(bytes.data(), bytes.size(), pool_.data(), pool_.size());
+  return DeserializeSegment(bytes, pool_);
 }
 
 }  // namespace bf

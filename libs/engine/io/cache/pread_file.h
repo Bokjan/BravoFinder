@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -75,10 +76,12 @@ class PreadFile {
   bool is_open() const { return fd_ >= 0; }
 #endif
 
-  // Read exactly `len` bytes at absolute `offset` into `dst`. Returns true only
-  // if all `len` bytes were read. Does not move any shared file position, so
+  // Read exactly `dst.size()` bytes at absolute `offset` into `dst`. Returns true
+  // only if all bytes were read. Does not move any shared file position, so
   // concurrent calls on the same PreadFile are safe.
-  bool ReadAt(char* dst, size_t len, uint64_t offset) const {
+  bool ReadAt(std::span<uint8_t> dst, uint64_t offset) const {
+    char* const base = reinterpret_cast<char*>(dst.data());
+    const size_t len = dst.size();
     size_t got = 0;
     while (got < len) {
 #ifdef _WIN32
@@ -88,12 +91,12 @@ class PreadFile {
       ov.OffsetHigh = static_cast<DWORD>(pos >> 32);
       DWORD read = 0;
       const DWORD want = static_cast<DWORD>((len - got) > 0xFFFFFFFFu ? 0xFFFFFFFFu : (len - got));
-      if (!::ReadFile(handle_, dst + got, want, &read, &ov) || read == 0) {
+      if (!::ReadFile(handle_, base + got, want, &read, &ov) || read == 0) {
         return false;
       }
       got += read;
 #else
-      const ssize_t n = ::pread(fd_, dst + got, len - got, static_cast<off_t>(offset + got));
+      const ssize_t n = ::pread(fd_, base + got, len - got, static_cast<off_t>(offset + got));
       if (n <= 0) {
         return false;
       }

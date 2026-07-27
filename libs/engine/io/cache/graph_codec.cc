@@ -174,9 +174,9 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
   return Result<void>::Ok();
 }
 
-Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const char* pool,
-                                         size_t pool_len) {
-  ByteReader r(data, size);
+Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
+                                         std::span<const uint8_t> pool) {
+  ByteReader r(body);
 
   auto bad = [](const char* why) {
     return Result<GraphSnapshot>::Err(
@@ -370,22 +370,21 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
   snapshot.idents.resize(v);
   for (uint32_t i = 0; i < v; ++i) {
     const IdentRef& ir = ident_refs[i];
-    const std::string id = ResolveRef(pool, pool_len, ir.io, ir.il, refs_ok);
-    const std::string reg = ResolveRef(pool, pool_len, ir.ro, ir.rl, refs_ok);
+    const std::string id = ResolveRef(pool, ir.io, ir.il, refs_ok);
+    const std::string reg = ResolveRef(pool, ir.ro, ir.rl, refs_ok);
     snapshot.idents[i] = FixedIdent::FromParts(id, reg);
   }
   snapshot.airway_names.resize(airway_count);
   for (uint32_t i = 0; i < airway_count; ++i) {
-    snapshot.airway_names[i] =
-        ResolveRef(pool, pool_len, airway_refs[i].o, airway_refs[i].l, refs_ok);
+    snapshot.airway_names[i] = ResolveRef(pool, airway_refs[i].o, airway_refs[i].l, refs_ok);
   }
   snapshot.mora = MoraGrid::FromCells(std::move(cells));
   snapshot.msa.resize(msa_count);
   for (uint32_t i = 0; i < msa_count; ++i) {
     MsaRef& m = msa_refs[i];
-    snapshot.msa[i].center.ident = ResolveRef(pool, pool_len, m.cio, m.cil, refs_ok);
-    snapshot.msa[i].center.region = ResolveRef(pool, pool_len, m.cro, m.crl, refs_ok);
-    snapshot.msa[i].airport_icao = ResolveRef(pool, pool_len, m.aio, m.ail, refs_ok);
+    snapshot.msa[i].center.ident = ResolveRef(pool, m.cio, m.cil, refs_ok);
+    snapshot.msa[i].center.region = ResolveRef(pool, m.cro, m.crl, refs_ok);
+    snapshot.msa[i].airport_icao = ResolveRef(pool, m.aio, m.ail, refs_ok);
     snapshot.msa[i].arcs = std::move(m.arcs);
   }
   if (!refs_ok) {

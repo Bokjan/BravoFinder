@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -70,10 +71,10 @@ class NavDetailCodec {
   // strings into the shared `pool`.
   static Result<void> Encode(const NavDetailArchive& archive, ByteWriter& w, StringPool& pool);
 
-  // Decode a detail section body (`data`/`size`) into a NavDetailArchive,
-  // resolving string references against the global pool blob (`pool`/`pool_len`).
-  static Result<NavDetailArchive> Decode(const char* data, size_t size, const char* pool,
-                                         size_t pool_len);
+  // Decode a detail section body (`body`) into a NavDetailArchive, resolving
+  // string references against the global pool blob (`pool`).
+  static Result<NavDetailArchive> Decode(std::span<const uint8_t> body,
+                                         std::span<const uint8_t> pool);
 };
 
 }  // namespace bf

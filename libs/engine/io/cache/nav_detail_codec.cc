@@ -91,14 +91,14 @@ Result<void> NavDetailCodec::Encode(const NavDetailArchive& archive, ByteWriter&
   return Result<void>::Ok();
 }
 
-Result<NavDetailArchive> NavDetailCodec::Decode(const char* data, size_t size, const char* pool,
-                                                size_t pool_len) {
+Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
+                                                std::span<const uint8_t> pool) {
   auto bad = [](const char* why) {
     return Result<NavDetailArchive>::Err(
         Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
   };
 
-  ByteReader r(data, size);
+  ByteReader r(body);
   const uint32_t navaid_count = r.U32();
   const uint32_t hold_count = r.U32();
   if (!r.ok()) {
@@ -107,7 +107,7 @@ Result<NavDetailArchive> NavDetailCodec::Decode(const char* data, size_t size, c
 
   bool refs_ok = true;
   auto resolve = [&](uint32_t off, uint32_t len) -> std::string {
-    return ResolveRef(pool, pool_len, off, len, refs_ok);
+    return ResolveRef(pool, off, len, refs_ok);
   };
 
   // Sanity-check counts before allocating. Per-record sizes come from the packed

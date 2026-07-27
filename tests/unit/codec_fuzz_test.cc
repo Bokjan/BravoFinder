@@ -2,7 +2,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <random>
-#include <string>
 #include <vector>
 
 #include "io/cache/graph_codec.h"
@@ -19,21 +18,20 @@ namespace {
 
 // An arbitrary small string-pool blob: NUL-separated entries. Not a valid pool
 // for any particular body; the decoders must tolerate references that miss.
-const std::string kPool("\0KJFK\0CANDR\0KLAX\0", 17);
+const std::vector<uint8_t> kPool{0x00, 'K', 'J',  'F', 'K', 0x00, 'C', 'A', 'N',
+                                 'D',  'R', 0x00, 'K', 'L', 'A',  'X', 0x00};
 
 TEST_CASE("GraphCodec::Decode: empty and tiny inputs error, never crash", "[unit][codec_fuzz]") {
-  const char empty[1] = {0};
-  CHECK_FALSE(bf::GraphCodec::Decode(empty, 0, kPool.data(), kPool.size()));
-  const char tiny[3] = {0x01, 0x02, 0x03};
-  CHECK_FALSE(bf::GraphCodec::Decode(tiny, sizeof(tiny), kPool.data(), kPool.size()));
+  CHECK_FALSE(bf::GraphCodec::Decode({}, kPool));
+  const uint8_t tiny[3] = {0x01, 0x02, 0x03};
+  CHECK_FALSE(bf::GraphCodec::Decode(tiny, kPool));
 }
 
 TEST_CASE("NavDetailCodec::Decode: empty and tiny inputs error, never crash",
           "[unit][codec_fuzz]") {
-  const char empty[1] = {0};
-  CHECK_FALSE(bf::NavDetailCodec::Decode(empty, 0, kPool.data(), kPool.size()));
-  const char tiny[3] = {0x7f, 0x00, 0x42};
-  CHECK_FALSE(bf::NavDetailCodec::Decode(tiny, sizeof(tiny), kPool.data(), kPool.size()));
+  CHECK_FALSE(bf::NavDetailCodec::Decode({}, kPool));
+  const uint8_t tiny[3] = {0x7f, 0x00, 0x42};
+  CHECK_FALSE(bf::NavDetailCodec::Decode(tiny, kPool));
 }
 
 TEST_CASE("cache decoders: random and truncated bytes never crash", "[unit][codec_fuzz]") {
@@ -41,15 +39,15 @@ TEST_CASE("cache decoders: random and truncated bytes never crash", "[unit][code
   std::uniform_int_distribution<int> byte(0, 255);
   std::uniform_int_distribution<int> len(1, 512);
   for (int iter = 0; iter < 3000; ++iter) {
-    std::vector<char> buf(static_cast<size_t>(len(rng)));
-    for (char& c : buf) {
-      c = static_cast<char>(byte(rng));
+    std::vector<uint8_t> buf(static_cast<size_t>(len(rng)));
+    for (uint8_t& c : buf) {
+      c = static_cast<uint8_t>(byte(rng));
     }
     // Only termination + no OOB (ASan) is asserted. A result may be Ok (the bytes
     // happened to form a self-consistent snapshot) or Err; both are fine here.
-    auto g = bf::GraphCodec::Decode(buf.data(), buf.size(), kPool.data(), kPool.size());
+    auto g = bf::GraphCodec::Decode(buf, kPool);
     (void)g;
-    auto d = bf::NavDetailCodec::Decode(buf.data(), buf.size(), kPool.data(), kPool.size());
+    auto d = bf::NavDetailCodec::Decode(buf, kPool);
     (void)d;
   }
   SUCCEED();

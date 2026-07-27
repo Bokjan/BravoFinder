@@ -2,6 +2,7 @@
 #include "io/cache/nav_detail_codec.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -67,14 +68,13 @@ bf::NavData MakeSampleData() {
 // StringPool as the unified container would provide.
 bf::Result<bf::NavDetailArchive> RoundTrip(const bf::NavDetailArchive& src) {
   bf::StringPool pool;
-  std::string body;
+  std::vector<uint8_t> body;
   bf::ByteWriter w(body);
   bf::Result<void> enc = bf::NavDetailCodec::Encode(src, w, pool);
   if (!enc) {
     return bf::Result<bf::NavDetailArchive>::Err(std::move(enc).error());
   }
-  const std::string& blob = pool.blob();
-  return bf::NavDetailCodec::Decode(body.data(), body.size(), blob.data(), blob.size());
+  return bf::NavDetailCodec::Decode(body, pool.blob());
 }
 
 }  // namespace

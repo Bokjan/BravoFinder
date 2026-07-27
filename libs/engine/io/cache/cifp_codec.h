@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -51,7 +52,7 @@ class CifpArchive {
 
   PreadFile file_;  // shared read-only handle on the unified .bfdb
   std::unordered_map<std::string, std::pair<uint64_t, uint32_t>> index_;  // icao -> (abs off, len)
-  std::string pool_;  // owned copy of the container's global string pool blob
+  std::vector<uint8_t> pool_;  // owned copy of the container's global string pool blob
 };
 
 // Encode/decode the CIFP SECTION of a unified `.bfdb`: a segmented, on-demand
@@ -81,7 +82,7 @@ class CifpCodec {
   // owned copy of the global pool blob (needed by Fetch). `section_offset` /
   // `section_length` locate the CIFP section within the file.
   static Result<CifpArchive> OpenSection(const std::string& path, uint64_t section_offset,
-                                         uint64_t section_length, std::string pool_blob);
+                                         uint64_t section_length, std::vector<uint8_t> pool_blob);
 };
 
 }  // namespace bf

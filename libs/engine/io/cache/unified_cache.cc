@@ -3,6 +3,9 @@
 
 #include <cstring>
 #include <fstream>
+#include <span>
+#include <utility>
+#include <vector>
 
 #include "io/cache/byte_io.h"
 #include "io/cache/cifp_codec.h"
@@ -32,6 +35,20 @@ constexpr size_t kSectionRowSize = 4 + 8 + 8;  // type U32 + offset U64 + length
 // string length pointing past what was read means the file is corrupt.
 constexpr size_t kMaxHeaderPrefix = 8192;
 
+// ofstream/ifstream speak char*; the cache layer's byte buffers are
+// std::vector<uint8_t>. These two helpers centralize the reinterpret_cast so
+// every read/write site stays byte-typed.
+void WriteAll(std::ostream& f, std::span<const uint8_t> b) {
+  f.write(reinterpret_cast<const char*>(b.data()), static_cast<std::streamsize>(b.size()));
+}
+
+bool ReadInto(std::istream& f, std::span<uint8_t> b) {
+  if (!b.empty()) {
+    f.read(reinterpret_cast<char*>(b.data()), static_cast<std::streamsize>(b.size()));
+  }
+  return static_cast<bool>(f);
+}
+
 }  // namespace
 
 Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& input) {
@@ -45,7 +62,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   // is encoded.
   StringPool pool;
 
-  std::string graph_body;
+  std::vector<uint8_t> graph_body;
   {
     ByteWriter gw(graph_body);
     Result<void> enc = GraphCodec::Encode(*input.graph, gw, pool);
@@ -54,7 +71,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
     }
   }
 
-  std::string cifp_body;
+  std::vector<uint8_t> cifp_body;
   const bool has_cifp = input.cifp != nullptr;
   if (has_cifp) {
     ByteWriter cw(cifp_body);
@@ -64,7 +81,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
     }
   }
 
-  std::string detail_body;
+  std::vector<uint8_t> detail_body;
   const bool has_detail = input.detail != nullptr;
   if (has_detail) {
     ByteWriter dw(detail_body);
@@ -74,7 +91,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
     }
   }
 
-  const std::string& pool_blob = pool.blob();
+  const std::span<const uint8_t> pool_blob = pool.blob();
 
   // The string pool's offset/length references and the pool_len header field are
   // uint32. If the deduplicated pool exceeds 4 GiB those values would silently
@@ -91,9 +108,9 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
 
   // Header buffer: magic, version, section_count, cycle, provenance strings,
   // pool_len. Built first so its size is known before section offsets.
-  std::string header;
+  std::vector<uint8_t> header;
   ByteWriter hw(header);
-  header.append(kMagic, 4);
+  hw.Bytes(reinterpret_cast<const uint8_t*>(kMagic), 4);
   hw.U32(kFormatVersion);
   hw.U32(kSectionCount);
   hw.U32(input.header.cycle);
@@ -113,7 +130,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   cursor += cifp_body.size();
   const uint64_t detail_off = has_detail ? cursor : 0;
 
-  std::string table;
+  std::vector<uint8_t> table;
   ByteWriter tw(table);
   tw.U32(kSectionGraph);
   tw.U64(graph_off);
@@ -130,15 +147,15 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
     return Result<void>::Err(
         Error(ErrorCode::kDataMissing, "cannot open .bfdb for writing: " + path));
   }
-  f.write(header.data(), static_cast<std::streamsize>(header.size()));
-  f.write(table.data(), static_cast<std::streamsize>(table.size()));
-  f.write(pool_blob.data(), static_cast<std::streamsize>(pool_blob.size()));
-  f.write(graph_body.data(), static_cast<std::streamsize>(graph_body.size()));
+  WriteAll(f, header);
+  WriteAll(f, table);
+  WriteAll(f, pool_blob);
+  WriteAll(f, graph_body);
   if (has_cifp) {
-    f.write(cifp_body.data(), static_cast<std::streamsize>(cifp_body.size()));
+    WriteAll(f, cifp_body);
   }
   if (has_detail) {
-    f.write(detail_body.data(), static_cast<std::streamsize>(detail_body.size()));
+    WriteAll(f, detail_body);
   }
   if (!f) {
     return Result<void>::Err(Error(ErrorCode::kParseError, "failed writing .bfdb: " + path));
@@ -151,8 +168,8 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
   if (!f.is_open()) {
     return Result<UnifiedHeader>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
   }
-  std::string buf(kMaxHeaderPrefix, '\0');
-  f.read(buf.data(), static_cast<std::streamsize>(kMaxHeaderPrefix));
+  std::vector<uint8_t> buf(kMaxHeaderPrefix);
+  ReadInto(f, buf);  // may short-read a tiny file; gcount() tells how much
   buf.resize(static_cast<size_t>(f.gcount()));
   if (buf.size() < 4) {
     return Result<UnifiedHeader>::Err(Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
@@ -161,7 +178,7 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
     return Result<UnifiedHeader>::Err(Error(
         ErrorCode::kCacheCorrupt, "not a .bfdb file (bad magic); run bf build to regenerate"));
   }
-  ByteReader r(buf.data() + 4, buf.size() - 4);
+  ByteReader r(std::span<const uint8_t>(buf).subspan(4));
   if (r.U32() != kFormatVersion) {
     return Result<UnifiedHeader>::Err(
         Error(ErrorCode::kFormatMismatch,
@@ -200,10 +217,10 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   // Read the fixed header + provenance strings + section table + global pool.
   // These are near the file start; the (large) section bodies are read
   // individually afterward, so this initial read stays small.
-  auto readN = [&](std::string& dst, size_t n) {
+  auto readN = [&](std::vector<uint8_t>& dst, size_t n) {
     dst.resize(n);
     if (n > 0) {
-      f.read(dst.data(), static_cast<std::streamsize>(n));
+      f.read(reinterpret_cast<char*>(dst.data()), static_cast<std::streamsize>(n));
     }
     return static_cast<bool>(f);
   };
@@ -235,7 +252,11 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     if (static_cast<std::streamoff>(len) > remaining) {
       return false;
     }
-    return readN(s, len);
+    s.resize(len);
+    if (len > 0) {
+      f.read(s.data(), static_cast<std::streamsize>(len));
+    }
+    return static_cast<bool>(f);
   };
 
   char magic[4];
@@ -294,7 +315,7 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   }
 
   // Global string pool, read once into memory and shared by every section decode.
-  std::string pool;
+  std::vector<uint8_t> pool;
   if (!readN(pool, pool_len)) {
     return bad("truncated .bfdb string pool");
   }
@@ -323,24 +344,23 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   }
 
   // A helper to read one section body into a buffer at its offset.
-  auto readSection = [&](const Row& row, std::string& dst) {
+  auto readSection = [&](const Row& row, std::vector<uint8_t>& dst) {
     f.clear();
     f.seekg(static_cast<std::streamoff>(row.off));
     dst.resize(static_cast<size_t>(row.len));
     if (row.len > 0) {
-      f.read(dst.data(), static_cast<std::streamsize>(row.len));
+      f.read(reinterpret_cast<char*>(dst.data()), static_cast<std::streamsize>(row.len));
     }
     return static_cast<bool>(f);
   };
 
   // Graph section (always present): decode against the global pool.
   {
-    std::string body;
+    std::vector<uint8_t> body;
     if (!readSection(*graph_row, body)) {
       return bad("truncated .bfdb graph section");
     }
-    Result<GraphSnapshot> g =
-        GraphCodec::Decode(body.data(), body.size(), pool.data(), pool.size());
+    Result<GraphSnapshot> g = GraphCodec::Decode(body, pool);
     if (!g) {
       return Result<UnifiedData>::Err(std::move(g).error());
     }
@@ -349,12 +369,11 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
 
   // Detail section (optional): decode against the global pool.
   if (detail_row != nullptr && !(detail_row->off == 0 && detail_row->len == 0)) {
-    std::string body;
+    std::vector<uint8_t> body;
     if (!readSection(*detail_row, body)) {
       return bad("truncated .bfdb detail section");
     }
-    Result<NavDetailArchive> d =
-        NavDetailCodec::Decode(body.data(), body.size(), pool.data(), pool.size());
+    Result<NavDetailArchive> d = NavDetailCodec::Decode(body, pool);
     if (!d) {
       return Result<UnifiedData>::Err(std::move(d).error());
     }
@@ -364,8 +383,10 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   // CIFP section (optional): opened on-demand -- the directory is read now, the
   // segments stay on disk and are fetched lazily via a pread handle. The archive
   // needs its own copy of the global pool blob to resolve segment string refs.
+  // This is the last use of `pool`, so move it into the archive.
   if (cifp_row != nullptr && !(cifp_row->off == 0 && cifp_row->len == 0)) {
-    Result<CifpArchive> c = CifpCodec::OpenSection(path, cifp_row->off, cifp_row->len, pool);
+    Result<CifpArchive> c =
+        CifpCodec::OpenSection(path, cifp_row->off, cifp_row->len, std::move(pool));
     if (!c) {
       return Result<UnifiedData>::Err(std::move(c).error());
     }

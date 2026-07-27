@@ -8,27 +8,34 @@
 // regardless of host endianness. Floats are written via their IEEE-754 bit
 // pattern (memcpy to an unsigned integer of the same width), which every
 // current platform shares, so values round-trip exactly across architectures.
+//
+// Byte buffers are std::vector<uint8_t> / std::span<const uint8_t> -- these hold
+// raw bytes, not text. Decoded strings (idents, regions, ICAO codes) are still
+// std::string, since those ARE text resolved out of the shared string pool.
 
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace bf {
 
 // Little-endian writer appending to an in-memory byte buffer.
 class ByteWriter {
  public:
-  explicit ByteWriter(std::string& out) : out_(out) {}
+  explicit ByteWriter(std::vector<uint8_t>& out) : out_(out) {}
 
   // Grow the backing buffer's capacity to at least its current size plus `extra`
   // bytes, so a sequence of appends does not reallocate. A hint only; callers
   // estimate the total from element counts before writing the sections.
   void Reserve(size_t extra) { out_.reserve(out_.size() + extra); }
 
-  void U8(uint8_t v) { out_.push_back(static_cast<char>(v)); }
+  void U8(uint8_t v) { out_.push_back(v); }
 
   void U16(uint16_t v) {
     U8(static_cast<uint8_t>(v));
@@ -64,17 +71,18 @@ class ByteWriter {
 
   // Append `n` raw bytes verbatim (no endianness transform). Used for string
   // bytes and pre-serialized blobs.
-  void Bytes(const char* data, size_t n) { out_.append(data, n); }
+  void Bytes(const uint8_t* data, size_t n) { out_.insert(out_.end(), data, data + n); }
 
   // A length-prefixed string: U32 length, then the bytes. The inverse of
-  // ByteReader::Str. Used for inline header strings (provenance, etc.).
+  // ByteReader::Str. Used for inline header strings (provenance, etc.) and for
+  // pool-interned string bodies. The input is text; it is serialized as bytes.
   void Str(const std::string& s) {
     U32(static_cast<uint32_t>(s.size()));
-    out_.append(s);
+    Bytes(reinterpret_cast<const uint8_t*>(s.data()), s.size());
   }
 
  private:
-  std::string& out_;
+  std::vector<uint8_t>& out_;
 };
 
 // Little-endian reader over a byte span with bounds checking. Every read
@@ -83,7 +91,7 @@ class ByteWriter {
 // further reads return zero, so parsing degrades safely.
 class ByteReader {
  public:
-  ByteReader(const char* data, size_t size) : data_(data), size_(size) {}
+  ByteReader(std::span<const uint8_t> bytes) : data_(bytes.data()), size_(bytes.size()) {}
 
   bool ok() const { return ok_; }
   size_t remaining() const { return ok_ ? size_ - pos_ : 0; }
@@ -93,7 +101,7 @@ class ByteReader {
       ok_ = false;
       return 0;
     }
-    return static_cast<uint8_t>(data_[pos_++]);
+    return data_[pos_++];
   }
 
   uint16_t U16() {
@@ -137,7 +145,7 @@ class ByteReader {
 
   // Copy `n` raw bytes into `dst` (no endianness transform). Sets the error
   // flag and copies nothing if fewer than `n` bytes remain.
-  void Bytes(char* dst, size_t n) {
+  void Bytes(uint8_t* dst, size_t n) {
     if (pos_ + n > size_) {
       ok_ = false;
       return;
@@ -202,7 +210,7 @@ class ByteReader {
            ((v & 0xFF000000u) >> 24);
   }
 
-  const char* data_;
+  const uint8_t* data_;
   size_t size_;
   size_t pos_ = 0;
   bool ok_ = true;
@@ -213,7 +221,8 @@ class ByteReader {
 // airway names, ICAO codes recur heavily) resolve to the same reference, so the
 // blob holds one copy of each. Deduplication is transparent to readers: the
 // on-disk reference format is unchanged, so a pool written with or without it
-// reads identically.
+// reads identically. The blob is a byte buffer (the serialized pool), while the
+// dedup map keys are the text strings being interned.
 class StringPool {
  public:
   std::pair<uint32_t, uint32_t> Add(const std::string& s) {
@@ -223,40 +232,32 @@ class StringPool {
     }
     const std::pair<uint32_t, uint32_t> ref{static_cast<uint32_t>(blob_.size()),
                                             static_cast<uint32_t>(s.size())};
-    blob_.append(s);
+    blob_.insert(blob_.end(), reinterpret_cast<const uint8_t*>(s.data()),
+                 reinterpret_cast<const uint8_t*>(s.data()) + s.size());
     it->second = ref;
     return ref;
   }
 
-  const std::string& blob() const { return blob_; }
+  std::span<const uint8_t> blob() const { return blob_; }
 
  private:
-  std::string blob_;
+  std::vector<uint8_t> blob_;
   std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> interned_;
 };
 
 // Resolve a (offset, len) reference against a loaded pool blob. Sets `ok` false
-// and returns empty if the reference is out of range.
-inline std::string ResolveRef(const std::string& blob, uint32_t offset, uint32_t len, bool& ok) {
+// and returns empty if the reference is out of range. The resolved value is
+// text (an ident, region, or ICAO code), hence std::string.
+inline std::string ResolveRef(std::span<const uint8_t> pool, uint32_t offset, uint32_t len,
+                              bool& ok) {
   // Overflow-safe bounds check: offset + len can wrap when size_t is 32-bit, so
   // subtract instead of add. offset <= size is checked first, so size - offset
   // never underflows.
-  if (offset > blob.size() || len > blob.size() - offset) {
+  if (offset > pool.size() || len > pool.size() - offset) {
     ok = false;
     return {};
   }
-  return blob.substr(offset, len);
-}
-
-// Same, but against a raw byte range (e.g. a slice of the already-read file
-// buffer), so the pool blob need not be copied out first.
-inline std::string ResolveRef(const char* pool, size_t pool_len, uint32_t offset, uint32_t len,
-                              bool& ok) {
-  if (offset > pool_len || len > pool_len - offset) {
-    ok = false;
-    return {};
-  }
-  return std::string(pool + offset, len);
+  return std::string(reinterpret_cast<const char*>(pool.data() + offset), len);
 }
 
 }  // namespace bf
