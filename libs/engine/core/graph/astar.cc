@@ -301,16 +301,6 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
 ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& sources,
                                    const std::vector<SeededEndpoint>& goals,
-                                   const SearchOptions& options,
-                                   const MultiGoalHeuristic& heuristic) {
-  const std::vector<double> goal_seed = BuildSeedTable(goals, graph.VertexCount());
-  SearchWorkspace ws;
-  return FindShortestPathMulti(graph, sources, goal_seed, options, heuristic, ws);
-}
-
-ShortestPath FindShortestPathMulti(const NavGraph& graph,
-                                   const std::vector<SeededEndpoint>& sources,
-                                   const std::vector<SeededEndpoint>& goals,
                                    const SearchOptions& options) {
   const MultiGoalHeuristic heuristic(graph, goals);
   const std::vector<double> goal_seed = BuildSeedTable(goals, graph.VertexCount());

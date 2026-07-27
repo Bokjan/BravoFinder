@@ -191,15 +191,6 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& goals,
                                    const SearchOptions& options);
 
-// Overload taking a caller-owned, memoized heuristic so repeated searches with
-// the same graph and goals (Yen's spur searches) share one cache. `heuristic`
-// must have been built for the same `graph` and `goals`.
-ShortestPath FindShortestPathMulti(const NavGraph& graph,
-                                   const std::vector<SeededEndpoint>& sources,
-                                   const std::vector<SeededEndpoint>& goals,
-                                   const SearchOptions& options,
-                                   const MultiGoalHeuristic& heuristic);
-
 // Build a per-vertex seed table: seed[v] is the smallest seed cost among the
 // endpoints landing on v, or -1 when v is not an endpoint. Shared by the search
 // and by Yen's path re-costing so both agree on which vertices are endpoints.
