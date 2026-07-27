@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "http_status.h"  // kStatusNone
 #include "llhttp.h"
@@ -125,7 +126,9 @@ class Connection : public std::enable_shared_from_this<Connection> {
 
   // Low-level write of an already-built payload. `mode` decides post-write
   // behavior: keep-alive reset, close, or (streaming) leave the connection open.
-  void WriteRaw(std::string payload, WriteMode mode);
+  // The payload is the raw wire frame (opaque bytes), held alive across the
+  // async uv_write in WriteReq::payload.
+  void WriteRaw(std::vector<uint8_t> payload, WriteMode mode);
 
   // llhttp settings wiring + the static trampolines it calls back into.
   static void SetupParser(Connection& conn);
@@ -179,7 +182,11 @@ class Connection : public std::enable_shared_from_this<Connection> {
   int header_count_ = 0;
   bool saw_transfer_encoding_ = false;
   Headers headers_;  // finalized (lower-cased name, value) pairs
-  std::string body_;
+  // The raw request body, accumulated from llhttp's OnBody callbacks as opaque
+  // bytes (the transport is payload-neutral; it never interprets the body as
+  // text). Converted to std::string at Dispatch only because the consumer
+  // contract (HttpRequest::body) is JSON text.
+  std::vector<uint8_t> body_;
   bool request_ready_ = false;
   bool keep_alive_ = false;
   bool awaiting_response_ = false;   // request dispatched; ignore further input bytes

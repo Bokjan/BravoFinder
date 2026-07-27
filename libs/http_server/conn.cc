@@ -28,11 +28,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "http_status.h"
 
@@ -93,15 +95,27 @@ const char* ReasonPhrase(int status) {
   }
 }
 
+// Append raw bytes from a text fragment into the wire frame buffer. The frame
+// is opaque bytes (std::vector<uint8_t>); status line, header names/values,
+// and the body all get appended through here, centralizing the single
+// reinterpret_cast from char* to uint8_t* for the text portions.
+void AppendBytes(std::vector<uint8_t>& out, const char* s, size_t n) {
+  out.insert(out.end(), reinterpret_cast<const uint8_t*>(s),
+             reinterpret_cast<const uint8_t*>(s + n));
+}
+void AppendBytes(std::vector<uint8_t>& out, std::string_view s) {
+  AppendBytes(out, s.data(), s.size());
+}
+
 // Append `v` to `out`, dropping any CR / LF / NUL byte. Header names and values
-// are concatenated into the response with raw string ops, so a stray \r\n in a
+// are concatenated into the response with raw byte ops, so a stray \r\n in a
 // value would inject headers or split the response (HTTP response splitting).
 // Every current caller passes trusted content (hardcoded content types, a
 // hex-only session id), but the transport core must not rely on that.
-void AppendHeaderSafe(std::string& out, std::string_view v) {
+void AppendHeaderSafe(std::vector<uint8_t>& out, std::string_view v) {
   for (const char c : v) {
     if (c != '\r' && c != '\n' && c != '\0') {
-      out += c;
+      out.push_back(static_cast<uint8_t>(c));
     }
   }
 }
@@ -111,10 +125,10 @@ void AppendHeaderSafe(std::string& out, std::string_view v) {
 // "name: value" framing below and forge a header. Header names are RFC 9110
 // tokens (no space, no colon), so a well-formed name is unchanged; this only
 // hardens the transport core against a future caller passing a half-trusted name.
-void AppendHeaderNameSafe(std::string& out, std::string_view name) {
+void AppendHeaderNameSafe(std::vector<uint8_t>& out, std::string_view name) {
   for (const char c : name) {
     if (c != '\r' && c != '\n' && c != '\0' && c != ' ' && c != ':') {
-      out += c;
+      out.push_back(static_cast<uint8_t>(c));
     }
   }
 }
@@ -134,59 +148,62 @@ std::string HttpDate() {
 }
 
 // Append the extra (name: value) headers verbatim after the framing headers.
-void AppendExtraHeaders(std::string& out, const Headers& extra_headers) {
+void AppendExtraHeaders(std::vector<uint8_t>& out, const Headers& extra_headers) {
   for (const auto& [name, value] : extra_headers) {
-    out += "\r\n";
+    AppendBytes(out, "\r\n");
     AppendHeaderNameSafe(out, name);
-    out += ": ";
+    AppendBytes(out, ": ");
     AppendHeaderSafe(out, value);
   }
 }
 
 // One full HTTP response with a Content-Length body. A non-zero elapsed_ms adds
 // an X-Elapsed-Ms header carrying the query's compute cost in milliseconds.
-std::string BuildResponse(int status, const std::string& body, bool keep_alive,
-                          const std::string& content_type, const Headers& extra_headers,
-                          uint32_t elapsed_ms) {
-  std::string out;
+// The returned frame is opaque wire bytes (std::vector<uint8_t>); `body` is JSON
+// text from the consumer, appended as bytes.
+std::vector<uint8_t> BuildResponse(int status, const std::string& body, bool keep_alive,
+                                   const std::string& content_type, const Headers& extra_headers,
+                                   uint32_t elapsed_ms) {
+  std::vector<uint8_t> out;
   out.reserve(body.size() + 200);
-  out += "HTTP/1.1 ";
-  out += std::to_string(status);
-  out += ' ';
-  out += ReasonPhrase(status);
-  out += "\r\nContent-Type: ";
+  AppendBytes(out, "HTTP/1.1 ");
+  const std::string status_str = std::to_string(status);
+  AppendBytes(out, status_str);
+  AppendBytes(out, " ");
+  AppendBytes(out, ReasonPhrase(status));
+  AppendBytes(out, "\r\nContent-Type: ");
   AppendHeaderSafe(out, content_type);
-  out += "\r\nContent-Length: ";
-  out += std::to_string(body.size());
-  out += "\r\nConnection: ";
-  out += keep_alive ? "keep-alive" : "close";
-  out += "\r\nDate: ";
-  out += HttpDate();
+  AppendBytes(out, "\r\nContent-Length: ");
+  AppendBytes(out, std::to_string(body.size()));
+  AppendBytes(out, "\r\nConnection: ");
+  AppendBytes(out, keep_alive ? "keep-alive" : "close");
+  AppendBytes(out, "\r\nDate: ");
+  AppendBytes(out, HttpDate());
   if (elapsed_ms > 0) {
-    out += "\r\nX-Elapsed-Ms: ";
-    out += std::to_string(elapsed_ms);
+    AppendBytes(out, "\r\nX-Elapsed-Ms: ");
+    AppendBytes(out, std::to_string(elapsed_ms));
   }
   AppendExtraHeaders(out, extra_headers);
-  out += "\r\n\r\n";
-  out += body;
+  AppendBytes(out, "\r\n\r\n");
+  AppendBytes(out, body);
   return out;
 }
 
 // The header block for an open, close-delimited stream: no Content-Length (the
 // stream ends when the connection closes), Connection: keep-alive.
-std::string BuildStreamHeader(int status, const std::string& content_type,
-                              const Headers& extra_headers) {
-  std::string out;
-  out += "HTTP/1.1 ";
-  out += std::to_string(status);
-  out += ' ';
-  out += ReasonPhrase(status);
-  out += "\r\nContent-Type: ";
+std::vector<uint8_t> BuildStreamHeader(int status, const std::string& content_type,
+                                       const Headers& extra_headers) {
+  std::vector<uint8_t> out;
+  AppendBytes(out, "HTTP/1.1 ");
+  AppendBytes(out, std::to_string(status));
+  AppendBytes(out, " ");
+  AppendBytes(out, ReasonPhrase(status));
+  AppendBytes(out, "\r\nContent-Type: ");
   AppendHeaderSafe(out, content_type);
-  out += "\r\nConnection: keep-alive\r\nDate: ";
-  out += HttpDate();
+  AppendBytes(out, "\r\nConnection: keep-alive\r\nDate: ");
+  AppendBytes(out, HttpDate());
   AppendExtraHeaders(out, extra_headers);
-  out += "\r\n\r\n";
+  AppendBytes(out, "\r\n\r\n");
   return out;
 }
 
@@ -194,7 +211,7 @@ std::string BuildStreamHeader(int status, const std::string& content_type,
 // alive until libuv finishes the write. `mode` decides post-write behavior.
 struct WriteReq {
   uv_write_t req{};
-  std::string payload;
+  std::vector<uint8_t> payload;
   std::shared_ptr<Connection> conn;
   WriteMode mode = WriteMode::kClose;
 };
@@ -504,7 +521,8 @@ int Connection::OnBody(llhttp_t* p, const char* at, size_t len) {
     conn->reject_message_ = "request body exceeds the configured limit";
     return -1;
   }
-  conn->body_.append(at, len);
+  conn->body_.insert(conn->body_.end(), reinterpret_cast<const uint8_t*>(at),
+                     reinterpret_cast<const uint8_t*>(at + len));
   return 0;
 }
 
@@ -528,13 +546,17 @@ void Connection::Dispatch() {
     req.path = url_.substr(0, q);
     req.query = url_.substr(q + 1);
   }
-  req.body = std::move(body_);
+  // The transport holds the body as opaque bytes (body_ is vector<uint8_t>);
+  // the consumer contract (HttpRequest::body) is JSON text, so copy once at
+  // this seam. The body is bounded by limits_.max_body_bytes.
+  req.body.assign(reinterpret_cast<const char*>(body_.data()), body_.size());
+  body_.clear();
   req.headers = std::move(headers_);
   req.keep_alive = keep_alive_;
   handler_.Handle(shared_from_this(), req);
 }
 
-void Connection::WriteRaw(std::string payload, WriteMode mode) {
+void Connection::WriteRaw(std::vector<uint8_t> payload, WriteMode mode) {
   if (closing_) {
     return;
   }
@@ -546,10 +568,12 @@ void Connection::WriteRaw(std::string payload, WriteMode mode) {
   wr->conn = shared_from_this();
   wr->mode = mode;
   wr->req.data = wr.get();
-  // uv_buf_init's length arg is unsigned int (uv.h), so this is a 32-bit field
-  // regardless of the cast -- fine here since every response body (JSON) is far
-  // under 4 GiB. A >4 GiB payload would need splitting across multiple uv_buf_t.
-  uv_buf_t b = uv_buf_init(wr->payload.data(), static_cast<unsigned>(wr->payload.size()));
+  // uv_buf_init's base is char* (libuv) and its length arg is unsigned int
+  // (uv.h), so the length is a 32-bit field regardless of the cast -- fine here
+  // since every response body (JSON) is far under 4 GiB. A >4 GiB payload would
+  // need splitting across multiple uv_buf_t.
+  uv_buf_t b = uv_buf_init(reinterpret_cast<char*>(wr->payload.data()),
+                           static_cast<unsigned>(wr->payload.size()));
   const int r = uv_write(&wr->req, stream(), &b, 1, OnWriteDone);
   if (r != 0) {
     StartClose();
@@ -585,7 +609,10 @@ void Connection::WriteEvent(const std::string& chunk) {
   if (closing_ || !streaming_) {
     return;
   }
-  WriteRaw(chunk, WriteMode::kStream);
+  // SSE chunk is JSON text from the consumer; the wire payload is opaque bytes,
+  // so move it into a vector here. Chunks are small ("data: ...\n\n").
+  std::vector<uint8_t> payload(chunk.begin(), chunk.end());
+  WriteRaw(std::move(payload), WriteMode::kStream);
 }
 
 void Connection::OnWriteDone(uv_write_t* req, int status) {
