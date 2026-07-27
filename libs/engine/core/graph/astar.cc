@@ -290,8 +290,8 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
   int best_goal = -1;
 
   while (!open.empty()) {
-    const QueueNode top = open.front();
     std::pop_heap(open.begin(), open.end(), std::greater<>());
+    const QueueNode top = open.back();
     open.pop_back();
     const int u = top.vertex;
     if (ws.Closed(u)) {
