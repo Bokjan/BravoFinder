@@ -20,6 +20,37 @@ namespace bf {
 //     inbound_course F64, leg_time_min F64, leg_dist_nm F64, turn_dir U8,
 //     min_alt_ft I32, max_alt_ft I32, speed_limit_kt I32
 
+namespace {
+
+// Wire-layout declarators for the fixed-length records in this section. These
+// exist ONLY so `sizeof` is the single source of truth for the corruption fuses
+// in Decode: the wire format is packed with no padding, while the in-memory types
+// (NavaidDetailInfo / HoldInfo) hold std::string where the wire stores (off,len)
+// ref pairs. Deliberately distinct from the in-memory structs. Encode/Decode stay
+// field-by-field via ByteWriter -- never instantiate, memcpy, or take a member
+// address (#pragma pack(push,1) is portable across MSVC/GCC/Clang for sizeof).
+#pragma pack(push, 1)
+struct WireNavaid {
+  uint32_t ident_io, ident_il, region_io, region_rl;
+  uint8_t kind;
+  int32_t elev_ft, freq_raw;
+  double range_nm, heading;
+};
+struct WireHold {
+  uint32_t fix_io, fix_il, fix_ro, fix_rl, ap_io, ap_il;
+  double inbound_course, leg_time_min, leg_dist_nm;
+  uint8_t turn_dir;
+  int32_t min_alt_ft, max_alt_ft, speed_limit_kt;
+};
+#pragma pack(pop)
+
+constexpr size_t kNavaidRecordSize = sizeof(WireNavaid);  // 41
+constexpr size_t kHoldRecordSize = sizeof(WireHold);      // 61
+static_assert(kNavaidRecordSize == 41, "navaid wire layout drifted");
+static_assert(kHoldRecordSize == 61, "hold wire layout drifted");
+
+}  // namespace
+
 Result<void> NavDetailCodec::Encode(const NavDetailArchive& archive, ByteWriter& w,
                                     StringPool& pool) {
   auto ref = [&](const std::string& s) {
@@ -79,10 +110,11 @@ Result<NavDetailArchive> NavDetailCodec::Decode(const char* data, size_t size, c
     return ResolveRef(pool, pool_len, off, len, refs_ok);
   };
 
-  // Sanity-check counts before allocating.
-  constexpr size_t kNavaidRecordMin = 8 + 8 + 1 + 4 + 4 + 8 + 8;            // 41 bytes
-  constexpr size_t kHoldRecordMin = 8 + 8 + 8 + 8 + 8 + 8 + 1 + 4 + 4 + 4;  // 61 bytes
-  if (static_cast<size_t>(navaid_count) > r.remaining() / kNavaidRecordMin) {
+  // Sanity-check counts before allocating. Per-record sizes come from the packed
+  // WireRecord declarators above (kNavaidRecordSize / kHoldRecordSize), pinned by
+  // static_assert so a field add fails to compile rather than leaving a stale
+  // literal here.
+  if (static_cast<size_t>(navaid_count) > r.remaining() / kNavaidRecordSize) {
     return bad("corrupt nav detail section: navaid count exceeds section");
   }
 
@@ -115,7 +147,7 @@ Result<NavDetailArchive> NavDetailCodec::Decode(const char* data, size_t size, c
   }
 
   // Hold records
-  if (static_cast<size_t>(hold_count) > r.remaining() / kHoldRecordMin) {
+  if (static_cast<size_t>(hold_count) > r.remaining() / kHoldRecordSize) {
     return bad("corrupt nav detail section: hold count exceeds section");
   }
   archive.holds_.resize(hold_count);

@@ -19,6 +19,55 @@ static_assert(static_cast<int>(ProcedureType::kApproach) < 256, "ProcedureType e
 static_assert(static_cast<int>(PathTerminator::kUnknown) < 256, "PathTerminator exceeds U8");
 static_assert(static_cast<int>(AltConstraintKind::kBetween) < 256, "AltConstraintKind exceeds U8");
 
+// Wire-layout declarators for the fixed-length records in a segment and the
+// section directory. These exist ONLY so `sizeof` is the single source of truth
+// for the corruption fuses in DeserializeSegment / OpenSection: the wire format
+// is packed with no padding, while the in-memory types (Procedure / ProcedureLeg
+// / Runway) hold std::string and FixedIdent where the wire stores (off,len) ref
+// pairs. Deliberately distinct from the in-memory structs. Encode/Decode stay
+// field-by-field via ByteWriter -- never instantiate, memcpy, or take a member
+// address (#pragma pack(push,1) is portable across MSVC/GCC/Clang for sizeof).
+#pragma pack(push, 1)
+struct WireProcedureHeader {
+  uint8_t type;
+  int32_t route_type;
+  uint32_t name_io, name_il, trans_io, trans_il, rwy_io, rwy_il;
+  uint32_t leg_count;
+};
+struct WireProcedureLeg {
+  uint32_t fix_io, fix_il, fix_ro, fix_rl;
+  uint8_t path_term;
+  double course_deg, distance_nm;
+  uint8_t alt_kind;
+  int32_t alt1_ft, alt2_ft;
+  uint16_t rnp_centinm;
+  uint8_t turn_dir;
+  uint16_t speed_limit_kt;
+};
+struct WireRunway {
+  uint32_t ident_io, ident_il;
+  double lat, lon;
+  int32_t elevation_ft;
+};
+struct WireDirEntry {
+  uint32_t icao_off, icao_len;
+  uint64_t seg_offset;
+  uint32_t seg_len;
+};
+#pragma pack(pop)
+
+// kProcedureHeaderSize is the fixed prefix of a variable record (followed by
+// leg_count * kProcedureLegSize bytes); the leg tail is fused per-procedure in
+// the read loop below against the then-remaining bytes.
+constexpr size_t kProcedureHeaderSize = sizeof(WireProcedureHeader);  // 33
+constexpr size_t kProcedureLegSize = sizeof(WireProcedureLeg);        // 47
+constexpr size_t kRunwaySize = sizeof(WireRunway);                    // 28
+constexpr size_t kDirEntrySize = sizeof(WireDirEntry);                // 20
+static_assert(kProcedureHeaderSize == 33, "procedure-header wire layout drifted");
+static_assert(kProcedureLegSize == 47, "procedure-leg wire layout drifted");
+static_assert(kRunwaySize == 28, "runway wire layout drifted");
+static_assert(kDirEntrySize == 20, "directory-entry wire layout drifted");
+
 // --- One airport's CIFP data, serialized as a bare segment body. ---
 //
 // Unlike the old standalone CIFP cache, a segment has NO per-segment string
@@ -93,18 +142,18 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
 
   // Minimum on-disk bytes per record, used to reject an absurd count before
   // resizing (ByteReader still guards the actual reads, but this stops a forged
-  // count from forcing a huge allocation): a procedure is >= 33 B (type 1 +
-  // route_type 4 + 3 string refs 24 + leg count 4), a leg >= 47 B (2 refs 16 +
-  // path_term 1 + course 8 + distance 8 + alt kind 1 + alt1 4 + alt2 4 + rnp 2 +
-  // turn_dir 1 + speed_limit 2), a runway >= 28 B (ident ref 8 + lat 8 + lon 8 +
-  // elevation 4).
+  // count from forcing a huge allocation). Sizes come from the packed WireRecord
+  // declarators above (kProcedureHeaderSize / kProcedureLegSize / kRunwaySize),
+  // pinned by static_assert so a field add fails to compile rather than leaving
+  // a stale literal here. The procedure header is a fixed prefix of a variable
+  // record; its leg tail is fused per-procedure in the loop below.
   auto count_fits = [&](uint32_t count, size_t per_record) {
     return static_cast<size_t>(count) <= br.remaining() / per_record;
   };
 
   CifpData data_out;
   const uint32_t proc_count = br.U32();
-  if (!br.ok() || !count_fits(proc_count, 33)) {
+  if (!br.ok() || !count_fits(proc_count, kProcedureHeaderSize)) {
     return std::nullopt;
   }
   data_out.procedures.resize(proc_count);
@@ -116,7 +165,7 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
     ref(p.transition_ident);
     ref(p.runway);
     const uint32_t leg_count = br.U32();
-    if (!br.ok() || !count_fits(leg_count, 47)) {
+    if (!br.ok() || !count_fits(leg_count, kProcedureLegSize)) {
       return std::nullopt;
     }
     p.legs.resize(leg_count);
@@ -138,7 +187,7 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
     }
   }
   const uint32_t rwy_count = br.U32();
-  if (!br.ok() || !count_fits(rwy_count, 28)) {
+  if (!br.ok() || !count_fits(rwy_count, kRunwaySize)) {
     return std::nullopt;
   }
   data_out.runways.resize(rwy_count);
@@ -161,8 +210,6 @@ std::optional<CifpData> DeserializeSegment(const char* data, size_t size, const 
   }
   return data_out;
 }
-
-constexpr size_t kDirEntrySize = 4 + 4 + 8 + 4;  // icao off,len + seg offset + seg len
 
 }  // namespace
 

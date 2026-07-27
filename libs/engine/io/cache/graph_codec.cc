@@ -14,6 +14,51 @@ namespace {
 static_assert(static_cast<int>(WaypointKind::kOther) < 256,
               "WaypointKind no longer fits in the U8 vertex-record field");
 
+// Wire-layout declarators for the fixed-length records in this section. These
+// exist ONLY so `sizeof` is the single source of truth for the corruption fuses
+// below (count_fits / min_body_bytes / per-sector arc bound): the wire format is
+// packed with no padding, while the in-memory types have natural alignment
+// (GraphEdge is 16 B in memory, 15 B on the wire) and use FixedIdent / std::string
+// where the wire stores (off,len) ref pairs. So these are deliberately distinct
+// from the in-memory structs. Encode/Decode stay field-by-field via ByteWriter --
+// never instantiate, memcpy, or take a member address of these (packed-member
+// access is UB; #pragma pack(push,1) is portable across MSVC/GCC/Clang for sizeof).
+#pragma pack(push, 1)
+struct WireVertex {
+  double lat, lon;
+  uint32_t ident_io, ident_il, region_io, region_rl;
+  uint8_t flags, kind;
+};
+struct WireEdge {
+  int32_t to;
+  float distance_nm;
+  uint16_t airway_id;
+  int16_t base_fl, top_fl;
+  uint8_t level;
+};
+struct WireAirwayRef {
+  uint32_t name_off, name_len;
+};
+struct WireMsaHeader {
+  uint32_t cio, cil, cro, crl, aio, ail, arc_count;
+};
+struct WireMsaArc {
+  int32_t bearing_from, alt_100ft, radius_nm;
+};
+#pragma pack(pop)
+
+constexpr size_t kVertexRecordSize = sizeof(WireVertex);  // 34
+constexpr size_t kAirportRecordSize = sizeof(int32_t);    // 4  (single I32 elevation)
+constexpr size_t kEdgeRecordSize = sizeof(WireEdge);      // 15
+constexpr size_t kAirwayRefSize = sizeof(WireAirwayRef);  // 8
+constexpr size_t kMsaHeaderSize = sizeof(WireMsaHeader);  // 28 (fixed prefix of a variable record)
+constexpr size_t kMsaArcSize = sizeof(WireMsaArc);        // 12
+static_assert(kVertexRecordSize == 34, "vertex wire layout drifted");
+static_assert(kEdgeRecordSize == 15, "edge wire layout drifted");
+static_assert(kAirwayRefSize == 8, "airway-ref wire layout drifted");
+static_assert(kMsaHeaderSize == 28, "msa-header wire layout drifted");
+static_assert(kMsaArcSize == 12, "msa-arc wire layout drifted");
+
 }  // namespace
 
 // The graph section body layout (all string refs point into the shared global
@@ -149,12 +194,14 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
   // resize, so a corrupt or forged section cannot trigger a huge allocation (and
   // a bad_alloc/length_error that would bypass Result). Each count must fit in
   // the remaining bytes at its minimum on-disk element size; this is a necessary
-  // condition, not an exact one -- a fuse, not a full validator. On-disk sizes:
-  // vertex record 34 B (coord 16 + ident refs 16 + flags 1 + kind 1), airport
-  // record 4 B (I32 elevation), offsets 4 B, GraphEdge 15 B (4+4+2+2+2+1), airway
-  // ref 8 B, MSA sector at least 28 B (6xU32 refs + a U32 arc count, EXCLUDING
-  // its variable-length arc array -- each sector's arcs are separately fused
-  // against the then-remaining bytes in the MSA read loop below).
+  // condition, not an exact one -- a fuse, not a full validator. The per-record
+  // sizes come from the packed WireRecord declarators above (kVertexRecordSize
+  // etc.), so adding a field fails the static_assert rather than silently leaving
+  // a stale literal here. On-disk sizes: vertex record kVertexRecordSize, airport
+  // record kAirportRecordSize, offsets 4 B, GraphEdge kEdgeRecordSize, airway ref
+  // kAirwayRefSize, MSA sector at least kMsaHeaderSize (EXCLUDING its variable-
+  // length arc array -- each sector's arcs are separately fused against the
+  // then-remaining bytes in the MSA read loop below).
   //
   // first_airport_vertex must lie in [0, v]; the airport record section then
   // holds (v - first_airport_vertex) elevations. An out-of-range value is
@@ -168,8 +215,9 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
   auto count_fits = [&](uint32_t count, size_t per_elem) {
     return static_cast<size_t>(count) <= avail / per_elem;
   };
-  if (!count_fits(v, 34) || !count_fits(airport_count, 4) || !count_fits(e, 15) ||
-      !count_fits(airway_count, 8) || !count_fits(msa_count, 28)) {
+  if (!count_fits(v, kVertexRecordSize) || !count_fits(airport_count, kAirportRecordSize) ||
+      !count_fits(e, kEdgeRecordSize) || !count_fits(airway_count, kAirwayRefSize) ||
+      !count_fits(msa_count, kMsaHeaderSize)) {
     return bad("corrupt .bfdb: section counts exceed section size");
   }
   // Each fuse above bounds one count against the whole remaining section without
@@ -177,10 +225,11 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
   // more than `avail` in total (each resize below allocates independently). Cap
   // the combined minimum too. Products fit in size_t: every count is a uint32
   // and per_elem is tiny, on a 64-bit size_t.
-  const size_t min_body_bytes =
-      static_cast<size_t>(v) * 34 + static_cast<size_t>(airport_count) * 4 +
-      static_cast<size_t>(e) * 15 + static_cast<size_t>(airway_count) * 8 +
-      static_cast<size_t>(msa_count) * 28;
+  const size_t min_body_bytes = static_cast<size_t>(v) * kVertexRecordSize +
+                                static_cast<size_t>(airport_count) * kAirportRecordSize +
+                                static_cast<size_t>(e) * kEdgeRecordSize +
+                                static_cast<size_t>(airway_count) * kAirwayRefSize +
+                                static_cast<size_t>(msa_count) * kMsaHeaderSize;
   if (min_body_bytes > avail) {
     return bad("corrupt .bfdb: combined section counts exceed section size");
   }
@@ -255,9 +304,9 @@ Result<GraphSnapshot> GraphCodec::Decode(const char* data, size_t size, const ch
     m.ail = r.U32();
     const uint32_t arc_count = r.U32();
     // Fuse against the CURRENTLY remaining bytes (shrinks as prior sectors are
-    // consumed), each arc being 12 B (3xI32). A necessary, per-sector bound; the
+    // consumed), each arc being kMsaArcSize. A necessary, per-sector bound; the
     // subsequent reads still degrade safely via r.ok() on any residual mismatch.
-    if (!r.ok() || arc_count > r.remaining() / 12) {
+    if (!r.ok() || arc_count > r.remaining() / kMsaArcSize) {
       return bad("corrupt .bfdb msa section");
     }
     m.arcs.resize(arc_count);
