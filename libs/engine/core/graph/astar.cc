@@ -20,13 +20,21 @@ struct QueueNode {
 
 // Evaluate all constraints for an edge. Returns false if any blocks it;
 // otherwise accumulates soft penalties into `extra_cost`.
-bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coordinate& from_coord,
-                 const Coordinate& to_coord, double& extra_cost) {
+//
+// `from_coord` is the popped vertex's coordinate, hoisted out of the edge loop
+// by the caller (it is constant across a vertex's out-edges). `to_coord` is
+// fetched lazily -- only when constraints are actually present -- so the common
+// unconstrained path (EdgeAllowed returns true on the first line) pays zero
+// Coordinate fetches per edge instead of two 16-byte copies that were never
+// read. `graph` is taken by reference so the lazy CoordOf(to) stays O(1).
+bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge,
+                 const Coordinate& from_coord, const NavGraph& graph, int to,
+                 double& extra_cost) {
   extra_cost = 0.0;
   if (options.constraints.empty() || options.request == nullptr) {
     return true;
   }
-  const EdgeContext ctx{edge, from_coord, to_coord};
+  const EdgeContext ctx{edge, from_coord, graph.CoordOf(to)};
   for (const Constraint* c : options.constraints) {
     const EdgeVerdict v = c->Evaluate(ctx, *options.request);
     if (!v.allowed) {
@@ -43,12 +51,16 @@ const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const Searc
                             double* out_cost) {
   const GraphEdge* best = nullptr;
   double best_cost = kInfinity;
+  // `from` is constant across the parallel-edge loop; hoist its coordinate so
+  // the unconstrained fast path (EdgeAllowed returns true immediately) fetches
+  // no coordinates at all per edge.
+  const Coordinate from_coord = graph.CoordOf(from);
   for (const GraphEdge* e = graph.EdgesBegin(from); e != graph.EdgesEnd(from); ++e) {
     if (e->to != to) {
       continue;
     }
     double extra_cost = 0.0;
-    if (!EdgeAllowed(options, *e, graph.CoordOf(from), graph.CoordOf(to), extra_cost)) {
+    if (!EdgeAllowed(options, *e, from_coord, graph, to, extra_cost)) {
       continue;  // blocked on this parallel edge; try the next
     }
     const double total = e->distance_nm + extra_cost;
@@ -126,6 +138,9 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
     }
     ws.MarkClosed(u);
 
+    // u is constant across its out-edges; hoist its coordinate once so the
+    // unconstrained fast path fetches no per-edge coordinates.
+    const Coordinate u_coord = graph.CoordOf(u);
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
       const int v = e->to;
       if (ws.Closed(v)) {
@@ -138,7 +153,7 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
         continue;
       }
       double extra_cost = 0.0;
-      if (!EdgeAllowed(options, *e, graph.CoordOf(u), graph.CoordOf(v), extra_cost)) {
+      if (!EdgeAllowed(options, *e, u_coord, graph, v, extra_cost)) {
         continue;
       }
       const double tentative = ws.G(u) + e->distance_nm + extra_cost;
@@ -260,6 +275,9 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
       }
     }
 
+    // u is constant across its out-edges; hoist its coordinate once so the
+    // unconstrained fast path fetches no per-edge coordinates.
+    const Coordinate u_coord = graph.CoordOf(u);
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
       const int v = e->to;
       if (ws.Closed(v)) {
@@ -272,7 +290,7 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
         continue;
       }
       double extra_cost = 0.0;
-      if (!EdgeAllowed(options, *e, graph.CoordOf(u), graph.CoordOf(v), extra_cost)) {
+      if (!EdgeAllowed(options, *e, u_coord, graph, v, extra_cost)) {
         continue;
       }
       const double tentative = ws.G(u) + e->distance_nm + extra_cost;
