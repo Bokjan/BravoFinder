@@ -44,7 +44,7 @@ Result<std::string> FindFenixDb(const std::string& source_dir) {
     return Result<std::string>::Err(
         Error(ErrorCode::kDataMissing, "source directory not found: " + source_dir));
   }
-  const char* kPreferred[] = {"fenix_navdata.db3", "navdata.db3", "fenix.db3"};
+  const char* kPreferred[] = {"fenix_navdata.db3", "navdata.db3", "fenix.db3", "nd.db3"};
   for (const char* name : kPreferred) {
     fs::path p = fs::path(source_dir) / name;
     if (fs::exists(p, ec)) {
