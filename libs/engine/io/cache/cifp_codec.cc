@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/cache/cifp_codec.h"
 
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <utility>

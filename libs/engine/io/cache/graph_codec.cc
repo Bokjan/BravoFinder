@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/cache/graph_codec.h"
 
+#include <cstdint>
+
 #include "io/cache/byte_io.h"
 #include "io/cache/graph_snapshot.h"
 
