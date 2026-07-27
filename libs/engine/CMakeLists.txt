@@ -46,6 +46,7 @@ add_library(bravofinder STATIC
   io/loaders/loader_registry.cc
   io/loaders/dfd1/dfd1_loader.cc
   io/loaders/dfd2/dfd2_loader.cc
+  io/loaders/fenix/fenix_loader.cc
   io/loaders/xplane12/xplane12_loader.cc
   io/loaders/xplane12/cifp_parser.cc
   io/cache/graph_codec.cc

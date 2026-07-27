@@ -24,7 +24,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
                     "Output .bfdb path (default: <data_dir>/nav_<cycle>.bfdb)");
   build->add_option("--loader", args->loader, "Data source loader")
       ->capture_default_str()
-      ->check(CLI::IsMember({"dfd1", "dfd2", "xplane12"}));
+      ->check(CLI::IsMember({"dfd1", "dfd2", "fenix", "xplane12"}));
 
   build->callback([args, &exit_code]() {
     Result<NavDatabase> db = NavDatabase::Open(args->data_dir, args->loader);

@@ -25,6 +25,7 @@ add_executable(bf_tests
                integration/route_integration_test.cc
                integration/query_test.cc
                integration/dfd_loader_test.cc
+               integration/fenix_loader_test.cc
                integration/graph_codec_test.cc
                integration/bfdb_inventory_test.cc
                integration/cifp_codec_test.cc
