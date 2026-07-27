@@ -23,6 +23,8 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 - File names `snake_case`, extensions **`.h` / `.cc`**; namespace `bf`.
 - Error handling uses the project's own `bf::Result<T, E>` (`libs/engine/core/result.h`); expected failures (no route found, missing data) go through `Result`, exceptions are only for truly exceptional situations. **No bare `new`/`delete`, no `goto`, no catch-by-value, no `static`/global mutable state** (v2's static-sharing bugs were one motivation for the rewrite).
 - JSON output uses **RapidJSON `Writer`** (SAX streaming, auto-escaping); no hand-rolled strings, no nlohmann.
+- **Brace every body**: every `if`/`else`/`for`/`while` body uses braces, including single-line bodies (clang-format does not enforce this).
+- **clang-format**: run `clang-format -i` on changed `.h`/`.cc`; the `pre-commit` hook (`tools/hooks/pre-commit` → `tools/check_clang_format.py`) enforces this once `core.hooksPath` is set to `tools/hooks`.
 
 ## Apps, transports, and the service layer (service / MCP / HTTP / CLI)
 
@@ -66,6 +68,7 @@ cmake --build --preset <debug|release|tsan> -j 32
 ctest --preset <debug|release|tsan> -j 32
 ```
 On Windows MSVC, `windows-debug` / `windows-release` presets are available (no sanitizers; used in CI). Dependencies are pure CMake + FetchContent (Catch2 v3 / CLI11 / RapidJSON / SQLite; + libuv / llhttp for the HTTP server); no vendoring, no vcpkg.
+- **Cross-platform**: a clean Linux build is not sufficient — CI spans macOS and Windows, which surface platform-specific warnings that Linux does not. Verify the relevant presets / wait for CI before considering work done.
 
 ### Pick test scope by change (saves time; see Testing section for the principle)
 

@@ -77,8 +77,9 @@ build: wire up Catch2 and CLI11 via FetchContent
 
 - **Base**: [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 - **Semantics**: follow the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/) (RAII, `enum class`, spans/views over raw pointers, etc.).
-- **Formatting**: enforced by clang-format (root `.clang-format`, `BasedOnStyle: Google`). Code should be formatted before committing.
+- **Formatting**: enforced by clang-format (root `.clang-format`, `BasedOnStyle: Google`). Run `clang-format -i` on every changed `.h`/`.cc` before committing, and ensure `clang-format --dry-run --Werror` passes. A local `pre-commit` hook (`tools/hooks/pre-commit` → `tools/check_clang_format.py`) enforces this once `core.hooksPath` is set to `tools/hooks`. Every `if`/`else`/`for`/`while` body uses braces, including single-line bodies.
 - **Language standard**: C++20.
+- **No magic numbers**: reference named engine constants instead of hardcoding invariants.
 
 ### 2.1 Naming and Files
 
@@ -109,3 +110,15 @@ build: wire up Catch2 and CLI11 via FetchContent
 - **Inbound = outbound**: contributions to `libs/engine/` are licensed under LGPL-3.0-or-later; contributions elsewhere are licensed under MIT. Do not submit code whose license is incompatible with the target directory — in particular, **do not** introduce any GPL-only dependency into `libs/engine/`.
 - All third-party dependencies use permissive licenses (see `THIRD_PARTY_LICENSES.md`) and are fetched at build time via FetchContent; **their source is not committed to this repository**.
 - **Navigation data compliance**: Navigraph / Jeppesen data is copyrighted and may not be redistributed. Real `.dat` / `.bfdb` data is **never committed** (blocked by `.gitignore`). Local real data lives in `navdata/` (ignored).
+
+## 5. Pre-PR Checklist
+
+Run through this list before opening a PR. CI and the local hooks catch most of it, but checking locally first saves a review round-trip.
+
+- [ ] **clang-format clean**: `clang-format -i` applied to every changed `.h`/`.cc`; `clang-format --dry-run --Werror` passes (or the `pre-commit` hook is active via `git config core.hooksPath tools/hooks`).
+- [ ] **Braces on every body**: all `if`/`else`/`for`/`while` bodies use `{}`, including single-line ones.
+- [ ] **No magic numbers**: engine invariants use their named constants, not literals.
+- [ ] **Builds on all CI platforms**: a clean Linux build is not enough — the CI matrix spans macOS and Windows, which surface platform-specific warnings that Linux does not. Prefer waiting for CI to go green before requesting review.
+- [ ] **Commit message conforms**: Conventional Commits type/scope/subject, English body, and no hard-wrapped paragraph (each paragraph is one logical line).
+- [ ] **PR description matches the code**: every claim in the description — data filtering, test results, behavior — is backed by the diff; reconcile any internal inconsistencies.
+- [ ] **Test results stated honestly**: if cases SKIP because the required data is not present, say so; do not report "all tests pass" when the run actually skipped cases.
