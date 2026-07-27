@@ -8,10 +8,6 @@ namespace bf {
 
 namespace {
 
-// Mean earth radius in nautical miles. 6371.0088 km is the IUGG mean radius;
-// one nautical mile is exactly 1.852 km.
-constexpr double kEarthRadiusNm = 6371.0088 / 1.852;
-
 constexpr double kPi = 3.14159265358979323846;
 
 double ToRadians(double degrees) { return degrees * kPi / 180.0; }

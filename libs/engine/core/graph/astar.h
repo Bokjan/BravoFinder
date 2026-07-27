@@ -150,12 +150,31 @@ class SearchWorkspace {
   // it is destroyed), so no wrap handling is needed.
 };
 
+// A point on the unit sphere, the Cartesian projection of a Coordinate. Used
+// only internally by MultiGoalHeuristic to compute chord-length distances
+// without recomputing trig per goal.
+struct UnitVec {
+  double x = 0.0;
+  double y = 0.0;
+  double z = 0.0;
+};
+
 // A memoized admissible heuristic for the multi-source/multi-goal search: for a
 // vertex it returns the least (great-circle distance to a goal fix + that goal's
 // seed cost). The goal set is fixed across a whole Yen run, so h(v) is constant
 // per vertex; caching it lets the many spur searches share one table instead of
-// recomputing an O(goals) haversine sweep on every pop. Construct once, reuse
-// across searches over the SAME graph and goals.
+// recomputing an O(goals) sweep on every pop. Construct once, reuse across
+// searches over the SAME graph and goals.
+//
+// The per-goal distance is a chord length on the unit sphere, not the haversine
+// arc: h(v) = kEarthRadiusNm * min_g |unit(v) - unit(g)| + goal.cost. A chord is
+// always <= its arc (straight line through the sphere vs. along its surface), so
+// it remains an admissible lower bound on the true remaining cost, but it costs
+// one sqrt per goal instead of a haversine's atan2/sin/cos -- and because each
+// goal's unit vector is precomputed once at construction, a vertex's own unit
+// vector (the only trig left) is computed once on the cache miss and reused
+// across all goals. The haversine arc is still used where the true distance
+// matters (route metrics), never here as a heuristic.
 //
 // State is function-local to the search (no shared mutable global), so a cache
 // owned by a single search or a single Yen invocation stays within the
@@ -170,6 +189,9 @@ class MultiGoalHeuristic {
  private:
   const NavGraph& graph_;
   const std::vector<SeededEndpoint>& goals_;
+  // Per-goal unit-sphere (x, y, z), precomputed once at construction so the hot
+  // path never recomputes goal trig.
+  std::vector<UnitVec> goals_xyz_;
   // -1 = not yet computed. Written lazily from the const operator(), so it is
   // NOT thread-safe: this relies on a single instance being used by one search
   // (or one single-threaded Yen run) at a time, per the concurrency note above.

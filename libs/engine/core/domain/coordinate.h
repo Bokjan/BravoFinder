@@ -17,4 +17,10 @@ struct Coordinate {
   double DistanceTo(const Coordinate& other) const;
 };
 
+// Mean earth radius in nautical miles. 6371.0088 km is the IUGG mean radius;
+// one nautical mile is exactly 1.852 km. Shared by the haversine distance and
+// by chord-based A* heuristics so a chord length (a lower bound on the arc) and
+// the true arc use the same radius and stay consistent.
+inline constexpr double kEarthRadiusNm = 6371.0088 / 1.852;
+
 }  // namespace bf

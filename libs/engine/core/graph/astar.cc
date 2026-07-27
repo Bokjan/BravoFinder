@@ -2,6 +2,7 @@
 #include "core/graph/astar.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <queue>
 
@@ -10,6 +11,19 @@ namespace bf {
 namespace {
 
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
+
+constexpr double kPi = 3.14159265358979323846;
+
+// Project a Coordinate onto the unit sphere as a Cartesian (x, y, z). Used by
+// MultiGoalHeuristic for chord-length distances; the trig here is the only trig
+// the heuristic pays per vertex (computed once on the cache miss, then reused
+// across every goal).
+UnitVec ProjectUnitSphere(const Coordinate& c) {
+  const double lat_r = c.latitude * kPi / 180.0;
+  const double lon_r = c.longitude * kPi / 180.0;
+  const double cos_lat = std::cos(lat_r);
+  return UnitVec{cos_lat * std::cos(lon_r), cos_lat * std::sin(lon_r), std::sin(lat_r)};
+}
 
 // An entry in the open set's priority queue, ordered by f = g + h (ascending).
 struct QueueNode {
@@ -191,21 +205,39 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal) {
 
 MultiGoalHeuristic::MultiGoalHeuristic(const NavGraph& graph,
                                        const std::vector<SeededEndpoint>& goals)
-    : graph_(graph), goals_(goals), cache_(graph.VertexCount(), -1.0) {}
+    : graph_(graph), goals_(goals), cache_(graph.VertexCount(), -1.0) {
+  // Precompute each goal's unit vector once, indexed in lock-step with goals_
+  // so the hot loop subtracts pre-projected vectors instead of recomputing trig.
+  const int n = graph.VertexCount();
+  goals_xyz_.reserve(goals_.size());
+  for (const SeededEndpoint& g : goals_) {
+    goals_xyz_.push_back((g.vertex >= 0 && g.vertex < n)
+                             ? ProjectUnitSphere(graph_.CoordOf(g.vertex))
+                             : UnitVec{});
+  }
+}
 
 double MultiGoalHeuristic::operator()(int vertex) const {
   double& slot = cache_[vertex];
   if (slot >= 0.0) {
     return slot;
   }
-  const Coordinate c = graph_.CoordOf(vertex);
+  const UnitVec v = ProjectUnitSphere(graph_.CoordOf(vertex));
   double best = kInfinity;
   const int n = static_cast<int>(cache_.size());
-  for (const SeededEndpoint& gp : goals_) {
+  for (size_t i = 0; i < goals_.size(); ++i) {
+    const SeededEndpoint& gp = goals_[i];
     if (gp.vertex < 0 || gp.vertex >= n) {
       continue;
     }
-    const double h = c.DistanceTo(graph_.CoordOf(gp.vertex)) + gp.cost;
+    const UnitVec& g = goals_xyz_[i];
+    const double dx = v.x - g.x;
+    const double dy = v.y - g.y;
+    const double dz = v.z - g.z;
+    // Chord length on the unit sphere; <= the great-circle arc, so multiplying
+    // by the earth radius stays an admissible lower bound on the NM distance.
+    const double chord = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const double h = kEarthRadiusNm * chord + gp.cost;
     if (h < best) {
       best = h;
     }
