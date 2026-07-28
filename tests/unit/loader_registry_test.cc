@@ -26,6 +26,13 @@ TEST_CASE("loader registry: dfd2 resolves to a loader", "[unit][loader]") {
   CHECK(loader.value()->name() == "dfd2");
 }
 
+TEST_CASE("loader registry: fenix resolves to a loader", "[unit][loader]") {
+  bf::Result<std::unique_ptr<bf::Loader>> loader = bf::MakeLoader("fenix");
+  REQUIRE(loader);
+  REQUIRE(loader.value() != nullptr);
+  CHECK(loader.value()->name() == "fenix");
+}
+
 TEST_CASE("loader registry: an unknown name is a clean error", "[unit][loader]") {
   bf::Result<std::unique_ptr<bf::Loader>> loader = bf::MakeLoader("littlenavmap");
   REQUIRE_FALSE(loader);

@@ -1,0 +1,210 @@
+// SPDX-License-Identifier: MIT
+// Integration tests for the Fenix A320 SQLite loader. Real Jeppesen data is
+// never committed; each case SKIPs when the data is absent. To avoid loading
+// the full 329k-waypoint dataset per-check, validations are grouped into
+// SECTIONS under a shared LoadNavData call.
+
+#include "io/loaders/fenix/fenix_loader.h"
+
+#include <algorithm>
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <memory>
+#include <string>
+
+#include "core/env.h"
+#include "io/loaders/dfd1/dfd1_loader.h"
+#include "io/loaders/loader_registry.h"
+
+namespace {
+
+std::string EnsureFenix() {
+  const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA");
+  std::string dir = env ? env : "navdata";
+  std::error_code ec;
+  if (!std::filesystem::is_directory(dir, ec)) return {};
+  const char* kNames[] = {"fenix_navdata.db3", "navdata.db3", "fenix.db3"};
+  for (const char* name : kNames) {
+    if (std::filesystem::exists(std::filesystem::path(dir) / name, ec)) return dir;
+  }
+  for (const auto& de : std::filesystem::directory_iterator(dir, ec))
+    if (de.is_regular_file() && de.path().extension() == ".db3") return dir;
+  return {};
+}
+
+std::string EnsureDfd1ForFenix() {
+  const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA");
+  std::string dir = env ? env : "navdata";
+  std::error_code ec;
+  if (!std::filesystem::is_directory(dir, ec)) return {};
+  for (const auto& de : std::filesystem::directory_iterator(dir, ec))
+    if (de.is_regular_file() && de.path().extension() == ".s3db") return dir;
+  return {};
+}
+
+// Load enroute data once, validate in SECTIONS.
+struct FenixData {
+  bf::NavData data;
+  explicit FenixData(const std::string& dir) {
+    bf::FenixLoader l;
+    auto r = l.LoadNavData(dir);
+    if (r) data = std::move(r.value());
+  }
+  explicit operator bool() const { return !data.waypoints.empty(); }
+};
+
+}  // namespace
+
+TEST_CASE("fenix: registry resolves", "[integration][fenix]") {
+  auto r = bf::MakeLoader("fenix");
+  REQUIRE(r);
+  CHECK(r.value()->name() == "fenix");
+}
+
+TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
+  const std::string dir = EnsureFenix();
+  if (dir.empty()) SKIP("Fenix navdata not found");
+  FenixData fd(dir);
+  REQUIRE(fd);
+
+  SECTION("counts") {
+    CHECK(fd.data.waypoints.size() > 200000);
+    CHECK(fd.data.airways.size() > 80000);
+    CHECK(fd.data.airports.size() > 10000);
+    CHECK(fd.data.hold_fixes.size() > 20000);
+    CHECK(fd.data.navaid_details.size() > 5000);
+    CHECK(!fd.data.mora.Empty());
+    CHECK(fd.data.msa.empty());
+  }
+  SECTION("waypoint coords") {
+    int bad = 0, reg_long = 0;
+    for (const auto& w : fd.data.waypoints) {
+      if (w.coord.latitude < -90 || w.coord.latitude > 90) ++bad;
+      if (w.coord.longitude < -180 || w.coord.longitude > 180) ++bad;
+      if (w.ident.region.size() > 2) ++reg_long;
+    }
+    CHECK(bad == 0);
+    CHECK(reg_long == 0);
+  }
+  SECTION("navaid kinds") {
+    int v = 0, n = 0, d = 0;
+    for (const auto& w : fd.data.waypoints) {
+      if (w.kind == bf::WaypointKind::kVor)
+        ++v;
+      else if (w.kind == bf::WaypointKind::kNdb)
+        ++n;
+      else if (w.kind == bf::WaypointKind::kDme)
+        ++d;
+      if (v > 3000 && n > 3000 && d > 1000) break;  // early exit
+    }
+    // kVor = VOR(120)+VORTAC(474)+VOR-DME(3112) ≈ 3706
+    // kNdb = NDB(3083)+NDB-DME(20) ≈ 3103
+    // kDme = TACAN(433)+DME excl ILS(820) ≈ 1253
+    CHECK(v > 3000);
+    CHECK(n > 3000);
+    CHECK(d > 1000);
+  }
+  SECTION("AROKE") {
+    auto it = std::find_if(fd.data.waypoints.begin(), fd.data.waypoints.end(),
+                           [](auto& w) { return w.ident.ident == "AROKE"; });
+    REQUIRE(it != fd.data.waypoints.end());
+    CHECK(it->coord.latitude == Catch::Approx(40.4724).margin(0.01));
+    CHECK(it->coord.longitude == Catch::Approx(-73.9021).margin(0.01));
+  }
+  SECTION("airways") {
+    int lo = 0, hi = 0, bo = 0, notboth = 0;
+    for (const auto& c : fd.data.airways) {
+      if (c.segment.level == bf::AirwayLevel::kLow)
+        ++lo;
+      else if (c.segment.level == bf::AirwayLevel::kHigh)
+        ++hi;
+      else if (c.segment.level == bf::AirwayLevel::kBoth)
+        ++bo;
+      if (c.segment.direction != bf::AirwayDirection::kBoth) ++notboth;
+    }
+    CHECK(lo > 50000);
+    CHECK(hi > 40000);
+    CHECK(bo > 10000);
+    CHECK(notboth == 0);
+  }
+  SECTION("airports") {
+    auto it = std::find_if(fd.data.airports.begin(), fd.data.airports.end(),
+                           [](auto& a) { return a.icao == "KJFK"; });
+    REQUIRE(it != fd.data.airports.end());
+    CHECK(it->coord.latitude == Catch::Approx(40.64).margin(0.1));
+    CHECK(it->coord.longitude == Catch::Approx(-73.78).margin(0.1));
+    CHECK(it->elevation_ft == Catch::Approx(13).margin(5));
+  }
+  SECTION("holds") {
+    int enrt = 0, term = 0;
+    for (const auto& h : fd.data.hold_fixes) {
+      if (h.airport_icao == "ENRT")
+        ++enrt;
+      else
+        ++term;
+      if (enrt > 1000 && term > 1000) break;
+    }
+    CHECK(enrt > 1000);
+    CHECK(term > 1000);
+  }
+  SECTION("MORA") { CHECK(fd.data.mora.MoraAt(bf::Coordinate{28.0, 87.0}) > 100); }
+}
+
+TEST_CASE("fenix: LoadProcedures", "[integration][fenix]") {
+  const std::string dir = EnsureFenix();
+  if (dir.empty()) SKIP("Fenix navdata not found");
+  bf::FenixLoader l;
+  auto r = l.LoadProcedures(dir);
+  REQUIRE(r);
+  CHECK(r.value().size() > 10000);
+  auto it =
+      std::find_if(r.value().begin(), r.value().end(), [](auto& a) { return a.first == "KJFK"; });
+  REQUIRE(it != r.value().end());
+  REQUIRE(!it->second.procedures.empty());
+}
+
+TEST_CASE("fenix: LoadProcedure KJFK", "[integration][fenix]") {
+  const std::string dir = EnsureFenix();
+  if (dir.empty()) SKIP("Fenix navdata not found");
+  bf::FenixLoader l;
+  auto r = l.LoadProcedure(dir, "KJFK");
+  REQUIRE(r.has_value());
+  CHECK(!r->procedures.empty());
+  CHECK(!r->runways.empty());
+  CHECK_FALSE(l.LoadProcedure(dir, "ZZZZ").has_value());
+  int tf = 0, unk = 0, alt = 0;
+  for (const auto& p : r->procedures)
+    for (const auto& leg : p.legs) {
+      if (leg.path_term == bf::PathTerminator::kTF)
+        ++tf;
+      else if (leg.path_term == bf::PathTerminator::kUnknown)
+        ++unk;
+      if (leg.alt.kind != bf::AltConstraintKind::kNone) ++alt;
+    }
+  CHECK(tf > 50);
+  CHECK(unk == 0);
+  CHECK(alt > 10);
+}
+
+TEST_CASE("fenix/dfd1: cross-loader AROKE", "[integration][fenix]") {
+  auto fd = EnsureFenix(), dd = EnsureDfd1ForFenix();
+  if (fd.empty() || dd.empty()) SKIP("data missing");
+  bf::FenixLoader fl;
+  bf::Dfd1Loader dl;
+  auto fn = fl.LoadNavData(fd), dn = dl.LoadNavData(dd);
+  REQUIRE(fn);
+  REQUIRE(dn);
+  auto f = [](auto& wps, auto& id) {
+    for (auto& w : wps)
+      if (w.ident.ident == id) return &w;
+    return (bf::Waypoint*)nullptr;
+  };
+  auto fa = f(fn.value().waypoints, "AROKE"), da = f(dn.value().waypoints, "AROKE");
+  REQUIRE(fa);
+  REQUIRE(da);
+  CHECK(std::fabs(fa->coord.latitude - da->coord.latitude) < 1e-4);
+  CHECK(std::fabs(fa->coord.longitude - da->coord.longitude) < 1e-4);
+}
