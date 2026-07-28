@@ -16,10 +16,10 @@ namespace bf::mcp::jsonrpc {
 inline constexpr char kVersion[] = "2.0";
 
 // §5.1 pre-defined error codes.
-inline constexpr int kParseError     = -32700;  // Invalid JSON was received.
+inline constexpr int kParseError = -32700;      // Invalid JSON was received.
 inline constexpr int kInvalidRequest = -32600;  // The JSON is not a valid Request object.
 inline constexpr int kMethodNotFound = -32601;  // The method does not exist / is not available.
-inline constexpr int kInvalidParams  = -32602;  // Invalid method parameter(s).
-inline constexpr int kInternalError  = -32603;  // Internal JSON-RPC error.
+inline constexpr int kInvalidParams = -32602;   // Invalid method parameter(s).
+inline constexpr int kInternalError = -32603;   // Internal JSON-RPC error.
 
 }  // namespace bf::mcp::jsonrpc

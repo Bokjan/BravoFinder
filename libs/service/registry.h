@@ -38,8 +38,7 @@ class NavDatabaseRegistry {
   // constructor does no I/O beyond what building the inventory already did.
   // `cifp_load` selects on-demand (default) or eager CIFP loading for every
   // cycle this registry opens (see CifpLoad).
-  explicit NavDatabaseRegistry(BfdbInventory inventory,
-                               CifpLoad cifp_load = CifpLoad::kOnDemand);
+  explicit NavDatabaseRegistry(BfdbInventory inventory, CifpLoad cifp_load = CifpLoad::kOnDemand);
 
   // The database for `cycle`, or the latest cycle when nullopt. Opens and
   // caches it on first use. Returns an error if the cycle is unknown, the

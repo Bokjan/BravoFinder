@@ -34,9 +34,8 @@ UnitVec ProjectUnitSphere(const Coordinate& c) {
 // unconstrained path (EdgeAllowed returns true on the first line) pays zero
 // Coordinate fetches per edge instead of two 16-byte copies that were never
 // read. `graph` is taken by reference so the lazy CoordOf(to) stays O(1).
-bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge,
-                 const Coordinate& from_coord, const NavGraph& graph, int to,
-                 double& extra_cost) {
+bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coordinate& from_coord,
+                 const NavGraph& graph, int to, double& extra_cost) {
   extra_cost = 0.0;
   if (options.constraints.empty() || options.request == nullptr) {
     return true;
@@ -211,9 +210,8 @@ MultiGoalHeuristic::MultiGoalHeuristic(const NavGraph& graph,
   const int n = graph.VertexCount();
   goals_xyz_.reserve(goals_.size());
   for (const SeededEndpoint& g : goals_) {
-    goals_xyz_.push_back((g.vertex >= 0 && g.vertex < n)
-                             ? ProjectUnitSphere(graph_.CoordOf(g.vertex))
-                             : UnitVec{});
+    goals_xyz_.push_back(
+        (g.vertex >= 0 && g.vertex < n) ? ProjectUnitSphere(graph_.CoordOf(g.vertex)) : UnitVec{});
   }
 }
 

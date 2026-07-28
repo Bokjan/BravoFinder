@@ -367,7 +367,8 @@ std::vector<bf::ShortestPath> NaiveKShortest(const bf::NavGraph& graph, int star
       std::sort(banned_nodes.begin(), banned_nodes.end());
       bf::SearchOptions opts;
       opts.node_filter.banned = &banned_nodes;
-      opts.edge_filter.banned = &banned_edges;      const bf::ShortestPath spur = bf::FindShortestPath(graph, prev[i], goal, opts);
+      opts.edge_filter.banned = &banned_edges;
+      const bf::ShortestPath spur = bf::FindShortestPath(graph, prev[i], goal, opts);
       if (!spur.found) {
         continue;
       }

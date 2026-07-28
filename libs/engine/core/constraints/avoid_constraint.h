@@ -64,8 +64,8 @@ class AvoidConstraint : public Constraint {
     return v;
   }
 
-  const std::vector<int> vertices_;        // sorted, for binary_search
-  const std::vector<uint16_t> airways_;    // sorted, expanded from designators
+  const std::vector<int> vertices_;      // sorted, for binary_search
+  const std::vector<uint16_t> airways_;  // sorted, expanded from designators
 };
 
 }  // namespace bf

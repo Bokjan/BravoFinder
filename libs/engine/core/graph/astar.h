@@ -47,8 +47,8 @@ struct QueueNode {
 // type-erased call -- this replaces a std::function<bool(int)> that profiling
 // showed at ~10% of the multi-source search.
 struct NodeFilter {
-  int airport_first = -1;  // first airport vertex (inclusive), or -1 if none
-  int airport_last = -1;   // one-past-last airport vertex (exclusive)
+  int airport_first = -1;                    // first airport vertex (inclusive), or -1 if none
+  int airport_last = -1;                     // one-past-last airport vertex (exclusive)
   const std::vector<int>* banned = nullptr;  // sorted ascending, or nullptr
 
   bool Blocks(int v) const {

@@ -41,8 +41,8 @@ class RandomizeConstraint : public Constraint {
     // distinct (seed, to) pairs could cancel to the same value and collapse
     // route diversity (correctness was unaffected -- the jitter stays
     // non-negative and admissible either way).
-    uint64_t x = (static_cast<uint64_t>(seed) << 32) |
-                 static_cast<uint64_t>(static_cast<uint32_t>(to));
+    uint64_t x =
+        (static_cast<uint64_t>(seed) << 32) | static_cast<uint64_t>(static_cast<uint32_t>(to));
     x += 0x9e3779b97f4a7c15ULL;
     x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
     x ^= static_cast<uint64_t>(airway_id) + 0x9e3779b97f4a7c15ULL;
