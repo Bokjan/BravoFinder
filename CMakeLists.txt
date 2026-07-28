@@ -191,10 +191,10 @@ if(BRAVOFINDER_INSTALL)
           FILE bravofinderTargets.cmake
           NAMESPACE bf::
           DESTINATION lib/cmake/bravofinder)
-  install(FILES LICENSE LICENSE.MIT THIRD_PARTY_LICENSES.md
+  install(FILES LICENSE.md LICENSE.MIT THIRD_PARTY_LICENSES.md
           DESTINATION share/doc/BravoFinder)
   # libs/engine is LGPL-3.0 (statically linked into the binaries). Rename its
-  # LICENSE so it does not collide with the root overview LICENSE at the same
+  # so it does not collide with the root overview LICENSE.md at the same
   # DESTINATION; its full GPLv3 text ships alongside as LICENSE.GPLv3.
   install(FILES libs/engine/LICENSE RENAME LICENSE.LGPLv3
           DESTINATION share/doc/BravoFinder)

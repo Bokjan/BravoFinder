@@ -1,6 +1,6 @@
 # BravoFinder
 
-[![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases) [![license](https://img.shields.io/badge/license-MIT%20%2F%20LGPL--3.0-blue)](LICENSE) ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
+[![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases) [![license](https://img.shields.io/badge/license-MIT%20%2F%20LGPL--3.0-blue)](LICENSE.md) ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
 
 A flight route finder written in modern C++ (v3).
 
@@ -34,7 +34,6 @@ Build only what you need with `--target`:
 |---|---|
 | `bf` | CLI tool (`apps/cli/`) |
 | `bf_mcp` | MCP server, stdio or HTTP (`apps/mcp/`) |
-| `bf_mcp_lib`   | MCP server library (static) |
 | `bf_http` | HTTP query server (`apps/http/`) |
 | `bf_service_lib` | Shared service layer: registry + handlers + typed entries, `bf::service` (static) |
 | `bf_tests` | Test runner |
@@ -42,7 +41,6 @@ Build only what you need with `--target`:
 
 ```bash
 cmake --build --preset debug --target bf_mcp    # just the MCP server
-cmake --build --preset debug --target bf bf_http      # CLI + HTTP server
 ```
 
 A `tsan` preset (ThreadSanitizer) is available to verify concurrency safety:
@@ -51,32 +49,7 @@ A `tsan` preset (ThreadSanitizer) is available to verify concurrency safety:
 cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 ```
 
-### Using the library (SDK)
-
-The route engine ships as a self-contained static library. Two ways to consume it, both under the single target name `bf::bravofinder`:
-
-**Pre-built SDK** — download a `bravofinder-sdk-*` archive from a [release](https://github.com/Bokjan/BravoFinder/releases), unpack it, and:
-
-```cmake
-find_package(bravofinder REQUIRED)
-target_link_libraries(my_app PRIVATE bf::bravofinder)
-```
-
-The static archive (`libbravofinder.a` / `bravofinder.lib`) folds in the SQLite amalgamation, so no separate sqlite dependency is needed. On MSVC the SDK uses the default dynamic CRT (`/MD`); match that in the consuming project.
-
-**From source (FetchContent)**:
-
-```cmake
-include(FetchContent)
-FetchContent_Declare(
-  BravoFinder
-  GIT_REPOSITORY https://github.com/Bokjan/BravoFinder.git
-  GIT_TAG v3)
-FetchContent_MakeAvailable(BravoFinder)
-target_link_libraries(my_app PRIVATE bf::bravofinder)
-```
-
-The public entry point is `bf::NavDatabase` (`#include "io/nav_database.h"`); headers are included as `core/...` / `io/...` rooted at `bf/`.
+The engine also ships as a self-contained static library `bf::bravofinder` — consume it from a release SDK archive via `find_package(bravofinder)`, or via `FetchContent`; the public entry point is `bf::NavDatabase` (`io/nav_database.h`).
 
 ## Usage
 
@@ -112,118 +85,40 @@ Tools exposed: `find_routes` and `parse_route` (mirroring `bf route`), the `look
 
 ### HTTP server (`bf-http`)
 
-BravoFinder also ships an HTTP+JSON query server for an internal (e.g. Go) gateway to call over the network. It exposes the same route-finding and navigation-data lookups as the MCP server, but as REST-style endpoints. It is a hand-rolled transport over [libuv](https://github.com/libuv/libuv) (async I/O + a worker threadpool) and [llhttp](https://github.com/nodejs/llhttp) (Node's HTTP parser): a single event-loop thread does all non-blocking I/O, and each route computation is offloaded to the threadpool, so one loop scales to many connections.
-
-Like the MCP server, it is pointed at a **directory** of `.bfdb` caches and can serve multiple AIRAC cycles (query endpoints accept an optional `?cycle=2601`, defaulting to the newest). It fails fast at startup if the directory holds no cache.
-
-Build and run it:
-
-```bash
-cmake --preset release && cmake --build --preset release   # or: debug
-# binary: build/release/apps/http/bf-http
-
-# The directory is --db-dir, else BRAVOFINDER_NAVDATA, else ./navdata.
-bf-http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
-# Other flags: --worker-threads N (threadpool size), --max-body BYTES,
-# --io-timeout SEC (header/body read + idle keep-alive),
-# --cifp-load on-demand|eager (eager = lock-free procedure reads, ~100 MB/cycle).
-```
-
-Endpoints (all query endpoints are `POST` with a JSON body; a batch lookup takes `{"ids":[...]}`, a single lookup is a one-element array):
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/v1/routes` | find k candidate routes |
-| POST | `/v1/parse-route` | validate/expand a filed route string |
-| POST | `/v1/waypoints` `/v1/airports` `/v1/procedures` `/v1/airways` `/v1/navaid-detail` `/v1/holds` | batch lookups (parallel to `ids`) |
-| POST | `/v1/procedure-legs` | one named procedure's per-leg detail |
-| GET | `/v1/cycles` | list the servable AIRAC cycles |
-| GET | `/healthz` `/readyz` | liveness / readiness probes |
-
-Errors return `{"error":"..."}` with an HTTP status: **400** for a malformed request (bad JSON, missing/invalid field, bad `?cycle=`), **404** when nothing matched (all ids missing, or an unknown path), and **422** when a well-formed request cannot be satisfied (no route, a bad route token). Request bodies over `--max-body` get **413**; `Transfer-Encoding: chunked` is refused. See [apps/http/README.md](apps/http/README.md) for the full per-endpoint request/response contract, and [docs/http-service.zh-CN.md](docs/http-service.zh-CN.md) for the design.
-
-`bf build` (cache creation) remains a CLI concern and is not exposed here.
+BravoFinder also ships an HTTP+JSON query server (REST-style endpoints) for a gateway to call over the network. It shares the MCP server's `.bfdb`-directory model — lazy per-cycle open, optional `?cycle=`, fails fast if no cache — and its transport core (`libs/http_server/`, over libuv + llhttp, with each route computation offloaded to a threadpool). The full per-endpoint request/response contract and status codes live in [apps/http/README.md](apps/http/README.md); the design is in [docs/http-service.zh-CN.md](docs/http-service.zh-CN.md).
 
 ### CLI (`bf`)
 
 ```bash
-# Build a binary cache once per AIRAC cycle for fast startup (~2.3s -> ~0.2s).
-# The default name encodes the cycle so a directory of caches can hold several
-# AIRACs. One unified .bfdb holds the graph, the CIFP procedures, and the navaid
-# detail, so deployment needs only that file, not the CIFP/ directory.
+# Build a binary cache once per AIRAC cycle for fast startup.
 bf build navdata                    # writes navdata/nav_<cycle>.bfdb
-bf build /path/to/xplane -o my.bfdb # explicit name: writes my.bfdb
-bf build navdata --loader xplane12  # select source loader: xplane12 | dfd1 | dfd2 (default xplane12)
+bf build navdata --loader xplane12  # source loader: xplane12 | dfd1 | dfd2 (default xplane12)
 
-# Find a route (reads navigation data from ./navdata by default)
+# Find a route (reads ./navdata by default)
 bf route KJFK KLAX
 bf route EGLL LFPG --format json
-bf route KSEA KBOS --data /path/to/xplane/data
+bf route KJFK KLAX --db navdata/nav_2601.bfdb   # load a prebuilt cache
 
-# Load a prebuilt cache to skip parsing. The one .bfdb carries the graph, the
-# CIFP procedures, and the navaid detail, so the CIFP/ directory is not needed
-# at all.
-bf route KJFK KLAX --db navdata/nav_2601.bfdb
+# Constrain the search
+bf route KJFK KLAX --alt 300-400      # altitude band (enables MORA filtering)
+bf route KJFK KLAX --level high -k 3  # prefer Jet airways; ask for 3 candidates
 
-# Procedure cache load mode: on-demand (default, ~1.5 MB, best for one-shot
-# queries) or eager (loads all procedures up front, ~100 MB then lock-free,
-# best for servers / batch routing)
-bf route KJFK KLAX --db navdata/nav_2601.bfdb --cifp-load eager
-
-# Constrain by cruise altitude (enables altitude-band and MORA filtering).
-# A single level or an inclusive range (any level in the band is acceptable).
-bf route KJFK KLAX --alt 350
-bf route KJFK KLAX --alt 300-400
-
-# Prefer high (Jet) or low (Victor) airways; ask for several candidates
-bf route KJFK KLAX --level high -k 3
-
-# Restrict the departure/arrival runway used for SID/STAR selection
-bf route KJFK KLAX --rwy-dep RW31L
-bf route KJFK KLAX --rwy-arr RW25L
-
-# Select a specific SID/STAR by name (bare name matches any transition;
-# NAME.TRANSITION pins the transition). An unknown name is a clean error.
-bf route KJFK KLAX --sid DEEZZ5
-bf route KJFK KLAX --star LENDY6.HAAYS
-
-# Force the route through waypoints, in order (via points); ident or IDENT/REGION.
-bf route KJFK KLAX --via DBL
-bf route KJFK KLAX --via PSB --via DBL
-
-# Route around waypoints or airways. A bare ident avoids all its regional
-# matches; an airway designator also blocks its concurrency segments.
-bf route KJFK KLAX --avoid-wpt CANDR
-bf route KJFK KLAX --avoid-awy J60
-
-# Diversify the route reproducibly: the same seed always yields the same route,
-# different seeds explore alternative (still valid) routes.
-bf route KJFK KLAX --seed 42
-
-# Validate and expand a filed route string (the reverse of route): checks that
-# each airway connects its bracketing fixes, expands airways to their
-# intermediate points, and totals the distance. Errors name the bad token.
+# Validate a filed route string (reverse of route)
 bf parse-route "KJFK SID CANDR Q480 HOTEE J80 MCI ... STAR KLAX" --db navdata/nav_2601.bfdb
 
-# Look up navigation data: waypoints, airports, procedures, airways, navaid
-# details, or holds. Each accepts one or more ids (a batch), and --format json
-# emits an array parallel to the input (a not-found id becomes null).
+# Look up navigation data (batch ids; --format json emits a parallel array)
 bf query waypoint --db navdata/nav_2601.bfdb NINOX DGC
 bf query airport  --db navdata/nav_2601.bfdb KJFK KLAX
-bf query procedure --db navdata/nav_2601.bfdb KJFK
-bf query airway   --db navdata/nav_2601.bfdb Y28 --format json
-# navaid_detail: frequency, service range, elevation, station variation/bearing.
-bf query navaid_detail --db navdata/nav_2601.bfdb SEA DGC
-# hold: holding-pattern parameters (inbound course, leg length, turn, altitude).
-bf query hold --db navdata/nav_2601.bfdb AE701
 
 # Print the program version
 bf --version
 ```
 
-Route endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an airport has procedure data, the route names the SID and STAR used in its `sid`/ `star` fields (and the interchangeable procedures that share the same connection fix); in the route string and the leg list they show as the literal `SID`/`STAR` connectors.
+More options — runways, SID/STAR selection, via/avoid points, reproducible `--seed`, and cache load mode (`--cifp-load eager|on-demand`) — are in `bf route --help` / `bf query --help`.
 
-The `--format json` route output carries, alongside the filed route string and per-phase distances, an ordered `points[]` array (each `{ident, lat, lon}`) and a running `cumulative_nm` on every leg. `points` has one more entry than `legs` (N points, N-1 legs); the destination of leg *i* is `points[i+1]`, and the last `cumulative_nm` equals `total_distance_nm`.
+Route endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an airport has procedure data, the route names the SID and STAR used in its `sid`/`star` fields (and the interchangeable procedures that share the same connection fix); in the route string and the leg list they show as the literal `SID`/`STAR` connectors.
+
+With `--format json`, route output carries the filed route string, per-phase distances, an ordered `points[]` array (each `{ident, lat, lon}`), and a running `cumulative_nm` on every leg.
 
 The `.bfdb` cache is a portable, little-endian binary snapshot. One unified file holds three sections sharing a global string pool: the route graph, the per-airport CIFP procedures (loaded on demand), and the radio-navaid attributes and holding patterns for the `navaid_detail` / `hold` lookups. The canonical name is `nav_<cycle>.bfdb`, encoding the AIRAC cycle so a directory can hold several cycles. It is derived from Navigraph/Jeppesen data and, like the source data, must not be redistributed (it is git-ignored).
 

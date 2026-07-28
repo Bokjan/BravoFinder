@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Local pre-commit hook: reject commits whose staged .h/.cc files are not
+# clang-format clean (see the repo-root .clang-format).
+# Activate with:  git config core.hooksPath tools/hooks
+# (or copy this file to .git/hooks/pre-commit)
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+exec python3 "${root}/tools/check_clang_format.py"

@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
       std::string("BravoFinder ") + bf::kBravoFinderVersion + "\n" + "Copyright (c) Boyin Chen\n" +
           "MIT-licensed, except the route engine (libs/engine/) which is under the GNU LGPL "
           "v3.0-or-later.\n" +
-          "See LICENSE, LICENSE.MIT, libs/engine/LICENSE and libs/engine/LICENSE.GPLv3.");
+          "See LICENSE.md, LICENSE.MIT, libs/engine/LICENSE and libs/engine/LICENSE.GPLv3.");
 
   int exit_code = EXIT_SUCCESS;
   bf::cli::RegisterBuild(app, exit_code);
