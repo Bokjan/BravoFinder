@@ -16,18 +16,23 @@
 //   * A compile-time BF_LOG_MIN_LEVEL gate strips low-severity macros to
 //     ((void)0); BF_LOG_FATAL is never stripped (callers may rely on its
 //     "log then abort, never returns" control flow).
-//   * The global default logger is held as std::atomic<std::shared_ptr<Logger>>:
-//     set/restore are atomic, readers take a lock-free copy, and a logger being
-//     replaced stays alive (refcount) until in-flight users release it -- no
-//     use-after-free. This is the mainstream shape (spdlog/glog/log4cxx/Boost.Log
-//     all use a global default logger). It is a deliberate, synchronized
-//     exception to CLAUDE.md's "no static/global mutable state" rule: that rule
-//     targets v2's bug pattern of cross-thread shared *unsynchronized* mutable
-//     state. Here the atomic load/store plus the per-sink mutex (SyncLogger)
-//     provide the synchronization, so the v2 race does not arise. A
-//     thread-local logger was rejected because threadpool workers default to
-//     nullptr and silently drop logs; a global logger set once is visible to all
-//     workers, which is the core benefit over thread-local.
+//   * The global default logger is a std::shared_ptr<Logger> guarded by an
+//     internal mutex: SetDefaultLogger stores under the lock, DefaultLogger
+//     copies under the lock on every LogImpl call, and a logger being replaced
+//     stays alive (refcount) until in-flight users release it -- no
+//     use-after-free. (Deliberately not std::atomic<std::shared_ptr<Logger>>:
+//     that C++20 partial specialization is absent from Apple's pre-LLVM-19
+//     libc++ and broke the Mac CI build; it is not lock-free on any mainstream
+//     implementation anyway, so the mutex loses nothing real and is portable.)
+//     This is the mainstream shape (spdlog/glog/log4cxx/Boost.Log all use a
+//     global default logger). It is a deliberate, synchronized exception to
+//     CLAUDE.md's "no static/global mutable state" rule: that rule targets v2's
+//     bug pattern of cross-thread shared *unsynchronized* mutable state. Here
+//     the mutex-guarded swap plus the per-sink mutex (SyncLogger) provide the
+//     synchronization, so the v2 race does not arise. A thread-local logger was
+//     rejected because threadpool workers default to nullptr and silently drop
+//     logs; a global logger set once is visible to all workers, which is the
+//     core benefit over thread-local.
 
 #include <cstdint>
 #include <format>
@@ -108,9 +113,9 @@ class SyncLogger final : public Logger {
 };
 
 // Process-wide global default logger. nullptr by default = fully silent.
-// Held as atomic<shared_ptr<Logger>>: set/restore atomic, readers take a
-// lock-free copy, and a replaced logger stays alive (refcount) until in-flight
-// users release it -- no use-after-free.
+// Held as a mutex-guarded shared_ptr (see log.cc): set/restore under the lock,
+// readers take a refcounted copy, and a replaced logger stays alive until
+// in-flight users release it -- no use-after-free.
 void SetDefaultLogger(std::shared_ptr<Logger> logger);
 std::shared_ptr<Logger> DefaultLogger();
 

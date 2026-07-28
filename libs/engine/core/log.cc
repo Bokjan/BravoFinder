@@ -5,23 +5,37 @@
 #include <atomic>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <utility>
 
 namespace bf {
 
 namespace {
 // Process-wide default logger. nullptr = fully silent (the common case). Held
-// as atomic<shared_ptr>: store on SetDefaultLogger, lock-free load on every
-// LogImpl call. A logger replaced while a thread holds a copy stays alive via
-// refcount until that copy is destroyed -- no use-after-free.
-std::atomic<std::shared_ptr<Logger>> g_default_logger{nullptr};
+// as a plain shared_ptr guarded by g_logger_mu: SetDefaultLogger stores under
+// the lock, DefaultLogger copies under the lock on every LogImpl call. A
+// logger replaced while a thread already holds a copy stays alive via refcount
+// until that copy is destroyed -- no use-after-free.
+//
+// Deliberately NOT std::atomic<std::shared_ptr<Logger>>: that C++20 partial
+// specialization is absent from Apple's pre-LLVM-19 libc++ (Xcode 16.x) and
+// broke the Mac CI build; and std::atomic<shared_ptr> is not lock-free on any
+// mainstream implementation (its is_always_lock_free is false -- it is
+// lock-based), so the mutex loses nothing real while remaining portable across
+// libstdc++/libc++/MSVC STL.
+std::shared_ptr<Logger> g_default_logger;
+std::mutex g_logger_mu;
 }  // namespace
 
 void SetDefaultLogger(std::shared_ptr<Logger> logger) {
-  g_default_logger.store(std::move(logger), std::memory_order_release);
+  std::lock_guard<std::mutex> lock(g_logger_mu);
+  g_default_logger = std::move(logger);
 }
 
-std::shared_ptr<Logger> DefaultLogger() { return g_default_logger.load(std::memory_order_acquire); }
+std::shared_ptr<Logger> DefaultLogger() {
+  std::lock_guard<std::mutex> lock(g_logger_mu);
+  return g_default_logger;
+}
 
 std::string FormatLine(LogLevel level, std::string_view file, std::uint_least32_t line,
                        std::string_view message) {
