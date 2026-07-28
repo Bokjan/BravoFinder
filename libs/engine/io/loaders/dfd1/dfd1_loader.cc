@@ -643,11 +643,13 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     ProcedureLeg leg;
     // FixedIdent::kIdentCap = 7; skip legs whose waypoint ident is too long.
     std::string wp_ident = ColumnText(stmt, c.wp_ident);
-    if (wp_ident.size() > 7) {
+    if (wp_ident.size() > FixedIdent::kIdentCap) {
+#ifndef NDEBUG
       std::fprintf(
           stderr,
-          "dfd1: skipping procedure leg with ident '%s' (too long for FixedIdent, %zu > 7)\n",
-          wp_ident.c_str(), wp_ident.size());
+          "dfd1: skipping procedure leg with ident '%s' (too long for FixedIdent, %zu > %d)\n",
+          wp_ident.c_str(), wp_ident.size(), FixedIdent::kIdentCap);
+#endif
       return;
     }
     leg.fix = FixedIdent::FromParts(wp_ident, ColumnText(stmt, c.wp_icao));

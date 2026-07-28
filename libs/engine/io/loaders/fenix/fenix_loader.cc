@@ -123,16 +123,24 @@ WaypointKind NavaidKindFromType(int type_id) {
 // string for between constraints.  AltitudeConstraint stores alt1_ft = upper
 // bound, alt2_ft = lower bound (ARINC convention).
 AltitudeConstraint ParseFenixAlt(const std::string& alt_text) {
-  if (alt_text.empty()) return {};
+  if (alt_text.empty()) {
+    return {};
+  }
 
   // Parse the first <num> segment.
   size_t pos = 0;
-  while (pos < alt_text.size() && alt_text[pos] >= '0' && alt_text[pos] <= '9') ++pos;
-  if (pos == 0) return {};
+  while (pos < alt_text.size() && alt_text[pos] >= '0' && alt_text[pos] <= '9') {
+    ++pos;
+  }
+  if (pos == 0) {
+    return {};
+  }
 
   int val1 = 0;
   auto [ptr1, ec1] = std::from_chars(alt_text.data(), alt_text.data() + pos, val1);
-  if (ec1 != std::errc{}) return {};
+  if (ec1 != std::errc{}) {
+    return {};
+  }
 
   char desc1 = (pos < alt_text.size()) ? alt_text[pos] : '\0';
   ++pos;  // advance past the first suffix
@@ -140,7 +148,9 @@ AltitudeConstraint ParseFenixAlt(const std::string& alt_text) {
   // If the first suffix is B, look for a second <num><suffix> pair.
   if (desc1 == 'B' && pos < alt_text.size()) {
     size_t num2_start = pos;
-    while (pos < alt_text.size() && alt_text[pos] >= '0' && alt_text[pos] <= '9') ++pos;
+    while (pos < alt_text.size() && alt_text[pos] >= '0' && alt_text[pos] <= '9') {
+      ++pos;
+    }
     if (pos > num2_start) {
       int val2 = 0;
       auto [ptr2, ec2] = std::from_chars(alt_text.data() + num2_start, alt_text.data() + pos, val2);
@@ -166,9 +176,13 @@ AltitudeConstraint ParseFenixAlt(const std::string& alt_text) {
 
 uint32_t ParseFenixCycle(sqlite3* conn) {
   Result<SqliteStmt> stmt = Prepare(conn, "SELECT val FROM config WHERE key='Cycle'");
-  if (!stmt) return 0;
+  if (!stmt) {
+    return 0;
+  }
   Result<bool> row = Step(stmt.value().get());
-  if (!row || !row.value()) return 0;
+  if (!row || !row.value()) {
+    return 0;
+  }
   int cycle = 0;
   std::string text = ColumnText(stmt.value().get(), 0);
   auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), cycle);
@@ -182,7 +196,9 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
   std::unordered_map<int, std::string> region_by_id;
   {
     Result<SqliteStmt> s = Prepare(conn, "SELECT ID, Country FROM WaypointLookup");
-    if (!s) return Result<void>::Err(s.error());
+    if (!s) {
+      return Result<void>::Err(s.error());
+    }
     sqlite3_stmt* stmt = s.value().get();
     for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
       region_by_id[ColumnInt(stmt, 0)] = ColumnText(stmt, 1);
@@ -193,7 +209,9 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
   std::unordered_map<int, int> navaid_type_of;
   {
     Result<SqliteStmt> s = Prepare(conn, "SELECT ID, Type FROM Navaids");
-    if (!s) return Result<void>::Err(s.error());
+    if (!s) {
+      return Result<void>::Err(s.error());
+    }
     sqlite3_stmt* stmt = s.value().get();
     for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
       navaid_type_of[ColumnInt(stmt, 0)] = ColumnInt(stmt, 1);
@@ -203,7 +221,9 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
   // 0=ID 1=Ident 2=Latitude 3=Longtitude 4=NavaidID
   Result<SqliteStmt> s =
       Prepare(conn, "SELECT w.ID, w.Ident, w.Latitude, w.Longtitude, w.NavaidID FROM Waypoints w");
-  if (!s) return Result<void>::Err(s.error());
+  if (!s) {
+    return Result<void>::Err(s.error());
+  }
 
   sqlite3_stmt* stmt = s.value().get();
   int skipped_long = 0;
@@ -226,12 +246,16 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
 
     std::string region;
     auto rit = region_by_id.find(id);
-    if (rit != region_by_id.end()) region = rit->second;
+    if (rit != region_by_id.end()) {
+      region = rit->second;
+    }
 
     WaypointKind kind = WaypointKind::kFix;
     if (nav_id > 0) {
       auto nit = navaid_type_of.find(nav_id);
-      if (nit != navaid_type_of.end()) kind = NavaidKindFromType(nit->second);
+      if (nit != navaid_type_of.end()) {
+        kind = NavaidKindFromType(nit->second);
+      }
     }
 
     data.waypoints.push_back(Waypoint{Ident{ident_str, region}, Coordinate{lat, lon}, kind});
@@ -251,7 +275,9 @@ Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
   // Navigraph NavaidDetail, persisted for display and lookup-only queries.
   // 0=Ident 1=Type 2=Elevation 3=Freq 4=Range
   Result<SqliteStmt> s = Prepare(conn, "SELECT Ident, Type, Elevation, Freq, Range FROM Navaids");
-  if (!s) return Result<void>::Err(s.error());
+  if (!s) {
+    return Result<void>::Err(s.error());
+  }
 
   sqlite3_stmt* stmt = s.value().get();
   for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
@@ -273,7 +299,9 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   std::unordered_map<int, std::string> airway_name;
   {
     Result<SqliteStmt> s = Prepare(conn, "SELECT ID, Ident FROM Airways");
-    if (!s) return Result<void>::Err(s.error());
+    if (!s) {
+      return Result<void>::Err(s.error());
+    }
     sqlite3_stmt* stmt = s.value().get();
     for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
       airway_name[ColumnInt(stmt, 0)] = ColumnText(stmt, 1);
@@ -286,7 +314,9 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     Result<SqliteStmt> s = Prepare(conn,
                                    "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
                                    "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
-    if (!s) return Result<void>::Err(s.error());
+    if (!s) {
+      return Result<void>::Err(s.error());
+    }
     sqlite3_stmt* stmt = s.value().get();
     for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
       wp_by_id[ColumnInt(stmt, 0)] = Ident{ColumnText(stmt, 1), ColumnText(stmt, 2)};
@@ -297,7 +327,9 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   Result<SqliteStmt> s = Prepare(conn,
                                  "SELECT al.AirwayID, al.Level, al.Waypoint1ID, al.Waypoint2ID, "
                                  "al.IsStart, al.IsEnd FROM AirwayLegs al");
-  if (!s) return Result<void>::Err(s.error());
+  if (!s) {
+    return Result<void>::Err(s.error());
+  }
 
   sqlite3_stmt* stmt = s.value().get();
   for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
@@ -309,7 +341,9 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     auto nm = airway_name.find(aid);
     auto fm = wp_by_id.find(wp1);
     auto to = wp_by_id.find(wp2);
-    if (nm == airway_name.end() || fm == wp_by_id.end() || to == wp_by_id.end()) continue;
+    if (nm == airway_name.end() || fm == wp_by_id.end() || to == wp_by_id.end()) {
+      continue;
+    }
 
     AirwayConnection conn;
     conn.from = fm->second;
@@ -349,7 +383,9 @@ Result<void> LoadAirports(sqlite3* conn, NavData& data) {
   // 0=ICAO 1=Latitude 2=Longtitude 3=Elevation
   Result<SqliteStmt> s =
       Prepare(conn, "SELECT ICAO, Latitude, Longtitude, Elevation FROM Airports");
-  if (!s) return Result<void>::Err(s.error());
+  if (!s) {
+    return Result<void>::Err(s.error());
+  }
 
   sqlite3_stmt* stmt = s.value().get();
   for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
@@ -373,14 +409,18 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
                                  "SELECT waypoint_identifier, region_code, icao_code, "
                                  "inbound_holding_course, leg_time, leg_length, turn_direction, "
                                  "minimum_altitude, maximum_altitude, holding_speed FROM Holdings");
-  if (!s) return Result<void>::Err(s.error());
+  if (!s) {
+    return Result<void>::Err(s.error());
+  }
 
   sqlite3_stmt* stmt = s.value().get();
   for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
     HoldFix h;
     h.fix = Ident{ColumnText(stmt, 0), ColumnText(stmt, 1)};
     h.airport_icao = ColumnText(stmt, 2);
-    if (h.airport_icao.empty()) h.airport_icao = "ENRT";
+    if (h.airport_icao.empty()) {
+      h.airport_icao = "ENRT";
+    }
     h.inbound_course = ColumnDouble(stmt, 3);
     h.leg_time_min = ColumnOptDouble(stmt, 4);
     h.leg_dist_nm = ColumnOptDouble(stmt, 5);
@@ -410,7 +450,9 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
               "mora11,mora12,mora13,mora14,mora15,mora16,mora17,mora18,mora19,mora20,"
               "mora21,mora22,mora23,mora24,mora25,mora26,mora27,mora28,mora29,mora30 "
               "FROM GridMora ORDER BY starting_latitude, starting_longitude");
-  if (!s) return Result<void>::Err(s.error());
+  if (!s) {
+    return Result<void>::Err(s.error());
+  }
 
   sqlite3_stmt* stmt = s.value().get();
   for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
@@ -419,15 +461,23 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
 
     for (int col = 0; col < 30; ++col) {
       std::string txt = ColumnText(stmt, 2 + col);
-      if (txt.empty()) continue;
+      if (txt.empty()) {
+        continue;
+      }
       int mora_val = 0;
       auto [ptr, ec] = std::from_chars(txt.data(), txt.data() + txt.size(), mora_val);
-      if (ec != std::errc{} || mora_val == 0) continue;
+      if (ec != std::errc{} || mora_val == 0) {
+        continue;
+      }
 
       int lat = start_lat;
       int lon = start_lon + col;
-      if (lat < 0) lat += 180;
-      if (lon < 0) lon += 360;
+      if (lat < 0) {
+        lat += 180;
+      }
+      if (lon < 0) {
+        lon += 360;
+      }
       if (lat >= 0 && lat < 180 && lon >= 0 && lon < 360) {
         data.mora.SetCell(lat, lon, static_cast<int16_t>(mora_val * 100));
       }
@@ -485,7 +535,9 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
   Result<SqliteStmt> ts = Prepare(conn,
                                   "SELECT t.ID, t.AirportID, t.Proc, t.Name, t.Rwy "
                                   "FROM Terminals t ORDER BY t.AirportID, t.ID");
-  if (!ts) return Result<void>::Err(ts.error());
+  if (!ts) {
+    return Result<void>::Err(ts.error());
+  }
 
   // Pre-build waypoint ident/region lookup for leg fix resolution.
   std::unordered_map<int, std::pair<std::string, std::string>> wp_info;
@@ -517,7 +569,9 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
                                     "FROM TerminalLegs tl "
                                     "LEFT JOIN TerminalLegsEx ex ON tl.ID = ex.ID "
                                     "ORDER BY tl.TerminalID, tl.ID");
-    if (!ls) return Result<void>::Err(ls.error());
+    if (!ls) {
+      return Result<void>::Err(ls.error());
+    }
     sqlite3_stmt* stmt = ls.value().get();
     Result<void> rows = ForEachRow(stmt, [&]() {
       ProcedureLeg leg;
@@ -525,7 +579,9 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
       leg.path_term = ParsePathTerminator(ColumnText(stmt, 2));
       // Unknown TrackCode → skip entire leg silently.  Real data has
       // 'RWYTF'×4 and 'RWY15'×2 — these legs are discarded with no signal.
-      if (leg.path_term == PathTerminator::kUnknown) return;
+      if (leg.path_term == PathTerminator::kUnknown) {
+        return;
+      }
 
       // Resolve leg fix ident from WptID.
       int wpt_id = ColumnOptInt(stmt, 7);
@@ -563,7 +619,9 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
       }
       groups.back().legs.push_back(std::move(leg));
     });
-    if (!rows) return Result<void>::Err(rows.error());
+    if (!rows) {
+      return Result<void>::Err(rows.error());
+    }
   }
 
   // Pre-index common (ALL) legs per TerminalID for appending to each transition.
@@ -588,7 +646,9 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
     if (!cifp.procedures.empty()) {
       auto iit = icao_of.find(cur_aid);
       std::string icao = (iit != icao_of.end()) ? iit->second : "";
-      if (!icao.empty()) out.emplace_back(icao, std::move(cifp));
+      if (!icao.empty()) {
+        out.emplace_back(icao, std::move(cifp));
+      }
     }
     cifp = CifpData{};
   };
@@ -616,7 +676,9 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
     std::string name = ColumnText(stmt, 3);
 
     auto git = leg_groups.find(tid);
-    if (git == leg_groups.end()) return;
+    if (git == leg_groups.end()) {
+      return;
+    }
 
     auto cit = common_legs.find(tid);
 
@@ -645,7 +707,9 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
       cifp.procedures.push_back(std::move(proc));
     }
   });
-  if (!rows) return Result<void>::Err(rows.error());
+  if (!rows) {
+    return Result<void>::Err(rows.error());
+  }
   flush_airport();
   return Result<void>::Ok();
 }
@@ -655,7 +719,9 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
 std::unordered_map<int, std::string> LoadAirportIcaoMap(sqlite3* conn) {
   std::unordered_map<int, std::string> icao_of;
   Result<SqliteStmt> s = Prepare(conn, "SELECT ID, ICAO FROM Airports");
-  if (!s) return icao_of;
+  if (!s) {
+    return icao_of;
+  }
   sqlite3_stmt* stmt = s.value().get();
   for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
     icao_of[ColumnInt(stmt, 0)] = ColumnText(stmt, 1);
@@ -684,22 +750,34 @@ Result<NavData> FenixLoader::LoadNavData(const std::string& source_dir) const {
   data.cycle = ParseFenixCycle(conn);
 
   Result<void> r = LoadWaypoints(conn, data);
-  if (!r) return Result<NavData>::Err(r.error());
+  if (!r) {
+    return Result<NavData>::Err(r.error());
+  }
 
   r = LoadNavaidDetails(conn, data);
-  if (!r) return Result<NavData>::Err(r.error());
+  if (!r) {
+    return Result<NavData>::Err(r.error());
+  }
 
   r = LoadAirways(conn, data);
-  if (!r) return Result<NavData>::Err(r.error());
+  if (!r) {
+    return Result<NavData>::Err(r.error());
+  }
 
   r = LoadAirports(conn, data);
-  if (!r) return Result<NavData>::Err(r.error());
+  if (!r) {
+    return Result<NavData>::Err(r.error());
+  }
 
   r = LoadHoldings(conn, data);
-  if (!r) return Result<NavData>::Err(r.error());
+  if (!r) {
+    return Result<NavData>::Err(r.error());
+  }
 
   r = LoadMoraGrid(conn, data);
-  if (!r) return Result<NavData>::Err(r.error());
+  if (!r) {
+    return Result<NavData>::Err(r.error());
+  }
 
   // NOTE: Fenix navdata has NO MSA table — data.msa is deliberately empty.
   // See the "MSA — NOT AVAILABLE" block above for details.
@@ -725,16 +803,24 @@ Result<std::vector<AirportProcedureData>> FenixLoader::LoadProcedures(
   // Scan the Terminals+TerminalLegs tables in a single pass (dfd1-style).
   std::vector<AirportProcedureData> out;
   Result<void> r = LoadProcTable(conn, out, icao_of);
-  if (!r) return Result<std::vector<AirportProcedureData>>::Err(r.error());
+  if (!r) {
+    return Result<std::vector<AirportProcedureData>>::Err(r.error());
+  }
 
   // Merge runways by airport ID.
   Result<std::unordered_map<int, std::vector<Runway>>> runways = LoadAllRunways(conn);
-  if (!runways) return Result<std::vector<AirportProcedureData>>::Err(runways.error());
+  if (!runways) {
+    return Result<std::vector<AirportProcedureData>>::Err(runways.error());
+  }
 
   for (auto& [aid, rwys] : runways.value()) {
-    if (rwys.empty()) continue;
+    if (rwys.empty()) {
+      continue;
+    }
     auto iit = icao_of.find(aid);
-    if (iit == icao_of.end()) continue;
+    if (iit == icao_of.end()) {
+      continue;
+    }
     // Find existing entry or add new.
     auto it = std::find_if(out.begin(), out.end(),
                            [&](const AirportProcedureData& a) { return a.first == iit->second; });
@@ -758,12 +844,18 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
   int airport_id = -1;
   {
     Result<SqliteStmt> s = Prepare(conn, "SELECT ID FROM Airports WHERE ICAO = ?");
-    if (!s) return std::nullopt;
+    if (!s) {
+      return std::nullopt;
+    }
     sqlite3_bind_text(s.value().get(), 1, icao.c_str(), -1, SQLITE_TRANSIENT);
     Result<bool> row = Step(s.value().get());
-    if (row && row.value()) airport_id = ColumnInt(s.value().get(), 0);
+    if (row && row.value()) {
+      airport_id = ColumnInt(s.value().get(), 0);
+    }
   }
-  if (airport_id < 0) return std::nullopt;
+  if (airport_id < 0) {
+    return std::nullopt;
+  }
 
   // Collect terminal IDs for this airport so we can filter the full leg scan.
   std::unordered_set<int> airport_tids;
@@ -771,7 +863,9 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
   {
     Result<SqliteStmt> ts =
         Prepare(conn, "SELECT ID, Proc, Name, Rwy FROM Terminals WHERE AirportID = ?");
-    if (!ts) return std::nullopt;
+    if (!ts) {
+      return std::nullopt;
+    }
     sqlite3_bind_int(ts.value().get(), 1, airport_id);
     sqlite3_stmt* stmt = ts.value().get();
     for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
@@ -835,16 +929,22 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
                                     "FROM TerminalLegs tl "
                                     "LEFT JOIN TerminalLegsEx ex ON tl.ID = ex.ID "
                                     "ORDER BY tl.TerminalID, tl.ID");
-    if (!ls) return std::nullopt;
+    if (!ls) {
+      return std::nullopt;
+    }
     sqlite3_stmt* stmt = ls.value().get();
     for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
       int tid = ColumnInt(stmt, 0);
-      if (airport_tids.find(tid) == airport_tids.end()) continue;
+      if (airport_tids.find(tid) == airport_tids.end()) {
+        continue;
+      }
 
       ProcedureLeg leg;
       std::string trans = ColumnText(stmt, 1);
       leg.path_term = ParsePathTerminator(ColumnText(stmt, 2));
-      if (leg.path_term == PathTerminator::kUnknown) continue;
+      if (leg.path_term == PathTerminator::kUnknown) {
+        continue;
+      }
 
       int wpt_id = ColumnOptInt(stmt, 7);
       if (wpt_id > 0) {
@@ -893,7 +993,9 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
   CifpData cifp;
   for (auto& [tid, groups] : leg_groups) {
     auto pit = proc_by_tid.find(tid);
-    if (pit == proc_by_tid.end()) continue;
+    if (pit == proc_by_tid.end()) {
+      continue;
+    }
 
     auto cit = common_legs.find(tid);
 
@@ -932,17 +1034,23 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
     }
   }
 
-  if (cifp.procedures.empty() && cifp.runways.empty()) return std::nullopt;
+  if (cifp.procedures.empty() && cifp.runways.empty()) {
+    return std::nullopt;
+  }
   return cifp;
 }
 
 std::optional<CifpData> FenixLoader::LoadProcedure(const std::string& source_dir,
                                                    const std::string& icao) const {
   Result<std::string> db_path = FindFenixDb(source_dir);
-  if (!db_path) return std::nullopt;
+  if (!db_path) {
+    return std::nullopt;
+  }
 
   Result<sqlite3*> conn_result = AcquireConn(kLoaderName, db_path.value());
-  if (!conn_result) return std::nullopt;
+  if (!conn_result) {
+    return std::nullopt;
+  }
 
   return LoadAirportProcedures(conn_result.value(), icao);
 }
