@@ -122,9 +122,12 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_s
   int skipped = 0;
   Result<void> result = ForEachRow(stmt, [&]() {
     std::string id = ColumnText(stmt, 1);
-    if (id.size() > 7) {
-      std::fprintf(stderr, "dfd1: skipping waypoint '%s' (ident too long for FixedIdent, %zu > 7)\n",
-                   id.c_str(), id.size());
+    if (id.size() > FixedIdent::kIdentCap) {
+#ifndef NDEBUG
+      std::fprintf(stderr,
+                   "dfd1: skipping waypoint '%s' (ident too long for FixedIdent, %zu > %d)\n",
+                   id.c_str(), id.size(), FixedIdent::kIdentCap);
+#endif
       ++skipped;
       return;
     }
@@ -135,7 +138,9 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_s
     }
   });
   if (skipped > 0) {
+#ifndef NDEBUG
     std::fprintf(stderr, "dfd1: %d waypoint(s) skipped (ident too long for FixedIdent)\n", skipped);
+#endif
   }
   return result;
 }
@@ -154,13 +159,32 @@ Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_
     return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  return ForEachRow(stmt, [&]() {
-    const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
+  int skipped = 0;
+  Result<void> result = ForEachRow(stmt, [&]() {
+    std::string id = ColumnText(stmt, 1);
+    if (id.size() > FixedIdent::kIdentCap) {
+#ifndef NDEBUG
+      std::fprintf(
+          stderr,
+          "dfd1: skipping terminal waypoint '%s' (ident too long for FixedIdent, %zu > %d)\n",
+          id.c_str(), id.size(), FixedIdent::kIdentCap);
+#endif
+      ++skipped;
+      return;
+    }
+    const Ident key(id, ColumnText(stmt, 0));
     if (seen.insert(key).second) {
       data.waypoints.push_back(Waypoint{
           key, Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)}, WaypointKind::kFix});
     }
   });
+  if (skipped > 0) {
+#ifndef NDEBUG
+    std::fprintf(stderr, "dfd1: %d terminal waypoint(s) skipped (ident too long for FixedIdent)\n",
+                 skipped);
+#endif
+  }
+  return result;
 }
 
 Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
@@ -620,8 +644,10 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     // FixedIdent::kIdentCap = 7; skip legs whose waypoint ident is too long.
     std::string wp_ident = ColumnText(stmt, c.wp_ident);
     if (wp_ident.size() > 7) {
-      std::fprintf(stderr, "dfd1: skipping procedure leg with ident '%s' (too long for FixedIdent, %zu > 7)\n",
-                   wp_ident.c_str(), wp_ident.size());
+      std::fprintf(
+          stderr,
+          "dfd1: skipping procedure leg with ident '%s' (too long for FixedIdent, %zu > 7)\n",
+          wp_ident.c_str(), wp_ident.size());
       return;
     }
     leg.fix = FixedIdent::FromParts(wp_ident, ColumnText(stmt, c.wp_icao));
@@ -757,9 +783,13 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
       }
       ProcedureLeg leg;
       std::string wp_ident2 = ColumnText(stmt, c.wp_ident);
-      if (wp_ident2.size() > 7) {
-        std::fprintf(stderr, "dfd1: skipping procedure leg with ident '%s' (too long for FixedIdent, %zu > 7)\n",
-                     wp_ident2.c_str(), wp_ident2.size());
+      if (wp_ident2.size() > FixedIdent::kIdentCap) {
+#ifndef NDEBUG
+        std::fprintf(
+            stderr,
+            "dfd1: skipping procedure leg with ident '%s' (too long for FixedIdent, %zu > %d)\n",
+            wp_ident2.c_str(), wp_ident2.size(), FixedIdent::kIdentCap);
+#endif
         return;
       }
       leg.fix = FixedIdent::FromParts(wp_ident2, ColumnText(stmt, c.wp_icao));

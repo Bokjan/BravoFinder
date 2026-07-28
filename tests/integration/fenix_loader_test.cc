@@ -4,6 +4,8 @@
 // the full 329k-waypoint dataset per-check, validations are grouped into
 // SECTIONS under a shared LoadNavData call.
 
+#include "io/loaders/fenix/fenix_loader.h"
+
 #include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -13,15 +15,15 @@
 #include <memory>
 #include <string>
 
+#include "core/env.h"
 #include "io/loaders/dfd1/dfd1_loader.h"
-#include "io/loaders/fenix/fenix_loader.h"
 #include "io/loaders/loader_registry.h"
 
 namespace {
 
 std::string EnsureFenix() {
-  const char* env = std::getenv("PYXIS_NAVDATA");
-  std::string dir = env ? env : "/home/ppm/Pyxis/navdata";
+  const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA");
+  std::string dir = env ? env : "navdata";
   std::error_code ec;
   if (!std::filesystem::is_directory(dir, ec)) return {};
   const char* kNames[] = {"fenix_navdata.db3", "navdata.db3", "fenix.db3"};
@@ -34,8 +36,8 @@ std::string EnsureFenix() {
 }
 
 std::string EnsureDfd1ForFenix() {
-  const char* env = std::getenv("PYXIS_NAVDATA");
-  std::string dir = env ? env : "/home/ppm/Pyxis/navdata";
+  const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA");
+  std::string dir = env ? env : "navdata";
   std::error_code ec;
   if (!std::filesystem::is_directory(dir, ec)) return {};
   for (const auto& de : std::filesystem::directory_iterator(dir, ec))
@@ -90,12 +92,20 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
   SECTION("navaid kinds") {
     int v = 0, n = 0, d = 0;
     for (const auto& w : fd.data.waypoints) {
-      if (w.kind == bf::WaypointKind::kVor) ++v;
-      else if (w.kind == bf::WaypointKind::kNdb) ++n;
-      else if (w.kind == bf::WaypointKind::kDme) ++d;
-      if (v > 5000 && n > 5000 && d > 1000) break;  // early exit
+      if (w.kind == bf::WaypointKind::kVor)
+        ++v;
+      else if (w.kind == bf::WaypointKind::kNdb)
+        ++n;
+      else if (w.kind == bf::WaypointKind::kDme)
+        ++d;
+      if (v > 3000 && n > 3000 && d > 1000) break;  // early exit
     }
-    CHECK(v > 5000); CHECK(n > 3000); CHECK(d > 400);
+    // kVor = VOR(120)+VORTAC(474)+VOR-DME(3112) ≈ 3706
+    // kNdb = NDB(3083)+NDB-DME(20) ≈ 3103
+    // kDme = TACAN(433)+DME excl ILS(820) ≈ 1253
+    CHECK(v > 3000);
+    CHECK(n > 3000);
+    CHECK(d > 1000);
   }
   SECTION("AROKE") {
     auto it = std::find_if(fd.data.waypoints.begin(), fd.data.waypoints.end(),
@@ -107,12 +117,18 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
   SECTION("airways") {
     int lo = 0, hi = 0, bo = 0, notboth = 0;
     for (const auto& c : fd.data.airways) {
-      if (c.segment.level == bf::AirwayLevel::kLow) ++lo;
-      else if (c.segment.level == bf::AirwayLevel::kHigh) ++hi;
-      else if (c.segment.level == bf::AirwayLevel::kBoth) ++bo;
+      if (c.segment.level == bf::AirwayLevel::kLow)
+        ++lo;
+      else if (c.segment.level == bf::AirwayLevel::kHigh)
+        ++hi;
+      else if (c.segment.level == bf::AirwayLevel::kBoth)
+        ++bo;
       if (c.segment.direction != bf::AirwayDirection::kBoth) ++notboth;
     }
-    CHECK(lo > 50000); CHECK(hi > 40000); CHECK(bo > 10000); CHECK(notboth == 0);
+    CHECK(lo > 50000);
+    CHECK(hi > 40000);
+    CHECK(bo > 10000);
+    CHECK(notboth == 0);
   }
   SECTION("airports") {
     auto it = std::find_if(fd.data.airports.begin(), fd.data.airports.end(),
@@ -125,14 +141,16 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
   SECTION("holds") {
     int enrt = 0, term = 0;
     for (const auto& h : fd.data.hold_fixes) {
-      if (h.airport_icao == "ENRT") ++enrt; else ++term;
+      if (h.airport_icao == "ENRT")
+        ++enrt;
+      else
+        ++term;
       if (enrt > 1000 && term > 1000) break;
     }
-    CHECK(enrt > 1000); CHECK(term > 1000);
+    CHECK(enrt > 1000);
+    CHECK(term > 1000);
   }
-  SECTION("MORA") {
-    CHECK(fd.data.mora.MoraAt(bf::Coordinate{28.0, 87.0}) > 100);
-  }
+  SECTION("MORA") { CHECK(fd.data.mora.MoraAt(bf::Coordinate{28.0, 87.0}) > 100); }
 }
 
 TEST_CASE("fenix: LoadProcedures", "[integration][fenix]") {
@@ -142,8 +160,8 @@ TEST_CASE("fenix: LoadProcedures", "[integration][fenix]") {
   auto r = l.LoadProcedures(dir);
   REQUIRE(r);
   CHECK(r.value().size() > 10000);
-  auto it = std::find_if(r.value().begin(), r.value().end(),
-                         [](auto& a) { return a.first == "KJFK"; });
+  auto it =
+      std::find_if(r.value().begin(), r.value().end(), [](auto& a) { return a.first == "KJFK"; });
   REQUIRE(it != r.value().end());
   REQUIRE(!it->second.procedures.empty());
 }
@@ -160,22 +178,33 @@ TEST_CASE("fenix: LoadProcedure KJFK", "[integration][fenix]") {
   int tf = 0, unk = 0, alt = 0;
   for (const auto& p : r->procedures)
     for (const auto& leg : p.legs) {
-      if (leg.path_term == bf::PathTerminator::kTF) ++tf;
-      else if (leg.path_term == bf::PathTerminator::kUnknown) ++unk;
+      if (leg.path_term == bf::PathTerminator::kTF)
+        ++tf;
+      else if (leg.path_term == bf::PathTerminator::kUnknown)
+        ++unk;
       if (leg.alt.kind != bf::AltConstraintKind::kNone) ++alt;
     }
-  CHECK(tf > 50); CHECK(unk == 0); CHECK(alt > 10);
+  CHECK(tf > 50);
+  CHECK(unk == 0);
+  CHECK(alt > 10);
 }
 
 TEST_CASE("fenix/dfd1: cross-loader AROKE", "[integration][fenix]") {
   auto fd = EnsureFenix(), dd = EnsureDfd1ForFenix();
   if (fd.empty() || dd.empty()) SKIP("data missing");
-  bf::FenixLoader fl; bf::Dfd1Loader dl;
+  bf::FenixLoader fl;
+  bf::Dfd1Loader dl;
   auto fn = fl.LoadNavData(fd), dn = dl.LoadNavData(dd);
-  REQUIRE(fn); REQUIRE(dn);
-  auto f = [](auto& wps, auto& id) { for (auto& w : wps) if (w.ident.ident == id) return &w; return (bf::Waypoint*)nullptr; };
+  REQUIRE(fn);
+  REQUIRE(dn);
+  auto f = [](auto& wps, auto& id) {
+    for (auto& w : wps)
+      if (w.ident.ident == id) return &w;
+    return (bf::Waypoint*)nullptr;
+  };
   auto fa = f(fn.value().waypoints, "AROKE"), da = f(dn.value().waypoints, "AROKE");
-  REQUIRE(fa); REQUIRE(da);
+  REQUIRE(fa);
+  REQUIRE(da);
   CHECK(std::fabs(fa->coord.latitude - da->coord.latitude) < 1e-4);
   CHECK(std::fabs(fa->coord.longitude - da->coord.longitude) < 1e-4);
 }

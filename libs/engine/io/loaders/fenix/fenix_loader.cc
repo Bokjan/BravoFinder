@@ -30,7 +30,6 @@ namespace bf {
 namespace {
 
 constexpr std::string_view kLoaderName = "fenix";
-constexpr int kFeetPerFlightLevel = 100;
 constexpr int kUnknownAltitudeFt = 99999;
 
 // ---- db discovery -------------------------------------------------------
@@ -76,23 +75,91 @@ double ColumnOptDouble(sqlite3_stmt* stmt, int col) {
 
 // ---- navaid type → WaypointKind ----------------------------------------
 
-// Fenix Navaids.Type maps: 1=VOR, 2=DME, 3=NDB, 4=TACAN, 5=VOR-DME,
-// 6=VORTAC, 7=ILS/DME, 8=NDB-DME.
+// Fenix Navaids.Type → WaypointKind.  The authoritative mapping is the
+// NavaidTypes table (Type column + Desc column).  The Type column is TEXT;
+// sqlite3_column_int() converts via SQLite type affinity.
+//
+//   Type  NavaidTypes.Name        → WaypointKind   Rationale
+//     1   VOR                     → kVor           VOR / VOR-DME
+//     2   VORTAC                  → kVor           VOR primary
+//     3   TACAN                   → kDme           DME / TACAN
+//     4   VOR-DME                 → kVor           VOR / VOR-DME
+//     5   NDB                     → kNdb           NDB
+//     7   NDB-DME                 → kNdb           NDB primary, DME auxiliary
+//     8   ILS-DME                 → kOther         ILS not enroute-routable
+//     9   DME (EXCLUDING ILS-DME) → kDme           standalone DME
+//
+// Types 6 and ≥10 absent from real data; fall through to kOther.
+// Note: Type 9 DME idents are 1-3 chars (some NDB-like: 'AS','JA','MS').
+// These are standalone DMEs (UHF-paired), not NDBs — kDme is correct.
 WaypointKind NavaidKindFromType(int type_id) {
   switch (type_id) {
-    case 1:   // VOR
-    case 4:   // TACAN
-    case 5:   // VOR-DME
-    case 6:   // VORTAC
+    case 1:  // VOR
+    case 2:  // VORTAC
+    case 4:  // VOR-DME
       return WaypointKind::kVor;
-    case 2:   // DME
+    case 3:  // TACAN
+    case 9:  // DME (excluding ILS-DME)
       return WaypointKind::kDme;
-    case 3:   // NDB
-    case 8:   // NDB-DME
+    case 5:  // NDB
+    case 7:  // NDB-DME
       return WaypointKind::kNdb;
+    case 8:  // ILS-DME
     default:
       return WaypointKind::kOther;
   }
+}
+
+// ---- altitude constraint parsing ----------------------------------------
+
+// Parse a Fenix Alt text into an AltitudeConstraint.  The Fenix format is a
+// compact concatenation of ARINC 424 altitude suffixes:
+//   "<num>A" or "<num>+" → at or above
+//   "<num>-"             → at or below
+//   "<num>B"             → at or below (single B with no second part)
+//   "<upper>B<lower>A"   → between: upper bound from B, lower bound from A
+//   "<num>"  (bare)      → at
+// ARINC: B = at-or-below, A = at-or-above.  Fenix joins the two into one
+// string for between constraints.  AltitudeConstraint stores alt1_ft = upper
+// bound, alt2_ft = lower bound (ARINC convention).
+AltitudeConstraint ParseFenixAlt(const std::string& alt_text) {
+  if (alt_text.empty()) return {};
+
+  // Parse the first <num> segment.
+  size_t pos = 0;
+  while (pos < alt_text.size() && alt_text[pos] >= '0' && alt_text[pos] <= '9') ++pos;
+  if (pos == 0) return {};
+
+  int val1 = 0;
+  auto [ptr1, ec1] = std::from_chars(alt_text.data(), alt_text.data() + pos, val1);
+  if (ec1 != std::errc{}) return {};
+
+  char desc1 = (pos < alt_text.size()) ? alt_text[pos] : '\0';
+  ++pos;  // advance past the first suffix
+
+  // If the first suffix is B, look for a second <num><suffix> pair.
+  if (desc1 == 'B' && pos < alt_text.size()) {
+    size_t num2_start = pos;
+    while (pos < alt_text.size() && alt_text[pos] >= '0' && alt_text[pos] <= '9') ++pos;
+    if (pos > num2_start) {
+      int val2 = 0;
+      auto [ptr2, ec2] = std::from_chars(alt_text.data() + num2_start, alt_text.data() + pos, val2);
+      char desc2 = (pos < alt_text.size()) ? alt_text[pos] : '\0';
+      if (ec2 == std::errc{} && (desc2 == 'A' || desc2 == '+')) {
+        // "<upper>B<lower>A" → between
+        return AltitudeConstraint{AltConstraintKind::kBetween, val1, val2};
+      }
+    }
+  }
+
+  // Single-segment format.
+  AltConstraintKind kind = AltConstraintKind::kAt;
+  if (desc1 == '+' || desc1 == 'A') {
+    kind = AltConstraintKind::kAtOrAbove;
+  } else if (desc1 == '-' || desc1 == 'B') {
+    kind = AltConstraintKind::kAtOrBelow;
+  }
+  return AltitudeConstraint{kind, val1, 0};
 }
 
 // ---- cycle extraction ---------------------------------------------------
@@ -134,8 +201,8 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
   }
 
   // 0=ID 1=Ident 2=Latitude 3=Longtitude 4=NavaidID
-  Result<SqliteStmt> s = Prepare(conn,
-      "SELECT w.ID, w.Ident, w.Latitude, w.Longtitude, w.NavaidID FROM Waypoints w");
+  Result<SqliteStmt> s =
+      Prepare(conn, "SELECT w.ID, w.Ident, w.Latitude, w.Longtitude, w.NavaidID FROM Waypoints w");
   if (!s) return Result<void>::Err(s.error());
 
   sqlite3_stmt* stmt = s.value().get();
@@ -147,9 +214,12 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
     double lon = ColumnDouble(stmt, 3);
     int nav_id = ColumnOptInt(stmt, 4);
 
-    if (ident_str.size() > 7) {
-      std::fprintf(stderr, "fenix: skipping waypoint '%s' (ident too long for FixedIdent, %zu > 7)\n",
-                   ident_str.c_str(), ident_str.size());
+    if (ident_str.size() > FixedIdent::kIdentCap) {
+#ifndef NDEBUG
+      std::fprintf(stderr,
+                   "fenix: skipping waypoint '%s' (ident too long for FixedIdent, %zu > %d)\n",
+                   ident_str.c_str(), ident_str.size(), FixedIdent::kIdentCap);
+#endif
       ++skipped_long;
       continue;
     }
@@ -164,12 +234,13 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
       if (nit != navaid_type_of.end()) kind = NavaidKindFromType(nit->second);
     }
 
-    data.waypoints.push_back(Waypoint{
-        Ident{ident_str, region}, Coordinate{lat, lon}, kind});
+    data.waypoints.push_back(Waypoint{Ident{ident_str, region}, Coordinate{lat, lon}, kind});
   }
   if (skipped_long > 0) {
+#ifndef NDEBUG
     std::fprintf(stderr, "fenix: %d waypoint(s) skipped (ident too long for FixedIdent)\n",
                  skipped_long);
+#endif
   }
   return Result<void>::Ok();
 }
@@ -179,8 +250,7 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
 Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
   // Navigraph NavaidDetail, persisted for display and lookup-only queries.
   // 0=Ident 1=Type 2=Elevation 3=Freq 4=Range
-  Result<SqliteStmt> s = Prepare(conn,
-      "SELECT Ident, Type, Elevation, Freq, Range FROM Navaids");
+  Result<SqliteStmt> s = Prepare(conn, "SELECT Ident, Type, Elevation, Freq, Range FROM Navaids");
   if (!s) return Result<void>::Err(s.error());
 
   sqlite3_stmt* stmt = s.value().get();
@@ -214,8 +284,8 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   std::unordered_map<int, Ident> wp_by_id;
   {
     Result<SqliteStmt> s = Prepare(conn,
-        "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
-        "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
+                                   "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
+                                   "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
     if (!s) return Result<void>::Err(s.error());
     sqlite3_stmt* stmt = s.value().get();
     for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
@@ -225,8 +295,8 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
 
   // 0=AirwayID 1=Level 2=Waypoint1ID 3=Waypoint2ID 4=IsStart 5=IsEnd
   Result<SqliteStmt> s = Prepare(conn,
-      "SELECT al.AirwayID, al.Level, al.Waypoint1ID, al.Waypoint2ID, "
-      "al.IsStart, al.IsEnd FROM AirwayLegs al");
+                                 "SELECT al.AirwayID, al.Level, al.Waypoint1ID, al.Waypoint2ID, "
+                                 "al.IsStart, al.IsEnd FROM AirwayLegs al");
   if (!s) return Result<void>::Err(s.error());
 
   sqlite3_stmt* stmt = s.value().get();
@@ -257,20 +327,38 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
 // ---- airports -----------------------------------------------------------
 
 Result<void> LoadAirports(sqlite3* conn, NavData& data) {
+  // Build an ICAO → region mapping from WaypointLookup.Country.  Each airport
+  // inherits the Country of the waypoints its terminal procedures reference,
+  // keeping the region system consistent between airports and waypoints.
+  // Airports without procedures fall back to the empty region.
+  std::unordered_map<std::string, std::string> icao_region;
+  {
+    Result<SqliteStmt> ms = Prepare(conn,
+                                    "SELECT DISTINCT a.ICAO, wl.Country FROM Airports a "
+                                    "JOIN Terminals t ON t.AirportID = a.ID "
+                                    "JOIN TerminalLegs tl ON tl.TerminalID = t.ID "
+                                    "JOIN WaypointLookup wl ON wl.ID = tl.WptID "
+                                    "WHERE wl.Country != ''");
+    if (ms) {
+      sqlite3_stmt* mstmt = ms.value().get();
+      for (Result<bool> row = Step(mstmt); row && row.value(); row = Step(mstmt))
+        icao_region.try_emplace(ColumnText(mstmt, 0), ColumnText(mstmt, 1));
+    }
+  }
+
   // 0=ICAO 1=Latitude 2=Longtitude 3=Elevation
-  Result<SqliteStmt> s = Prepare(conn,
-      "SELECT ICAO, Latitude, Longtitude, Elevation FROM Airports");
+  Result<SqliteStmt> s =
+      Prepare(conn, "SELECT ICAO, Latitude, Longtitude, Elevation FROM Airports");
   if (!s) return Result<void>::Err(s.error());
 
   sqlite3_stmt* stmt = s.value().get();
   for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
     std::string icao = ColumnText(stmt, 0);
-    // Derive the two-letter ICAO region from the airport identifier.
-    std::string region = icao.size() >= 2 ? icao.substr(0, 2) : "";
-    data.airports.push_back(Airport{
-        icao, region,
-        Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)},
-        ColumnInt(stmt, 3)});
+    auto rit = icao_region.find(icao);
+    std::string region = (rit != icao_region.end()) ? rit->second : "";
+    data.airports.push_back(Airport{icao, region,
+                                    Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)},
+                                    ColumnInt(stmt, 3)});
   }
   return Result<void>::Ok();
 }
@@ -282,9 +370,9 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
   // 3=inbound_holding_course 4=leg_time 5=leg_length 6=turn_direction
   // 7=minimum_altitude 8=maximum_altitude 9=holding_speed
   Result<SqliteStmt> s = Prepare(conn,
-      "SELECT waypoint_identifier, region_code, icao_code, "
-      "inbound_holding_course, leg_time, leg_length, turn_direction, "
-      "minimum_altitude, maximum_altitude, holding_speed FROM Holdings");
+                                 "SELECT waypoint_identifier, region_code, icao_code, "
+                                 "inbound_holding_course, leg_time, leg_length, turn_direction, "
+                                 "minimum_altitude, maximum_altitude, holding_speed FROM Holdings");
   if (!s) return Result<void>::Err(s.error());
 
   sqlite3_stmt* stmt = s.value().get();
@@ -315,12 +403,13 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
   // Fenix GridMora: one row per 1° lat × 30 columns (mora01..mora30).
   // Values are hundreds of feet as text (e.g. "010" = 1000 ft).
   // 0=starting_latitude 1=starting_longitude 2..31=mora01..mora30
-  Result<SqliteStmt> s = Prepare(conn,
-      "SELECT starting_latitude, starting_longitude, "
-      "mora01,mora02,mora03,mora04,mora05,mora06,mora07,mora08,mora09,mora10,"
-      "mora11,mora12,mora13,mora14,mora15,mora16,mora17,mora18,mora19,mora20,"
-      "mora21,mora22,mora23,mora24,mora25,mora26,mora27,mora28,mora29,mora30 "
-      "FROM GridMora ORDER BY starting_latitude, starting_longitude");
+  Result<SqliteStmt> s =
+      Prepare(conn,
+              "SELECT starting_latitude, starting_longitude, "
+              "mora01,mora02,mora03,mora04,mora05,mora06,mora07,mora08,mora09,mora10,"
+              "mora11,mora12,mora13,mora14,mora15,mora16,mora17,mora18,mora19,mora20,"
+              "mora21,mora22,mora23,mora24,mora25,mora26,mora27,mora28,mora29,mora30 "
+              "FROM GridMora ORDER BY starting_latitude, starting_longitude");
   if (!s) return Result<void>::Err(s.error());
 
   sqlite3_stmt* stmt = s.value().get();
@@ -368,18 +457,18 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
 Result<std::unordered_map<int, std::vector<Runway>>> LoadAllRunways(sqlite3* conn) {
   std::unordered_map<int, std::vector<Runway>> by_airport;
   // 0=AirportID 1=Ident 2=Latitude 3=Longtitude 4=Elevation
-  Result<SqliteStmt> s = Prepare(conn,
-      "SELECT AirportID, Ident, Latitude, Longtitude, Elevation FROM Runways "
-      "ORDER BY AirportID");
+  Result<SqliteStmt> s =
+      Prepare(conn,
+              "SELECT AirportID, Ident, Latitude, Longtitude, Elevation FROM Runways "
+              "ORDER BY AirportID");
   if (!s) {
     return Result<std::unordered_map<int, std::vector<Runway>>>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
   Result<void> rows = ForEachRow(stmt, [&]() {
-    by_airport[ColumnInt(stmt, 0)].push_back(Runway{
-        "RW" + ColumnText(stmt, 1),
-        Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)},
-        ColumnInt(stmt, 4)});
+    by_airport[ColumnInt(stmt, 0)].push_back(
+        Runway{"RW" + ColumnText(stmt, 1), Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)},
+               ColumnInt(stmt, 4)});
   });
   if (!rows) {
     return Result<std::unordered_map<int, std::vector<Runway>>>::Err(rows.error());
@@ -394,16 +483,16 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
   // One full scan of Terminals + TerminalLegs, grouped by airport then terminal.
   // Build the airport ICAO lookup on the fly from the Airports table.
   Result<SqliteStmt> ts = Prepare(conn,
-      "SELECT t.ID, t.AirportID, t.Proc, t.Name, t.Rwy "
-      "FROM Terminals t ORDER BY t.AirportID, t.ID");
+                                  "SELECT t.ID, t.AirportID, t.Proc, t.Name, t.Rwy "
+                                  "FROM Terminals t ORDER BY t.AirportID, t.ID");
   if (!ts) return Result<void>::Err(ts.error());
 
   // Pre-build waypoint ident/region lookup for leg fix resolution.
   std::unordered_map<int, std::pair<std::string, std::string>> wp_info;
   {
     Result<SqliteStmt> ws = Prepare(conn,
-        "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
-        "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
+                                    "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
+                                    "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
     if (ws) {
       sqlite3_stmt* stmt = ws.value().get();
       for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
@@ -423,18 +512,19 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
   std::unordered_map<int, std::vector<LegGroup>> leg_groups;
   {
     Result<SqliteStmt> ls = Prepare(conn,
-        "SELECT tl.TerminalID, tl.Transition, tl.TrackCode, tl.Course, "
-        "tl.Distance, tl.Alt, tl.TurnDir, tl.WptID, ex.SpeedLimit "
-        "FROM TerminalLegs tl "
-        "LEFT JOIN TerminalLegsEx ex ON tl.ID = ex.ID "
-        "ORDER BY tl.TerminalID, tl.ID");
+                                    "SELECT tl.TerminalID, tl.Transition, tl.TrackCode, tl.Course, "
+                                    "tl.Distance, tl.Alt, tl.TurnDir, tl.WptID, ex.SpeedLimit "
+                                    "FROM TerminalLegs tl "
+                                    "LEFT JOIN TerminalLegsEx ex ON tl.ID = ex.ID "
+                                    "ORDER BY tl.TerminalID, tl.ID");
     if (!ls) return Result<void>::Err(ls.error());
     sqlite3_stmt* stmt = ls.value().get();
-    std::string prev_trans;
     Result<void> rows = ForEachRow(stmt, [&]() {
       ProcedureLeg leg;
       std::string trans = ColumnText(stmt, 1);
       leg.path_term = ParsePathTerminator(ColumnText(stmt, 2));
+      // Unknown TrackCode → skip entire leg silently.  Real data has
+      // 'RWYTF'×4 and 'RWY15'×2 — these legs are discarded with no signal.
       if (leg.path_term == PathTerminator::kUnknown) return;
 
       // Resolve leg fix ident from WptID.
@@ -444,7 +534,7 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
         if (wit != wp_info.end()) {
           std::string ident = wit->second.first;
           std::string region = wit->second.second;
-          if (ident.size() <= 7) {  // FixedIdent::kIdentCap
+          if (ident.size() <= FixedIdent::kIdentCap) {
             leg.fix = FixedIdent::FromParts(ident, region);
           }
         }
@@ -452,28 +542,19 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
 
       leg.course_deg = ColumnDouble(stmt, 3);
       leg.distance_nm = ColumnOptDouble(stmt, 4);
-      // Fenix altitude: numeric prefix = feet, trailing letter = constraint.
-      std::string alt_text = ColumnText(stmt, 5);
-      if (!alt_text.empty()) {
-        int alt_ft = 0;
-        size_t num_end = alt_text.find_first_not_of("0123456789");
-        auto num_part = (num_end == std::string::npos)
-                            ? std::string_view(alt_text)
-                            : std::string_view(alt_text.data(), num_end);
-        auto [ptr, ec] = std::from_chars(num_part.data(), num_part.data() + num_part.size(), alt_ft);
-        if (ec == std::errc{}) {
-          char desc = (num_end != std::string::npos) ? alt_text[num_end] : '\0';
-          AltConstraintKind kind = AltConstraintKind::kAt;
-          if (desc == '+' || desc == 'A') kind = AltConstraintKind::kAtOrAbove;
-          else if (desc == '-') kind = AltConstraintKind::kAtOrBelow;
-          else if (desc == 'B') kind = AltConstraintKind::kBetween;
-          leg.alt = AltitudeConstraint{kind, alt_ft, 0};
-        }
-      }
+      leg.alt = ParseFenixAlt(ColumnText(stmt, 5));
       std::string td = ColumnText(stmt, 6);
+      // TurnDir: 'L'/'R' only; anything else (e.g. 'E' ×114 in real
+      // data) becomes '\0' — the turn direction is silently dropped.
+      // TurnDir 'E' (114 rows, DF/VM/CF legs only, no airport clustering)
+      // appears to mean "either" — '\0' fallback is acceptable.
       leg.turn_dir = (td == "L") ? 'L' : (td == "R") ? 'R' : '\0';
       double spd = ColumnOptDouble(stmt, 8);
       leg.speed_limit_kt = static_cast<uint16_t>(spd > 0.0 ? spd : 0.0);
+      // NOTE: Fenix schema has no RNP column in TerminalLegs or
+      // TerminalLegsEx — ProcedureLeg.rnp_centinm stays 0.  dfd1, dfd2,
+      // and xplane12 all load this field; Fenix data simply omits it.
+      // dfd1/dfd2/xplane12 all load this field; confirm whether Fenix omits it.
 
       int tid = ColumnInt(stmt, 0);
       auto& groups = leg_groups[tid];
@@ -488,7 +569,7 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
   // Pre-index common (ALL) legs per TerminalID for appending to each transition.
   std::unordered_map<int, std::vector<ProcedureLeg>> common_legs;
   for (auto& [tid, groups] : leg_groups) {
-    for (auto it = groups.begin(); it != groups.end(); ) {
+    for (auto it = groups.begin(); it != groups.end();) {
       if (it->transition == "ALL") {
         common_legs[tid] = std::move(it->legs);
         it = groups.erase(it);
@@ -521,12 +602,18 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
     }
 
     std::string pt = ColumnText(stmt, 2);
+    // Fenix Proc: '2'=SID, '1'=STAR.  Everything else (e.g. '3' in real
+    // data, ~34k rows) maps to kApproach silently — no diagnostic emitted.
+    // Proc='3' (~34k rows) is RNAV approach (runway-specific, e.g. "R18").
+    // No other non-1/2 Proc values observed — kApproach is correct.
     ProcedureType ptype;
-    if (pt == "2") ptype = ProcedureType::kSid;
-    else if (pt == "1") ptype = ProcedureType::kStar;
-    else ptype = ProcedureType::kApproach;
+    if (pt == "2")
+      ptype = ProcedureType::kSid;
+    else if (pt == "1")
+      ptype = ProcedureType::kStar;
+    else
+      ptype = ProcedureType::kApproach;
     std::string name = ColumnText(stmt, 3);
-    std::string rwy = ColumnText(stmt, 4);
 
     auto git = leg_groups.find(tid);
     if (git == leg_groups.end()) return;
@@ -663,47 +750,68 @@ Result<std::vector<AirportProcedureData>> FenixLoader::LoadProcedures(
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(out));
 }
 
-std::optional<CifpData> FenixLoader::LoadProcedure(const std::string& source_dir,
-                                                    const std::string& icao) const {
-  Result<std::string> db_path = FindFenixDb(source_dir);
-  if (!db_path) return std::nullopt;
-
-  Result<sqlite3*> conn_result = AcquireConn(kLoaderName, db_path.value());
-  if (!conn_result) return std::nullopt;
-  sqlite3* conn = conn_result.value();
-
-  // Resolve airport ID from ICAO code.
+// Load procedures for a single airport (LoadProcedure path).  Shares the
+// same transition grouping / ALL-split logic as the bulk LoadProcTable so
+// both paths produce identical procedure structures.  Returns nullopt when
+// the airport has no procedures or runways.
+std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& icao) {
   int airport_id = -1;
   {
     Result<SqliteStmt> s = Prepare(conn, "SELECT ID FROM Airports WHERE ICAO = ?");
     if (!s) return std::nullopt;
     sqlite3_bind_text(s.value().get(), 1, icao.c_str(), -1, SQLITE_TRANSIENT);
     Result<bool> row = Step(s.value().get());
-    if (row && row.value()) {
-      airport_id = ColumnInt(s.value().get(), 0);
-    }
+    if (row && row.value()) airport_id = ColumnInt(s.value().get(), 0);
   }
   if (airport_id < 0) return std::nullopt;
 
-  CifpData cifp;
-  // Runways for this airport.
+  // Collect terminal IDs for this airport so we can filter the full leg scan.
+  std::unordered_set<int> airport_tids;
+  std::unordered_map<int, Procedure> proc_by_tid;
   {
-    Result<SqliteStmt> rs = Prepare(conn,
-        "SELECT Ident, Latitude, Longtitude, Elevation FROM Runways WHERE AirportID = ?");
+    Result<SqliteStmt> ts =
+        Prepare(conn, "SELECT ID, Proc, Name, Rwy FROM Terminals WHERE AirportID = ?");
+    if (!ts) return std::nullopt;
+    sqlite3_bind_int(ts.value().get(), 1, airport_id);
+    sqlite3_stmt* stmt = ts.value().get();
+    for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
+      int tid = ColumnInt(stmt, 0);
+      airport_tids.insert(tid);
+      Procedure proc;
+      std::string pt = ColumnText(stmt, 1);
+      if (pt == "2")
+        proc.type = ProcedureType::kSid;
+      else if (pt == "1")
+        proc.type = ProcedureType::kStar;
+      else  // e.g. '3' in real data → kApproach silently
+        proc.type = ProcedureType::kApproach;
+      proc.name = ColumnText(stmt, 2);
+      proc_by_tid[tid] = proc;
+    }
+  }
+
+  if (airport_tids.empty()) {
+    // No procedures, but the airport may still have runways.
+    CifpData cifp;
+    Result<SqliteStmt> rs = Prepare(
+        conn, "SELECT Ident, Latitude, Longtitude, Elevation FROM Runways WHERE AirportID = ?");
     if (rs) {
       sqlite3_bind_int(rs.value().get(), 1, airport_id);
       sqlite3_stmt* stmt = rs.value().get();
       for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
         cifp.runways.push_back(Runway{"RW" + ColumnText(stmt, 0),
-            Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)}, ColumnInt(stmt, 3)});
+                                      Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)},
+                                      ColumnInt(stmt, 3)});
     }
+    return cifp.runways.empty() ? std::nullopt : std::optional<CifpData>(std::move(cifp));
   }
-  // Build waypoint ident/region lookup for leg fix resolution.
+
+  // Build waypoint ident/region lookup table.
   std::unordered_map<int, std::pair<std::string, std::string>> wp_info;
   {
     Result<SqliteStmt> ws = Prepare(conn,
-        "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
-        "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
+                                    "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
+                                    "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
     if (ws) {
       sqlite3_stmt* stmt = ws.value().get();
       for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
@@ -711,80 +819,132 @@ std::optional<CifpData> FenixLoader::LoadProcedure(const std::string& source_dir
     }
   }
 
-  // Procedures for this airport (dfd1-style per-airport query).
+  // Use exactly the same leg SELECT as LoadProcTable (including Transition),
+  // so column indices are identical and column-offset bugs are impossible.
+  // Filter to this airport's terminal IDs in code.
+  struct LegGroup {
+    std::vector<ProcedureLeg> legs;
+    std::string transition;
+    std::string runway;
+  };
+  std::unordered_map<int, std::vector<LegGroup>> leg_groups;
   {
-    Result<SqliteStmt> ts = Prepare(conn,
-        "SELECT ID, Proc, Name, Rwy FROM Terminals WHERE AirportID = ?");
-    if (!ts) return std::nullopt;
-    sqlite3_bind_int(ts.value().get(), 1, airport_id);
-
-    std::unordered_map<int, Procedure> procs;
-    sqlite3_stmt* stmt = ts.value().get();
+    Result<SqliteStmt> ls = Prepare(conn,
+                                    "SELECT tl.TerminalID, tl.Transition, tl.TrackCode, tl.Course, "
+                                    "tl.Distance, tl.Alt, tl.TurnDir, tl.WptID, ex.SpeedLimit "
+                                    "FROM TerminalLegs tl "
+                                    "LEFT JOIN TerminalLegsEx ex ON tl.ID = ex.ID "
+                                    "ORDER BY tl.TerminalID, tl.ID");
+    if (!ls) return std::nullopt;
+    sqlite3_stmt* stmt = ls.value().get();
     for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
       int tid = ColumnInt(stmt, 0);
-      Procedure proc;
-      std::string pt = ColumnText(stmt, 1);
-      if (pt == "2") proc.type = ProcedureType::kSid;
-      else if (pt == "1") proc.type = ProcedureType::kStar;
-      else proc.type = ProcedureType::kApproach;
-      proc.name = ColumnText(stmt, 2);
-      proc.transition_ident = "ALL";
-      proc.runway = ColumnText(stmt, 3);
-      procs[tid] = proc;
-    }
+      if (airport_tids.find(tid) == airport_tids.end()) continue;
 
-    // Load legs, including WptID for fix resolution.
-    Result<SqliteStmt> ls = Prepare(conn,
-        "SELECT tl.TerminalID, tl.TrackCode, tl.Course, tl.Distance, tl.Alt, "
-        "tl.TurnDir, tl.WptID, ex.SpeedLimit "
-        "FROM TerminalLegs tl LEFT JOIN TerminalLegsEx ex ON tl.ID = ex.ID "
-        "ORDER BY tl.TerminalID, tl.ID");
-    if (!ls) return std::nullopt;
-    sqlite3_stmt* lst = ls.value().get();
-    for (Result<bool> row = Step(lst); row && row.value(); row = Step(lst)) {
-      int tid = ColumnInt(lst, 0);
-      auto it = procs.find(tid);
-      if (it == procs.end()) continue;
       ProcedureLeg leg;
-      leg.path_term = ParsePathTerminator(ColumnText(lst, 1));
+      std::string trans = ColumnText(stmt, 1);
+      leg.path_term = ParsePathTerminator(ColumnText(stmt, 2));
       if (leg.path_term == PathTerminator::kUnknown) continue;
 
-      // Resolve fix ident from WptID (column 5, shifted from TurnDir).
-      int wpt_id = ColumnOptInt(lst, 5);
+      int wpt_id = ColumnOptInt(stmt, 7);
       if (wpt_id > 0) {
         auto wit = wp_info.find(wpt_id);
-        if (wit != wp_info.end() && wit->second.first.size() <= 7)
+        if (wit != wp_info.end() && wit->second.first.size() <= FixedIdent::kIdentCap)
           leg.fix = FixedIdent::FromParts(wit->second.first, wit->second.second);
       }
 
-      leg.course_deg = ColumnDouble(lst, 2);
-      leg.distance_nm = ColumnOptDouble(lst, 3);
-      std::string alt_text = ColumnText(lst, 4);
-      if (!alt_text.empty()) {
-        int alt_ft = 0;
-        size_t num_end = alt_text.find_first_not_of("0123456789");
-        auto num_part = (num_end == std::string::npos) ? std::string_view(alt_text)
-                                                        : std::string_view(alt_text.data(), num_end);
-        auto [ptr, ec] = std::from_chars(num_part.data(), num_part.data() + num_part.size(), alt_ft);
-        if (ec == std::errc{}) {
-          char desc = (num_end != std::string::npos) ? alt_text[num_end] : '\0';
-          AltConstraintKind kind = AltConstraintKind::kAt;
-          if (desc == '+' || desc == 'A') kind = AltConstraintKind::kAtOrAbove;
-          else if (desc == '-') kind = AltConstraintKind::kAtOrBelow;
-          else if (desc == 'B') kind = AltConstraintKind::kBetween;
-          leg.alt = AltitudeConstraint{kind, alt_ft, 0};
-        }
-      }
-      std::string td = ColumnText(lst, 5);
+      leg.course_deg = ColumnDouble(stmt, 3);
+      leg.distance_nm = ColumnOptDouble(stmt, 4);
+      leg.alt = ParseFenixAlt(ColumnText(stmt, 5));
+      std::string td = ColumnText(stmt, 6);
+      // TurnDir: 'L'/'R' only; anything else (e.g. 'E' ×114 in real
+      // data) becomes '\0' — the turn direction is silently dropped.
+      // TurnDir 'E' (114 rows, DF/VM/CF legs only, no airport clustering)
+      // appears to mean "either" — '\0' fallback is acceptable.
       leg.turn_dir = (td == "L") ? 'L' : (td == "R") ? 'R' : '\0';
-      double spd = ColumnOptDouble(lst, 6);
+      double spd = ColumnOptDouble(stmt, 8);
       leg.speed_limit_kt = static_cast<uint16_t>(spd > 0.0 ? spd : 0.0);
-      it->second.legs.push_back(leg);
+      // NOTE: Fenix schema has no RNP column in TerminalLegs or
+      // TerminalLegsEx — ProcedureLeg.rnp_centinm stays 0.  dfd1, dfd2,
+      // and xplane12 all load this field; Fenix data simply omits it.
+      // dfd1/dfd2/xplane12 all load this field; confirm whether Fenix omits it.
+
+      auto& groups = leg_groups[tid];
+      if (groups.empty() || groups.back().transition != trans) {
+        groups.push_back(LegGroup{{}, trans, trans});
+      }
+      groups.back().legs.push_back(std::move(leg));
     }
-    for (auto& kv : procs)
-      if (!kv.second.legs.empty()) cifp.procedures.push_back(std::move(kv.second));
   }
+
+  // Split ALL transitions into common legs; append to each per-runway procedure.
+  std::unordered_map<int, std::vector<ProcedureLeg>> common_legs;
+  for (auto& [tid, groups] : leg_groups) {
+    for (auto it = groups.begin(); it != groups.end();) {
+      if (it->transition == "ALL") {
+        common_legs[tid] = std::move(it->legs);
+        it = groups.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  CifpData cifp;
+  for (auto& [tid, groups] : leg_groups) {
+    auto pit = proc_by_tid.find(tid);
+    if (pit == proc_by_tid.end()) continue;
+
+    auto cit = common_legs.find(tid);
+
+    // Common-segment procedure (transition="", no runway).
+    if (cit != common_legs.end() && !cit->second.empty()) {
+      Procedure proc = pit->second;
+      proc.transition_ident = "";
+      proc.runway = "";
+      proc.legs = cit->second;
+      cifp.procedures.push_back(std::move(proc));
+    }
+
+    // Per-runway-transition procedure with common legs appended.
+    for (auto& group : groups) {
+      Procedure proc = pit->second;
+      proc.transition_ident = group.transition;
+      proc.runway = group.runway;
+      proc.legs = std::move(group.legs);
+      if (cit != common_legs.end())
+        proc.legs.insert(proc.legs.end(), cit->second.begin(), cit->second.end());
+      cifp.procedures.push_back(std::move(proc));
+    }
+  }
+
+  // Runways.
+  {
+    Result<SqliteStmt> rs = Prepare(
+        conn, "SELECT Ident, Latitude, Longtitude, Elevation FROM Runways WHERE AirportID = ?");
+    if (rs) {
+      sqlite3_bind_int(rs.value().get(), 1, airport_id);
+      sqlite3_stmt* stmt = rs.value().get();
+      for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
+        cifp.runways.push_back(Runway{"RW" + ColumnText(stmt, 0),
+                                      Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)},
+                                      ColumnInt(stmt, 3)});
+    }
+  }
+
+  if (cifp.procedures.empty() && cifp.runways.empty()) return std::nullopt;
   return cifp;
+}
+
+std::optional<CifpData> FenixLoader::LoadProcedure(const std::string& source_dir,
+                                                   const std::string& icao) const {
+  Result<std::string> db_path = FindFenixDb(source_dir);
+  if (!db_path) return std::nullopt;
+
+  Result<sqlite3*> conn_result = AcquireConn(kLoaderName, db_path.value());
+  if (!conn_result) return std::nullopt;
+
+  return LoadAirportProcedures(conn_result.value(), icao);
 }
 
 }  // namespace bf
