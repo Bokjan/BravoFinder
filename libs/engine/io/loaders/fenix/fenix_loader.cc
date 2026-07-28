@@ -3,6 +3,7 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
@@ -375,8 +376,9 @@ Result<void> LoadAirports(sqlite3* conn, NavData& data) {
                                     "WHERE wl.Country != ''");
     if (ms) {
       sqlite3_stmt* mstmt = ms.value().get();
-      for (Result<bool> row = Step(mstmt); row && row.value(); row = Step(mstmt))
+      for (Result<bool> row = Step(mstmt); row && row.value(); row = Step(mstmt)) {
         icao_region.try_emplace(ColumnText(mstmt, 0), ColumnText(mstmt, 1));
+      }
     }
   }
 
@@ -502,66 +504,51 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
 // (dfd1 / dfd2) or X-Plane 12.
 // ============================================================================
 
-// ---- runways (single scan, indexed by airport ID) -----------------------
+// ---- shared terminal-procedure core (single scan) -----------------------
+//
+// Both the bulk LoadProcedures path and the single-airport LoadProcedure path
+// build procedures from the same Terminals + TerminalLegs + Runways tables.
+// To keep the two paths from diverging (and to preserve the dfd1-style single
+// TerminalLegs scan for cache-build performance), they share one core:
+// BuildAirportProcedures does a single Terminals scan, a single TerminalLegs
+// scan, and a single Runways scan, then emits one CifpData per airport via the
+// shared EmitTerminalProcedure.
 
-Result<std::unordered_map<int, std::vector<Runway>>> LoadAllRunways(sqlite3* conn) {
-  std::unordered_map<int, std::vector<Runway>> by_airport;
-  // 0=AirportID 1=Ident 2=Latitude 3=Longtitude 4=Elevation
-  Result<SqliteStmt> s =
-      Prepare(conn,
-              "SELECT AirportID, Ident, Latitude, Longtitude, Elevation FROM Runways "
-              "ORDER BY AirportID");
-  if (!s) {
-    return Result<std::unordered_map<int, std::vector<Runway>>>::Err(s.error());
-  }
-  sqlite3_stmt* stmt = s.value().get();
-  Result<void> rows = ForEachRow(stmt, [&]() {
-    by_airport[ColumnInt(stmt, 0)].push_back(
-        Runway{"RW" + ColumnText(stmt, 1), Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)},
-               ColumnInt(stmt, 4)});
-  });
-  if (!rows) {
-    return Result<std::unordered_map<int, std::vector<Runway>>>::Err(rows.error());
-  }
-  return Result<std::unordered_map<int, std::vector<Runway>>>::Ok(std::move(by_airport));
-}
+// One procedure's legs grouped by transition.  `runway` mirrors `transition`
+// (Fenix stores the runway in the Transition column, e.g. "RW18L"); "ALL" legs
+// are split out into common_legs below.
+struct LegGroup {
+  std::vector<ProcedureLeg> legs;
+  std::string transition;
+  std::string runway;
+};
 
-// ---- terminal procedures (single scan, dfd1-style) -----------------------
-
-Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out,
-                           std::unordered_map<int, std::string>& icao_of) {
-  // One full scan of Terminals + TerminalLegs, grouped by airport then terminal.
-  // Build the airport ICAO lookup on the fly from the Airports table.
-  Result<SqliteStmt> ts = Prepare(conn,
-                                  "SELECT t.ID, t.AirportID, t.Proc, t.Name, t.Rwy "
-                                  "FROM Terminals t ORDER BY t.AirportID, t.ID");
-  if (!ts) {
-    return Result<void>::Err(ts.error());
-  }
-
-  // Pre-build waypoint ident/region lookup for leg fix resolution.
+// One TerminalLegs scan → leg_groups (keyed by TerminalID) + common_legs
+// (the "ALL" transition legs, appended to every per-runway procedure).
+// When `allowed_tids` is non-null, only legs whose TerminalID is in the set
+// are processed (the single-airport path); when null, every leg is processed
+// (the bulk path).  A single scan either way — no per-airport re-scan.
+Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowed_tids,
+                            std::unordered_map<int, std::vector<LegGroup>>& leg_groups,
+                            std::unordered_map<int, std::vector<ProcedureLeg>>& common_legs) {
+  // Waypoint ident/region lookup for leg-fix resolution.
   std::unordered_map<int, std::pair<std::string, std::string>> wp_info;
   {
     Result<SqliteStmt> ws = Prepare(conn,
                                     "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
                                     "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
-    if (ws) {
-      sqlite3_stmt* stmt = ws.value().get();
-      for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
-        wp_info[ColumnInt(stmt, 0)] = {ColumnText(stmt, 1), ColumnText(stmt, 2)};
+    if (!ws) {
+      return Result<void>::Err(ws.error());
+    }
+    sqlite3_stmt* stmt = ws.value().get();
+    Result<void> rows = ForEachRow(
+        stmt, [&]() { wp_info[ColumnInt(stmt, 0)] = {ColumnText(stmt, 1), ColumnText(stmt, 2)}; });
+    if (!rows) {
+      return Result<void>::Err(rows.error());
     }
   }
 
-  // Pre-index TerminalLegs by (TerminalID, Transition). Fenix procedures
-  // interleave runway-specific legs (Transition=RW18L etc.) with common legs
-  // (Transition=ALL). We split them into separate Procedures keyed by
-  // terminal + transition, matching the DFD/PMDG per-runway structure.
-  struct LegGroup {
-    std::vector<ProcedureLeg> legs;
-    std::string transition;
-    std::string runway;
-  };
-  std::unordered_map<int, std::vector<LegGroup>> leg_groups;
+  // Scan the whole TerminalLegs table once; group by TerminalID + transition.
   {
     Result<SqliteStmt> ls = Prepare(conn,
                                     "SELECT tl.TerminalID, tl.Transition, tl.TrackCode, tl.Course, "
@@ -574,22 +561,26 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
     }
     sqlite3_stmt* stmt = ls.value().get();
     Result<void> rows = ForEachRow(stmt, [&]() {
-      ProcedureLeg leg;
+      int tid = ColumnInt(stmt, 0);
+      if (allowed_tids && allowed_tids->find(tid) == allowed_tids->end()) {
+        return;
+      }
+
       std::string trans = ColumnText(stmt, 1);
+      ProcedureLeg leg;
       leg.path_term = ParsePathTerminator(ColumnText(stmt, 2));
-      // Unknown TrackCode → skip entire leg silently.  Real data has
-      // 'RWYTF'×4 and 'RWY15'×2 — these legs are discarded with no signal.
+      // Unknown TrackCode → skip the entire leg.  Real data has 'RWYTF'×4 and
+      // 'RWY15'×2 — these legs are discarded silently.
       if (leg.path_term == PathTerminator::kUnknown) {
         return;
       }
 
-      // Resolve leg fix ident from WptID.
       int wpt_id = ColumnOptInt(stmt, 7);
       if (wpt_id > 0) {
         auto wit = wp_info.find(wpt_id);
         if (wit != wp_info.end()) {
-          std::string ident = wit->second.first;
-          std::string region = wit->second.second;
+          const std::string& ident = wit->second.first;
+          const std::string& region = wit->second.second;
           if (ident.size() <= FixedIdent::kIdentCap) {
             leg.fix = FixedIdent::FromParts(ident, region);
           }
@@ -600,19 +591,14 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
       leg.distance_nm = ColumnOptDouble(stmt, 4);
       leg.alt = ParseFenixAlt(ColumnText(stmt, 5));
       std::string td = ColumnText(stmt, 6);
-      // TurnDir: 'L'/'R' only; anything else (e.g. 'E' ×114 in real
-      // data) becomes '\0' — the turn direction is silently dropped.
-      // TurnDir 'E' (114 rows, DF/VM/CF legs only, no airport clustering)
-      // appears to mean "either" — '\0' fallback is acceptable.
+      // TurnDir: 'L'/'R' only; anything else ('E' ×114 in real data) becomes
+      // '\0'.  'E' appears to mean "either" — '\0' fallback is acceptable.
       leg.turn_dir = (td == "L") ? 'L' : (td == "R") ? 'R' : '\0';
       double spd = ColumnOptDouble(stmt, 8);
       leg.speed_limit_kt = static_cast<uint16_t>(spd > 0.0 ? spd : 0.0);
-      // NOTE: Fenix schema has no RNP column in TerminalLegs or
-      // TerminalLegsEx — ProcedureLeg.rnp_centinm stays 0.  dfd1, dfd2,
-      // and xplane12 all load this field; Fenix data simply omits it.
-      // dfd1/dfd2/xplane12 all load this field; confirm whether Fenix omits it.
+      // NOTE: Fenix schema has no RNP column in TerminalLegs/TerminalLegsEx,
+      // so ProcedureLeg.rnp_centinm stays 0 (dfd1/dfd2/xplane12 load it).
 
-      int tid = ColumnInt(stmt, 0);
       auto& groups = leg_groups[tid];
       if (groups.empty() || groups.back().transition != trans) {
         groups.push_back(LegGroup{{}, trans, trans});
@@ -624,8 +610,8 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
     }
   }
 
-  // Pre-index common (ALL) legs per TerminalID for appending to each transition.
-  std::unordered_map<int, std::vector<ProcedureLeg>> common_legs;
+  // Split "ALL" transitions into common_legs; every per-runway procedure
+  // appends them.
   for (auto& [tid, groups] : leg_groups) {
     for (auto it = groups.begin(); it != groups.end();) {
       if (it->transition == "ALL") {
@@ -637,81 +623,180 @@ Result<void> LoadProcTable(sqlite3* conn, std::vector<AirportProcedureData>& out
     }
   }
 
-  // Iterate terminals, emitting one Procedure per transition.
-  sqlite3_stmt* stmt = ts.value().get();
-  int cur_aid = -1;
-  CifpData cifp;
+  return Result<void>::Ok();
+}
 
-  auto flush_airport = [&]() {
-    if (!cifp.procedures.empty()) {
-      auto iit = icao_of.find(cur_aid);
-      std::string icao = (iit != icao_of.end()) ? iit->second : "";
-      if (!icao.empty()) {
-        out.emplace_back(icao, std::move(cifp));
+// Emit one terminal's procedures (common segment + per-runway transitions)
+// into `cifp`.  Shared by the bulk and single-airport paths so both produce
+// byte-identical procedure structures.  `leg_groups` is read (not moved) so
+// the bulk path can reuse it across airports.
+void EmitTerminalProcedure(int tid, const std::unordered_map<int, Procedure>& proc_by_tid,
+                           const std::unordered_map<int, std::vector<LegGroup>>& leg_groups,
+                           const std::unordered_map<int, std::vector<ProcedureLeg>>& common_legs,
+                           CifpData& cifp) {
+  auto pit = proc_by_tid.find(tid);
+  if (pit == proc_by_tid.end()) {
+    return;
+  }
+  auto git = leg_groups.find(tid);
+  if (git == leg_groups.end()) {
+    return;
+  }
+  const Procedure& base = pit->second;
+  auto cit = common_legs.find(tid);
+
+  // Common-segment procedure (transition="", no runway) — the most direct
+  // path to the exit fix.
+  if (cit != common_legs.end() && !cit->second.empty()) {
+    Procedure proc = base;
+    proc.transition_ident = "";
+    proc.runway = "";
+    proc.legs = cit->second;
+    cifp.procedures.push_back(std::move(proc));
+  }
+
+  // Per-runway-transition procedures with common legs appended.
+  for (const auto& group : git->second) {
+    Procedure proc = base;
+    proc.transition_ident = group.transition;
+    proc.runway = group.runway;
+    proc.legs = group.legs;
+    if (cit != common_legs.end()) {
+      proc.legs.insert(proc.legs.end(), cit->second.begin(), cit->second.end());
+    }
+    cifp.procedures.push_back(std::move(proc));
+  }
+}
+
+// Build CifpData (procedures + runways) for each airport in `airport_ids`.
+// When `airport_ids` is null, every airport is processed (bulk path).  One
+// Terminals scan, one TerminalLegs scan, one Runways scan — the bulk path
+// scans the whole table, while the single-airport path narrows the Terminals
+// and Runways scans with an indexed `WHERE AirportID = ?` instead of a full
+// table scan plus an in-code filter.  Returns airport_id → CifpData, omitting
+// airports with neither procedures nor runways.
+Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
+    sqlite3* conn, const std::unordered_set<int>* airport_ids) {
+  // Terminal → (airport, procedure type/name) + airport → terminal list.
+  std::unordered_map<int, Procedure> proc_by_tid;
+  std::unordered_map<int, std::vector<int>> airport_tids;
+  // Single-airport requests use an indexed WHERE; bulk scans all rows.  Either
+  // way there is one Terminals scan — the single-airport path stays O(1) on the
+  // index instead of degrading to a full table scan plus an in-code filter.
+  const bool single_airport = airport_ids != nullptr && airport_ids->size() == 1;
+  {
+    std::string sql = single_airport ? "SELECT ID, AirportID, Proc, Name FROM Terminals "
+                                       "WHERE AirportID = ? ORDER BY ID"
+                                     : "SELECT ID, AirportID, Proc, Name FROM Terminals "
+                                       "ORDER BY AirportID, ID";
+    Result<SqliteStmt> ts = Prepare(conn, sql);
+    if (!ts) {
+      return Result<std::unordered_map<int, CifpData>>::Err(ts.error());
+    }
+    sqlite3_stmt* stmt = ts.value().get();
+    if (single_airport) {
+      sqlite3_bind_int(stmt, 1, *airport_ids->begin());
+    }
+    Result<void> rows = ForEachRow(stmt, [&]() {
+      int tid = ColumnInt(stmt, 0);
+      int aid = ColumnInt(stmt, 1);
+      // In-code filter only applies to the bulk scan; the single-airport path
+      // is already narrowed by the WHERE above.
+      if (airport_ids && !single_airport && airport_ids->find(aid) == airport_ids->end()) {
+        return;
+      }
+      // Fenix Proc: '2'=SID, '1'=STAR, everything else (e.g. '3' RNAV
+      // approach, ~34k rows) → kApproach silently.
+      std::string pt = ColumnText(stmt, 2);
+      Procedure proc;
+      if (pt == "2") {
+        proc.type = ProcedureType::kSid;
+      } else if (pt == "1") {
+        proc.type = ProcedureType::kStar;
+      } else {
+        proc.type = ProcedureType::kApproach;
+      }
+      proc.name = ColumnText(stmt, 3);
+      proc_by_tid[tid] = std::move(proc);
+      airport_tids[aid].push_back(tid);
+    });
+    if (!rows) {
+      return Result<std::unordered_map<int, CifpData>>::Err(rows.error());
+    }
+  }
+
+  // BuildLegGroups filters the TerminalLegs scan by TerminalID, so narrow the
+  // request to the TerminalIDs that belong to the requested airport(s).
+  std::unordered_set<int> allowed_tids;
+  if (airport_ids) {
+    for (auto& [aid, tids] : airport_tids) {
+      for (int tid : tids) {
+        allowed_tids.insert(tid);
       }
     }
-    cifp = CifpData{};
-  };
-
-  Result<void> rows = ForEachRow(stmt, [&]() {
-    int aid = ColumnInt(stmt, 1);
-    int tid = ColumnInt(stmt, 0);
-    if (aid != cur_aid) {
-      flush_airport();
-      cur_aid = aid;
-    }
-
-    std::string pt = ColumnText(stmt, 2);
-    // Fenix Proc: '2'=SID, '1'=STAR.  Everything else (e.g. '3' in real
-    // data, ~34k rows) maps to kApproach silently — no diagnostic emitted.
-    // Proc='3' (~34k rows) is RNAV approach (runway-specific, e.g. "R18").
-    // No other non-1/2 Proc values observed — kApproach is correct.
-    ProcedureType ptype;
-    if (pt == "2")
-      ptype = ProcedureType::kSid;
-    else if (pt == "1")
-      ptype = ProcedureType::kStar;
-    else
-      ptype = ProcedureType::kApproach;
-    std::string name = ColumnText(stmt, 3);
-
-    auto git = leg_groups.find(tid);
-    if (git == leg_groups.end()) {
-      return;
-    }
-
-    auto cit = common_legs.find(tid);
-
-    // Emit the common-segment procedure first (transition="", no runway).
-    // This is the most direct path to the exit fix, matching PMDG structure.
-    if (cit != common_legs.end() && !cit->second.empty()) {
-      Procedure proc;
-      proc.type = ptype;
-      proc.name = name;
-      proc.transition_ident = "";
-      proc.runway = "";
-      proc.legs = cit->second;
-      cifp.procedures.push_back(std::move(proc));
-    }
-
-    // Emit per-runway-transition procedures with common legs appended.
-    for (auto& group : git->second) {
-      Procedure proc;
-      proc.type = ptype;
-      proc.name = name;
-      proc.transition_ident = group.transition;
-      proc.runway = group.runway;
-      proc.legs = std::move(group.legs);
-      if (cit != common_legs.end())
-        proc.legs.insert(proc.legs.end(), cit->second.begin(), cit->second.end());
-      cifp.procedures.push_back(std::move(proc));
-    }
-  });
-  if (!rows) {
-    return Result<void>::Err(rows.error());
   }
-  flush_airport();
-  return Result<void>::Ok();
+  std::unordered_map<int, std::vector<LegGroup>> leg_groups;
+  std::unordered_map<int, std::vector<ProcedureLeg>> common_legs;
+  Result<void> lr =
+      BuildLegGroups(conn, airport_ids ? &allowed_tids : nullptr, leg_groups, common_legs);
+  if (!lr) {
+    return Result<std::unordered_map<int, CifpData>>::Err(lr.error());
+  }
+
+  // Runways by airport.  The single-airport query also uses the indexed WHERE
+  // (mirrors the Terminals path above); bulk scans all rows.
+  std::unordered_map<int, std::vector<Runway>> runways_by_airport;
+  {
+    std::string rsql = single_airport ? "SELECT AirportID, Ident, Latitude, Longtitude, Elevation "
+                                        "FROM Runways WHERE AirportID = ? ORDER BY Ident"
+                                      : "SELECT AirportID, Ident, Latitude, Longtitude, Elevation "
+                                        "FROM Runways ORDER BY AirportID";
+    Result<SqliteStmt> rs = Prepare(conn, rsql);
+    if (!rs) {
+      return Result<std::unordered_map<int, CifpData>>::Err(rs.error());
+    }
+    sqlite3_stmt* stmt = rs.value().get();
+    if (single_airport) {
+      sqlite3_bind_int(stmt, 1, *airport_ids->begin());
+    }
+    Result<void> rows = ForEachRow(stmt, [&]() {
+      int aid = ColumnInt(stmt, 0);
+      if (airport_ids && !single_airport && airport_ids->find(aid) == airport_ids->end()) {
+        return;
+      }
+      runways_by_airport[aid].push_back(
+          Runway{"RW" + ColumnText(stmt, 1),
+                 Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)}, ColumnInt(stmt, 4)});
+    });
+    if (!rows) {
+      return Result<std::unordered_map<int, CifpData>>::Err(rows.error());
+    }
+  }
+
+  std::unordered_map<int, CifpData> result;
+  // Airports with procedures (and possibly runways).
+  for (auto& [aid, tids] : airport_tids) {
+    CifpData cifp;
+    for (int tid : tids) {
+      EmitTerminalProcedure(tid, proc_by_tid, leg_groups, common_legs, cifp);
+    }
+    auto rit = runways_by_airport.find(aid);
+    if (rit != runways_by_airport.end()) {
+      cifp.runways = std::move(rit->second);
+    }
+    if (!cifp.procedures.empty() || !cifp.runways.empty()) {
+      result[aid] = std::move(cifp);
+    }
+  }
+  // Airports with runways but no procedures.
+  for (auto& [aid, rwys] : runways_by_airport) {
+    if (result.find(aid) == result.end()) {
+      CifpData cifp;
+      cifp.runways = std::move(rwys);
+      result[aid] = std::move(cifp);
+    }
+  }
+  return Result<std::unordered_map<int, CifpData>>::Ok(std::move(result));
 }
 
 // ---- airport ICAO lookup -------------------------------------------------
@@ -723,8 +808,9 @@ std::unordered_map<int, std::string> LoadAirportIcaoMap(sqlite3* conn) {
     return icao_of;
   }
   sqlite3_stmt* stmt = s.value().get();
-  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
+  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
     icao_of[ColumnInt(stmt, 0)] = ColumnText(stmt, 1);
+  }
   return icao_of;
 }
 
@@ -797,49 +883,38 @@ Result<std::vector<AirportProcedureData>> FenixLoader::LoadProcedures(
   }
   sqlite3* conn = conn_r.value();
 
-  // Preload airport ICAO lookup.
+  // Single-scan core builds every airport's CifpData (procedures + runways).
+  Result<std::unordered_map<int, CifpData>> built = BuildAirportProcedures(conn, nullptr);
+  if (!built) {
+    return Result<std::vector<AirportProcedureData>>::Err(built.error());
+  }
+
+  // Map airport id → ICAO; airports missing an ICAO are skipped.  Emit in
+  // ascending airport_id order so the output (and any .bfdb cache built from
+  // it) is reproducible across compilers and standard libraries.
   auto icao_of = LoadAirportIcaoMap(conn);
-
-  // Scan the Terminals+TerminalLegs tables in a single pass (dfd1-style).
+  std::vector<int> aids;
+  aids.reserve(built.value().size());
+  for (const auto& [aid, cifp] : built.value()) {
+    aids.push_back(aid);
+  }
+  std::sort(aids.begin(), aids.end());
   std::vector<AirportProcedureData> out;
-  Result<void> r = LoadProcTable(conn, out, icao_of);
-  if (!r) {
-    return Result<std::vector<AirportProcedureData>>::Err(r.error());
-  }
-
-  // Merge runways by airport ID.
-  Result<std::unordered_map<int, std::vector<Runway>>> runways = LoadAllRunways(conn);
-  if (!runways) {
-    return Result<std::vector<AirportProcedureData>>::Err(runways.error());
-  }
-
-  for (auto& [aid, rwys] : runways.value()) {
-    if (rwys.empty()) {
-      continue;
-    }
+  out.reserve(aids.size());
+  for (int aid : aids) {
     auto iit = icao_of.find(aid);
     if (iit == icao_of.end()) {
       continue;
     }
-    // Find existing entry or add new.
-    auto it = std::find_if(out.begin(), out.end(),
-                           [&](const AirportProcedureData& a) { return a.first == iit->second; });
-    if (it != out.end()) {
-      it->second.runways = std::move(rwys);
-    } else {
-      CifpData cifp;
-      cifp.runways = std::move(rwys);
-      out.emplace_back(iit->second, std::move(cifp));
-    }
+    auto cit = built.value().find(aid);
+    out.emplace_back(iit->second, std::move(cit->second));
   }
-
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(out));
 }
 
-// Load procedures for a single airport (LoadProcedure path).  Shares the
-// same transition grouping / ALL-split logic as the bulk LoadProcTable so
-// both paths produce identical procedure structures.  Returns nullopt when
-// the airport has no procedures or runways.
+// Load procedures for a single airport (LoadProcedure path).  Delegates to the
+// shared BuildAirportProcedures core with a one-element airport set, so it
+// produces byte-identical structures to the bulk LoadProcedures path.
 std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& icao) {
   int airport_id = -1;
   {
@@ -857,187 +932,16 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
     return std::nullopt;
   }
 
-  // Collect terminal IDs for this airport so we can filter the full leg scan.
-  std::unordered_set<int> airport_tids;
-  std::unordered_map<int, Procedure> proc_by_tid;
-  {
-    Result<SqliteStmt> ts =
-        Prepare(conn, "SELECT ID, Proc, Name, Rwy FROM Terminals WHERE AirportID = ?");
-    if (!ts) {
-      return std::nullopt;
-    }
-    sqlite3_bind_int(ts.value().get(), 1, airport_id);
-    sqlite3_stmt* stmt = ts.value().get();
-    for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
-      int tid = ColumnInt(stmt, 0);
-      airport_tids.insert(tid);
-      Procedure proc;
-      std::string pt = ColumnText(stmt, 1);
-      if (pt == "2")
-        proc.type = ProcedureType::kSid;
-      else if (pt == "1")
-        proc.type = ProcedureType::kStar;
-      else  // e.g. '3' in real data → kApproach silently
-        proc.type = ProcedureType::kApproach;
-      proc.name = ColumnText(stmt, 2);
-      proc_by_tid[tid] = proc;
-    }
-  }
-
-  if (airport_tids.empty()) {
-    // No procedures, but the airport may still have runways.
-    CifpData cifp;
-    Result<SqliteStmt> rs = Prepare(
-        conn, "SELECT Ident, Latitude, Longtitude, Elevation FROM Runways WHERE AirportID = ?");
-    if (rs) {
-      sqlite3_bind_int(rs.value().get(), 1, airport_id);
-      sqlite3_stmt* stmt = rs.value().get();
-      for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
-        cifp.runways.push_back(Runway{"RW" + ColumnText(stmt, 0),
-                                      Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)},
-                                      ColumnInt(stmt, 3)});
-    }
-    return cifp.runways.empty() ? std::nullopt : std::optional<CifpData>(std::move(cifp));
-  }
-
-  // Build waypoint ident/region lookup table.
-  std::unordered_map<int, std::pair<std::string, std::string>> wp_info;
-  {
-    Result<SqliteStmt> ws = Prepare(conn,
-                                    "SELECT w.ID, w.Ident, COALESCE(l.Country,'') "
-                                    "FROM Waypoints w LEFT JOIN WaypointLookup l ON w.ID = l.ID");
-    if (ws) {
-      sqlite3_stmt* stmt = ws.value().get();
-      for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
-        wp_info[ColumnInt(stmt, 0)] = {ColumnText(stmt, 1), ColumnText(stmt, 2)};
-    }
-  }
-
-  // Use exactly the same leg SELECT as LoadProcTable (including Transition),
-  // so column indices are identical and column-offset bugs are impossible.
-  // Filter to this airport's terminal IDs in code.
-  struct LegGroup {
-    std::vector<ProcedureLeg> legs;
-    std::string transition;
-    std::string runway;
-  };
-  std::unordered_map<int, std::vector<LegGroup>> leg_groups;
-  {
-    Result<SqliteStmt> ls = Prepare(conn,
-                                    "SELECT tl.TerminalID, tl.Transition, tl.TrackCode, tl.Course, "
-                                    "tl.Distance, tl.Alt, tl.TurnDir, tl.WptID, ex.SpeedLimit "
-                                    "FROM TerminalLegs tl "
-                                    "LEFT JOIN TerminalLegsEx ex ON tl.ID = ex.ID "
-                                    "ORDER BY tl.TerminalID, tl.ID");
-    if (!ls) {
-      return std::nullopt;
-    }
-    sqlite3_stmt* stmt = ls.value().get();
-    for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
-      int tid = ColumnInt(stmt, 0);
-      if (airport_tids.find(tid) == airport_tids.end()) {
-        continue;
-      }
-
-      ProcedureLeg leg;
-      std::string trans = ColumnText(stmt, 1);
-      leg.path_term = ParsePathTerminator(ColumnText(stmt, 2));
-      if (leg.path_term == PathTerminator::kUnknown) {
-        continue;
-      }
-
-      int wpt_id = ColumnOptInt(stmt, 7);
-      if (wpt_id > 0) {
-        auto wit = wp_info.find(wpt_id);
-        if (wit != wp_info.end() && wit->second.first.size() <= FixedIdent::kIdentCap)
-          leg.fix = FixedIdent::FromParts(wit->second.first, wit->second.second);
-      }
-
-      leg.course_deg = ColumnDouble(stmt, 3);
-      leg.distance_nm = ColumnOptDouble(stmt, 4);
-      leg.alt = ParseFenixAlt(ColumnText(stmt, 5));
-      std::string td = ColumnText(stmt, 6);
-      // TurnDir: 'L'/'R' only; anything else (e.g. 'E' ×114 in real
-      // data) becomes '\0' — the turn direction is silently dropped.
-      // TurnDir 'E' (114 rows, DF/VM/CF legs only, no airport clustering)
-      // appears to mean "either" — '\0' fallback is acceptable.
-      leg.turn_dir = (td == "L") ? 'L' : (td == "R") ? 'R' : '\0';
-      double spd = ColumnOptDouble(stmt, 8);
-      leg.speed_limit_kt = static_cast<uint16_t>(spd > 0.0 ? spd : 0.0);
-      // NOTE: Fenix schema has no RNP column in TerminalLegs or
-      // TerminalLegsEx — ProcedureLeg.rnp_centinm stays 0.  dfd1, dfd2,
-      // and xplane12 all load this field; Fenix data simply omits it.
-      // dfd1/dfd2/xplane12 all load this field; confirm whether Fenix omits it.
-
-      auto& groups = leg_groups[tid];
-      if (groups.empty() || groups.back().transition != trans) {
-        groups.push_back(LegGroup{{}, trans, trans});
-      }
-      groups.back().legs.push_back(std::move(leg));
-    }
-  }
-
-  // Split ALL transitions into common legs; append to each per-runway procedure.
-  std::unordered_map<int, std::vector<ProcedureLeg>> common_legs;
-  for (auto& [tid, groups] : leg_groups) {
-    for (auto it = groups.begin(); it != groups.end();) {
-      if (it->transition == "ALL") {
-        common_legs[tid] = std::move(it->legs);
-        it = groups.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-
-  CifpData cifp;
-  for (auto& [tid, groups] : leg_groups) {
-    auto pit = proc_by_tid.find(tid);
-    if (pit == proc_by_tid.end()) {
-      continue;
-    }
-
-    auto cit = common_legs.find(tid);
-
-    // Common-segment procedure (transition="", no runway).
-    if (cit != common_legs.end() && !cit->second.empty()) {
-      Procedure proc = pit->second;
-      proc.transition_ident = "";
-      proc.runway = "";
-      proc.legs = cit->second;
-      cifp.procedures.push_back(std::move(proc));
-    }
-
-    // Per-runway-transition procedure with common legs appended.
-    for (auto& group : groups) {
-      Procedure proc = pit->second;
-      proc.transition_ident = group.transition;
-      proc.runway = group.runway;
-      proc.legs = std::move(group.legs);
-      if (cit != common_legs.end())
-        proc.legs.insert(proc.legs.end(), cit->second.begin(), cit->second.end());
-      cifp.procedures.push_back(std::move(proc));
-    }
-  }
-
-  // Runways.
-  {
-    Result<SqliteStmt> rs = Prepare(
-        conn, "SELECT Ident, Latitude, Longtitude, Elevation FROM Runways WHERE AirportID = ?");
-    if (rs) {
-      sqlite3_bind_int(rs.value().get(), 1, airport_id);
-      sqlite3_stmt* stmt = rs.value().get();
-      for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt))
-        cifp.runways.push_back(Runway{"RW" + ColumnText(stmt, 0),
-                                      Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)},
-                                      ColumnInt(stmt, 3)});
-    }
-  }
-
-  if (cifp.procedures.empty() && cifp.runways.empty()) {
+  std::unordered_set<int> ids{airport_id};
+  Result<std::unordered_map<int, CifpData>> built = BuildAirportProcedures(conn, &ids);
+  if (!built) {
     return std::nullopt;
   }
-  return cifp;
+  auto it = built.value().find(airport_id);
+  if (it == built.value().end()) {
+    return std::nullopt;
+  }
+  return it->second;
 }
 
 std::optional<CifpData> FenixLoader::LoadProcedure(const std::string& source_dir,

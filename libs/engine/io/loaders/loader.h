@@ -17,9 +17,10 @@ namespace bf {
 using AirportProcedureData = std::pair<std::string, CifpData>;
 
 // Abstract navigation-data source. A Loader turns some on-disk representation
-// (X-Plane 12 native ".dat" files, or a DFD SQLite database -- see the dfd1/
-// dfd2 loaders) into BravoFinder's domain types. A loader is only needed where raw source data must
-// be parsed -- the `bf build` and NavDatabase::Open paths. The cached path (OpenCached) reads
+// (X-Plane 12 native ".dat" files, or a SQLite navigation database -- the
+// available loaders live under io/loaders/ and register themselves with the
+// loader registry) into BravoFinder's domain types. A loader is only needed where raw source data
+// must be parsed -- the `bf build` and NavDatabase::Open paths. The cached path (OpenCached) reads
 // prebuilt .bfdb caches and needs no loader.
 //
 // Loaders are stateless and their methods are const, so a single instance can

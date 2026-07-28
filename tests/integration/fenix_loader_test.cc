@@ -18,31 +18,24 @@
 #include "core/env.h"
 #include "io/loaders/dfd1/dfd1_loader.h"
 #include "io/loaders/loader_registry.h"
+#include "test_db.h"
 
 namespace {
 
 std::string EnsureFenix() {
-  const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA");
-  std::string dir = env ? env : "navdata";
-  std::error_code ec;
-  if (!std::filesystem::is_directory(dir, ec)) return {};
-  const char* kNames[] = {"fenix_navdata.db3", "navdata.db3", "fenix.db3"};
-  for (const char* name : kNames) {
-    if (std::filesystem::exists(std::filesystem::path(dir) / name, ec)) return dir;
-  }
-  for (const auto& de : std::filesystem::directory_iterator(dir, ec))
-    if (de.is_regular_file() && de.path().extension() == ".db3") return dir;
-  return {};
+  // Pin to the per-loader subdirectory, mirroring EnsureDfd1 / EnsureXPlane12.
+  bf::test::SetNavDataDir("navdata/fenix");
+  const std::string dir = bf::test::NavDataDir();
+  return bf::test::HasDb3(dir) ? dir : std::string{};
 }
 
 std::string EnsureDfd1ForFenix() {
-  const char* env = bf::GetEnv("BRAVOFINDER_NAVDATA");
-  std::string dir = env ? env : "navdata";
-  std::error_code ec;
-  if (!std::filesystem::is_directory(dir, ec)) return {};
-  for (const auto& de : std::filesystem::directory_iterator(dir, ec))
-    if (de.is_regular_file() && de.path().extension() == ".s3db") return dir;
-  return {};
+  // Pin to the per-loader subdirectory; the cross-loader passes this dir
+  // straight to Dfd1Loader, so it must resolve the real DFD v1 data (not the
+  // top-level 0-byte placeholders) regardless of BRAVOFINDER_NAVDATA.
+  bf::test::SetNavDataDir("navdata/dfd1");
+  const std::string dir = bf::test::NavDataDir();
+  return bf::test::HasS3db(dir) ? dir : std::string{};
 }
 
 // Load enroute data once, validate in SECTIONS.

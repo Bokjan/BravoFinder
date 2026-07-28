@@ -56,9 +56,9 @@ class NavDatabase {
   NavDatabase& operator=(NavDatabase&&) noexcept;
 
   // Load navigation source data from `source_dir` and build the route graph.
-  // `loader_name` selects the source loader (see MakeLoader; one of "xplane12",
-  // "dfd1", or "dfd2") and is recorded as `source_loader` provenance in any
-  // caches written.
+  // `loader_name` selects the source loader (see MakeLoader / the loader
+  // registry for the available names) and is recorded as `source_loader`
+  // provenance in any caches written.
   // Returns the ready database or an Error (including an unknown loader name).
   static Result<NavDatabase> Open(const std::string& source_dir,
                                   const std::string& loader_name = "xplane12");

@@ -19,7 +19,7 @@ X-Plane 的 `CIFP/<ICAO>.dat` 是 ARINC 424 派生的终端程序格式，每个
 - **「飞到定点」型**（TF/IF/DF/CF）：终点是确定的航路点，能解析成图顶点。占绝大多数。
 - **「飞航向/弧/高度/等待」型**（VA/VM/CA/VI/VR/FM/RF/HM/…）：终点不是固定航点（飞到某高度、 航向截获、等待），无法直接对应一个顶点。
 
-BravoFinder 解析并**保留每条 leg 的完整结构化信息**（path terminator、航向、距离、高度限制， 以及 RNP / 转向方向 / 速度限制），即使暂时不参与建图（用于输出展示：`bf query procedure ICAO/名称` 按程序名列出每条 leg 的这些字段）。解析器见 `cifp_parser.cc`；三个 loader（xplane12 / dfd1 / dfd2） 都填这些字段，缺席即留空值（`optional` 语义的 0 / `'\0'`），不按 `source_loader` 分支。
+BravoFinder 解析并**保留每条 leg 的完整结构化信息**（path terminator、航向、距离、高度限制， 以及 RNP / 转向方向 / 速度限制），即使暂时不参与建图（用于输出展示：`bf query procedure ICAO/名称` 按程序名列出每条 leg 的这些字段）。解析器见 `cifp_parser.cc`；所有 loader（xplane12 / dfd1 / dfd2 / fenix） 都填这些字段，缺席即留空值（`optional` 语义的 0 / `'\0'`），不按 `source_loader` 分支。
 
 ## 3. 「飞航向/弧/等待」型 leg：全量复核后的重新定性
 

@@ -8,7 +8,7 @@ A flight route finder written in modern C++ (v3).
 
 BravoFinder builds a graph from navigation data (waypoints, navaids, airways, and SID/STAR/approach procedures) and finds routes between two airports. Unlike earlier versions, which computed a purely geographic shortest path, v3 is a **realistic / compliant route engine**: routes respect real-world constraints such as airway directionality, high/low airway levels, segment altitude bands, and terminal procedures.
 
-Navigation data is read through a **pluggable `Loader` interface** (`libs/engine/io/loaders/`) that abstracts the source format. Three loaders ship today: `xplane12` (the default — X-Plane 12 native `.dat`), and `dfd1` / `dfd2` for the DFD SQLite databases shipped by RealTraffic / SimToolkitPro / PMDG MSFS and Inibuilds A350 respectively. Adding a format means adding a loader; the route engine is untouched. The selected loader is recorded as `source_loader` provenance in every `.bfdb` cache header.
+Navigation data is read through a **pluggable `Loader` interface** (`libs/engine/io/loaders/`) that abstracts the source format. Four loaders ship today: `xplane12` (the default — X-Plane 12 native `.dat`), `dfd1` / `dfd2` for the DFD SQLite databases shipped by RealTraffic / SimToolkitPro / PMDG MSFS and Inibuilds A350 respectively, and `fenix` for the Fenix A320 navdata SQLite database. Adding a format means adding a loader; the route engine is untouched. The selected loader is recorded as `source_loader` provenance in every `.bfdb` cache header.
 
 ## Status
 
@@ -92,7 +92,7 @@ BravoFinder also ships an HTTP+JSON query server (REST-style endpoints) for a ga
 ```bash
 # Build a binary cache once per AIRAC cycle for fast startup.
 bf build navdata                    # writes navdata/nav_<cycle>.bfdb
-bf build navdata --loader xplane12  # source loader: xplane12 | dfd1 | dfd2 (default xplane12)
+bf build navdata --loader xplane12  # source loader: xplane12 | dfd1 | dfd2 | fenix (default xplane12)
 
 # Find a route (reads ./navdata by default)
 bf route KJFK KLAX
@@ -129,6 +129,10 @@ Navigation data is **not** included and must be supplied by the user. It is copy
 ## Documentation
 
 In-depth technical articles (in Chinese) live under [docs/](docs/README.md) — start with the routing-algorithm primer and follow the index from there.
+
+## Contributors
+
+[![Contributors](https://contrib.rocks/image?repo=Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/graphs/contributors)
 
 ## License
 

@@ -37,4 +37,19 @@ inline bool HasS3db(const std::string& dir) {
   return false;
 }
 
+// Whether `dir` holds at least one *.db3 file (a Fenix SQLite database).
+// Mirrors HasS3db for the Fenix loader's per-loader subdirectory convention.
+inline bool HasDb3(const std::string& dir) {
+  std::error_code ec;
+  if (!std::filesystem::is_directory(dir, ec)) {
+    return false;
+  }
+  for (const auto& de : std::filesystem::directory_iterator(dir, ec)) {
+    if (de.is_regular_file() && de.path().extension() == ".db3") {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace bf::test

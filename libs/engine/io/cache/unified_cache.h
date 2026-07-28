@@ -22,7 +22,7 @@ namespace bf {
 struct UnifiedHeader {
   uint32_t cycle = 0;           // AIRAC cycle, e.g. 2601; 0 means no provenance
   std::string program_version;  // bf version that built this cache
-  std::string source_loader;    // loader that produced the data, e.g. "xplane12", "dfd1", "dfd2"
+  std::string source_loader;    // loader that produced the data (a name from the loader registry)
   std::string data_dir;         // the data dir used at build time (route default)
 };
 

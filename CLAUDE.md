@@ -8,7 +8,7 @@
 > - `.notes/` — local working docs (gitignored, not committed): `README.md` is the directory index, `design/design-archive-M0-M4.md` is the archived M0–M4 design snapshot (historical; current architecture lives in `docs/`), `plans/`/`records/`/`research/` are historical plans and records. Start from `.notes/README.md` when you need background.
 > - `docs/` — public-facing docs (CONTRIBUTING, algorithm articles, architecture: binary-cache / domain-design / thread-safety / http-service / performance; the authority for "how it works now"; committed).
 
-One-line background (details in README / docs/): a realistic/compliant flight route engine that parses navigation data through a pluggable `Loader` (X-Plane 12 native `.dat`, or DFD SQLite — `dfd1` / `dfd2`; including ARINC 424 procedures), builds a directed graph, and finds candidate routes respecting aviation constraints via A\* + Yen K-shortest.
+One-line background (details in README / docs/): a realistic/compliant flight route engine that parses navigation data through a pluggable `Loader` (X-Plane 12 native `.dat`, or DFD SQLite — `dfd1` / `dfd2` — or Fenix A320 SQLite; including ARINC 424 procedures), builds a directed graph, and finds candidate routes respecting aviation constraints via A\* + Yen K-shortest.
 
 ## Language
 
