@@ -3,6 +3,7 @@ include(Catch)
 add_executable(bf_tests
                unit/coordinate_test.cc
                unit/result_test.cc
+               unit/log_test.cc
                unit/graph_test.cc
                unit/constraint_test.cc
                unit/yen_test.cc
@@ -53,10 +54,10 @@ target_link_libraries(bf_tests PRIVATE bf::bravofinder bf_service_lib bf_mcp_lib
 # filename "libasan.so", IS_ABSOLUTE is false, and we skip the property so
 # tests run without any wrapper.
 execute_process(
-  COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libasan.so
+  COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libasan.so.8
   OUTPUT_VARIABLE _asan_lib OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(
-  COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libtsan.so
+  COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libtsan.so.2
   OUTPUT_VARIABLE _tsan_lib OUTPUT_STRIP_TRAILING_WHITESPACE)
 if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread" AND IS_ABSOLUTE "${_tsan_lib}")
   set_property(TARGET bf_tests PROPERTY CROSSCOMPILING_EMULATOR

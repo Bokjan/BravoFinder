@@ -5,7 +5,6 @@
 > **Doc map** (each has one job; don't mix them):
 > - `README.md` — user-facing: what the project is, how to build, CLI usage, data compliance.
 > - `CLAUDE.md` (this file) — AI-agent-facing: hard conventions, invariants, minefields.
-> - `.notes/` — local working docs (gitignored, not committed): `README.md` is the directory index, `design/design-archive-M0-M4.md` is the archived M0–M4 design snapshot (historical; current architecture lives in `docs/`), `plans/`/`records/`/`research/` are historical plans and records. Start from `.notes/README.md` when you need background.
 > - `docs/` — public-facing docs (CONTRIBUTING, algorithm articles, architecture: binary-cache / domain-design / thread-safety / http-service / performance; the authority for "how it works now"; committed).
 
 One-line background (details in README / docs/): a realistic/compliant flight route engine that parses navigation data through a pluggable `Loader` (X-Plane 12 native `.dat`, or DFD SQLite — `dfd1` / `dfd2` — or Fenix A320 SQLite; including ARINC 424 procedures), builds a directed graph, and finds candidate routes respecting aviation constraints via A\* + Yen K-shortest.
@@ -14,7 +13,7 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 
 - Conversations, comments, documentation, and commit messages default to **Simplified Chinese**; docs prefer Chinese.
 - Exceptions (keep in original): code identifiers, existing code style, technical proper nouns/commands/APIs, and **code comments use English**.
-- **Markdown is never hard-wrapped (iron rule).** Every paragraph — in `README.md`, `docs/*.md`, `.notes/*.md`, and GitHub release notes — is **one logical line**; let the renderer soft-wrap. No manual column-80 folding inside a paragraph. Hard-wrapped paragraphs render as broken/odd line breaks when synced to GitHub releases (the `.notes/changelog/*.md` → `gh release edit` flow), and they make diffs noisy. This is the same discipline as git commit-message bodies (see Git). Code fences, tables, and ASCII/box diagrams are pre-formatted — leave their line breaks intact.
+- **Markdown is never hard-wrapped (iron rule).** Every paragraph — in `README.md`, `docs/*.md`, and GitHub release notes — is **one logical line**; let the renderer soft-wrap. No manual column-80 folding inside a paragraph. Hard-wrapped paragraphs render as broken/odd line breaks when synced to GitHub releases (the changelog → `gh release edit` flow), and they make diffs noisy. This is the same discipline as git commit-message bodies (see Git). Code fences, tables, and ASCII/box diagrams are pre-formatted — leave their line breaks intact.
 
 ## Code conventions
 

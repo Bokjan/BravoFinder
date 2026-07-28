@@ -38,6 +38,7 @@ add_library(bravofinder STATIC
   ${_sqlite3_dir}/sqlite3.c
   core/domain/coordinate.cc
   core/domain/procedure.cc
+  core/log.cc
   ${_bf_astar}
   ${_bf_yen}
   core/routing/route_parser.cc
@@ -85,6 +86,30 @@ target_include_directories(bravofinder PUBLIC
   $<INSTALL_INTERFACE:include/bf>)
 
 target_compile_features(bravofinder PUBLIC cxx_std_20)
+
+# Compile-time log-level gate. Levels below BF_LOG_MIN_LEVEL expand to
+# ((void)0) in log.h, their format string never entering the binary (min-size).
+# BF_LOG_FATAL is never stripped (always compiled in). Default "trace" keeps
+# everything; a min-size build may raise this.
+set(BF_LOG_MIN_LEVEL "trace" CACHE STRING
+    "Lowest log level kept in binary (trace/debug/info/warn/error/fatal)")
+set_property(CACHE BF_LOG_MIN_LEVEL PROPERTY STRINGS trace debug info warn error fatal)
+if(BF_LOG_MIN_LEVEL STREQUAL "trace")
+  set(_bf_log_level_num 1)
+elseif(BF_LOG_MIN_LEVEL STREQUAL "debug")
+  set(_bf_log_level_num 2)
+elseif(BF_LOG_MIN_LEVEL STREQUAL "info")
+  set(_bf_log_level_num 3)
+elseif(BF_LOG_MIN_LEVEL STREQUAL "warn")
+  set(_bf_log_level_num 4)
+elseif(BF_LOG_MIN_LEVEL STREQUAL "error")
+  set(_bf_log_level_num 5)
+elseif(BF_LOG_MIN_LEVEL STREQUAL "fatal")
+  set(_bf_log_level_num 6)
+else()
+  set(_bf_log_level_num 1)  # default trace, keep everything
+endif()
+target_compile_definitions(bravofinder PRIVATE BF_LOG_MIN_LEVEL=${_bf_log_level_num})
 
 # Scope the SQLite amalgamation's third-party-C options to sqlite3.c alone so
 # bravofinder's own flags stay clean. -w silences all warnings (GCC/Clang; MSVC's

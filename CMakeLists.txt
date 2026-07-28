@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(BravoFinder
-        VERSION 3.18.0
+        VERSION 3.18.1
         DESCRIPTION "A realistic and compliant flight routing engine and its query tools"
         LANGUAGES C CXX)
 
@@ -35,6 +35,35 @@ if(PROJECT_IS_TOP_LEVEL)
   option(BRAVOFINDER_INSTALL "Install BravoFinder headers and libraries" ON)
 else()
   set(BRAVOFINDER_INSTALL OFF)
+endif()
+
+# ---------------------------------------------------------------------------
+# Compile-time source-path sanitization
+# ---------------------------------------------------------------------------
+# Strip the absolute repo prefix from __FILE__ (and std::source_location, which
+# reads the same __FILE__) at compile time so log lines show short relative
+# paths like "io/loaders/fenix/fenix_loader.cc" instead of a machine-specific
+# absolute path. Applied globally (not bravofinder-only): once the log macros
+# exist, apps/tests will use BF_LOG_* too, and their __FILE__ must trim
+# consistently. sqlite3.c / libuv / llhttp also pick this up but never log, so
+# it is harmless there.
+if(MSVC)
+  if(MSVC_VERSION GREATER_EQUAL 1927)
+    file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/" _bf_repo_native)
+    add_compile_options("/d1trimfile:${_bf_repo_native}")
+  endif()
+  # /Zc:preprocessor enables the conforming preprocessor (VS2019 16.5+ / MSVC
+  # 19.25+, CI matrix satisfies it; loadmaster uses the same scheme). Required
+  # by BF_LOG_* macros' __VA_OPT__ (core/log.h). Applied globally (not
+  # bravofinder-only): any TU including log.h (bravofinder sources, apps, tests)
+  # uses __VA_OPT__, so the flag must reach every consumer. Scoping it
+  # per-target is how bf_tests was missed originally -- it uses BF_LOG_* but had
+  # no flag, breaking the Windows CI leg.
+  if(MSVC_VERSION GREATER_EQUAL 1925)
+    add_compile_options("/Zc:preprocessor")
+  endif()
+else()
+  add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=")
 endif()
 
 # ---------------------------------------------------------------------------

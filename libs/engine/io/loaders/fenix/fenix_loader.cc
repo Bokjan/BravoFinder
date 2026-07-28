@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -23,6 +22,7 @@
 #include "core/domain/navaid_detail.h"
 #include "core/domain/procedure.h"
 #include "core/domain/waypoint.h"
+#include "core/log.h"
 #include "core/result.h"
 #include "io/loaders/sqlite_util.h"
 #include "io/nav_data.h"
@@ -236,11 +236,8 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
     int nav_id = ColumnOptInt(stmt, 4);
 
     if (ident_str.size() > FixedIdent::kIdentCap) {
-#ifndef NDEBUG
-      std::fprintf(stderr,
-                   "fenix: skipping waypoint '%s' (ident too long for FixedIdent, %zu > %d)\n",
-                   ident_str.c_str(), ident_str.size(), FixedIdent::kIdentCap);
-#endif
+      BF_LOG_WARN("fenix: skipping waypoint '{}' (ident too long for FixedIdent, {} > {})",
+                  ident_str, ident_str.size(), FixedIdent::kIdentCap);
       ++skipped_long;
       continue;
     }
@@ -262,10 +259,7 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
     data.waypoints.push_back(Waypoint{Ident{ident_str, region}, Coordinate{lat, lon}, kind});
   }
   if (skipped_long > 0) {
-#ifndef NDEBUG
-    std::fprintf(stderr, "fenix: %d waypoint(s) skipped (ident too long for FixedIdent)\n",
-                 skipped_long);
-#endif
+    BF_LOG_WARN("fenix: {} waypoint(s) skipped (ident too long for FixedIdent)", skipped_long);
   }
   return Result<void>::Ok();
 }

@@ -150,7 +150,7 @@ class GraphBuilder {
   // map of the ~270k (ident, region) keys is the second-largest on-demand
   // resident block (~26 MB); these sorted vectors cost ~4 MB with a ~50 ns/op
   // lookup penalty that is immaterial off the A* hot path (endpoint resolution
-  // only). See .notes/plans/2026-07-09_memory_compaction.md #3.
+  // only).
   std::vector<std::pair<FixedIdent, int>> ident_index_;  // sorted by (ident,region) -> vertex
   std::vector<std::pair<FixedIdentNoRegion, int>>
       ident_all_;  // sorted by ident; equal range = all vertices sharing the ident

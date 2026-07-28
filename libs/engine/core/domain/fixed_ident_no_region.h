@@ -13,8 +13,7 @@ namespace bf {
 // An 8-byte, region-less counterpart to FixedIdent, for lookup keys that carry
 // no region: a bare fix ident (ident_all_) or an airport ICAO (airport_index_).
 // Backs sorted-vector indices, where sizeof==8 keeps pair<FixedIdentNoRegion,int>
-// at 12 bytes (a 9..12B key would pad up to 16B, saving nothing -- see
-// .notes/plans/2026-07-09_memory_compaction.md #3).
+// at 12 bytes (a 9..12B key would pad up to 16B, saving nothing).
 //
 // Capacities are sized from real AIRAC data (cycle 2601): fix idents max 5,
 // airport ICAO max 4. Overflow means corrupt source data and trips an assert

@@ -9,7 +9,7 @@
 //   2. lookup latency over a real query workload
 //   3. memory (sizeof-based estimate)
 // so we can decide with data whether the ~20 MB saving is worth any lookup cost
-// before touching production code. See .notes/plans/2026-07-09_memory_compaction.md #3.
+// before touching production code.
 //
 // Not part of the default build; enable with -DBRAVOFINDER_BUILD_BENCH=ON.
 
