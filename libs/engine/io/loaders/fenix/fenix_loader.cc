@@ -201,8 +201,10 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
       return Result<void>::Err(s.error());
     }
     sqlite3_stmt* stmt = s.value().get();
-    for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
-      region_by_id[ColumnInt(stmt, 0)] = ColumnText(stmt, 1);
+    Result<void> rows =
+        ForEachRow(stmt, [&] { region_by_id[ColumnInt(stmt, 0)] = ColumnText(stmt, 1); });
+    if (!rows) {
+      return Result<void>::Err(rows.error());
     }
   }
 
@@ -214,8 +216,10 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
       return Result<void>::Err(s.error());
     }
     sqlite3_stmt* stmt = s.value().get();
-    for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
-      navaid_type_of[ColumnInt(stmt, 0)] = ColumnInt(stmt, 1);
+    Result<void> rows =
+        ForEachRow(stmt, [&] { navaid_type_of[ColumnInt(stmt, 0)] = ColumnInt(stmt, 1); });
+    if (!rows) {
+      return Result<void>::Err(rows.error());
     }
   }
 
@@ -228,7 +232,7 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
 
   sqlite3_stmt* stmt = s.value().get();
   int skipped_long = 0;
-  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
+  Result<void> rows = ForEachRow(stmt, [&] {
     int id = ColumnInt(stmt, 0);
     std::string ident_str = ColumnText(stmt, 1);
     double lat = ColumnDouble(stmt, 2);
@@ -239,7 +243,7 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
       BF_LOG_WARN("fenix: skipping waypoint '{}' (ident too long for FixedIdent, {} > {})",
                   ident_str, ident_str.size(), FixedIdent::kIdentCap);
       ++skipped_long;
-      continue;
+      return;
     }
 
     std::string region;
@@ -257,6 +261,9 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
     }
 
     data.waypoints.push_back(Waypoint{Ident{ident_str, region}, Coordinate{lat, lon}, kind});
+  });
+  if (!rows) {
+    return Result<void>::Err(rows.error());
   }
   if (skipped_long > 0) {
     BF_LOG_WARN("fenix: {} waypoint(s) skipped (ident too long for FixedIdent)", skipped_long);
@@ -275,7 +282,7 @@ Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
   }
 
   sqlite3_stmt* stmt = s.value().get();
-  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
+  Result<void> rows = ForEachRow(stmt, [&] {
     NavaidDetail detail;
     detail.ident = Ident{ColumnText(stmt, 0), ""};
     detail.kind = NavaidKindFromType(ColumnInt(stmt, 1));
@@ -283,6 +290,9 @@ Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
     detail.freq_raw = ColumnInt(stmt, 3);
     detail.range_nm = ColumnDouble(stmt, 4);
     data.navaid_details.push_back(detail);
+  });
+  if (!rows) {
+    return Result<void>::Err(rows.error());
   }
   return Result<void>::Ok();
 }
@@ -298,8 +308,10 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
       return Result<void>::Err(s.error());
     }
     sqlite3_stmt* stmt = s.value().get();
-    for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
-      airway_name[ColumnInt(stmt, 0)] = ColumnText(stmt, 1);
+    Result<void> rows =
+        ForEachRow(stmt, [&] { airway_name[ColumnInt(stmt, 0)] = ColumnText(stmt, 1); });
+    if (!rows) {
+      return Result<void>::Err(rows.error());
     }
   }
 
@@ -313,8 +325,11 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
       return Result<void>::Err(s.error());
     }
     sqlite3_stmt* stmt = s.value().get();
-    for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
+    Result<void> rows = ForEachRow(stmt, [&] {
       wp_by_id[ColumnInt(stmt, 0)] = Ident{ColumnText(stmt, 1), ColumnText(stmt, 2)};
+    });
+    if (!rows) {
+      return Result<void>::Err(rows.error());
     }
   }
 
@@ -327,7 +342,7 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   }
 
   sqlite3_stmt* stmt = s.value().get();
-  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
+  Result<void> rows = ForEachRow(stmt, [&] {
     int aid = ColumnInt(stmt, 0);
     std::string level = ColumnText(stmt, 1);
     int wp1 = ColumnInt(stmt, 2);
@@ -337,7 +352,7 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     auto fm = wp_by_id.find(wp1);
     auto to = wp_by_id.find(wp2);
     if (nm == airway_name.end() || fm == wp_by_id.end() || to == wp_by_id.end()) {
-      continue;
+      return;
     }
 
     AirwayConnection conn;
@@ -349,6 +364,9 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     // default to bidirectional as in earth_awy.dat rows without 'F'/'B'.
     conn.segment.direction = AirwayDirection::kBoth;
     data.airways.push_back(conn);
+  });
+  if (!rows) {
+    return Result<void>::Err(rows.error());
   }
   return Result<void>::Ok();
 }
@@ -370,8 +388,10 @@ Result<void> LoadAirports(sqlite3* conn, NavData& data) {
                                     "WHERE wl.Country != ''");
     if (ms) {
       sqlite3_stmt* mstmt = ms.value().get();
-      for (Result<bool> row = Step(mstmt); row && row.value(); row = Step(mstmt)) {
-        icao_region.try_emplace(ColumnText(mstmt, 0), ColumnText(mstmt, 1));
+      Result<void> rows = ForEachRow(
+          mstmt, [&] { icao_region.try_emplace(ColumnText(mstmt, 0), ColumnText(mstmt, 1)); });
+      if (!rows) {
+        return Result<void>::Err(rows.error());
       }
     }
   }
@@ -384,13 +404,16 @@ Result<void> LoadAirports(sqlite3* conn, NavData& data) {
   }
 
   sqlite3_stmt* stmt = s.value().get();
-  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
+  Result<void> rows = ForEachRow(stmt, [&] {
     std::string icao = ColumnText(stmt, 0);
     auto rit = icao_region.find(icao);
     std::string region = (rit != icao_region.end()) ? rit->second : "";
     data.airports.push_back(Airport{icao, region,
                                     Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)},
                                     ColumnInt(stmt, 3)});
+  });
+  if (!rows) {
+    return Result<void>::Err(rows.error());
   }
   return Result<void>::Ok();
 }
@@ -410,7 +433,7 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
   }
 
   sqlite3_stmt* stmt = s.value().get();
-  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
+  Result<void> rows = ForEachRow(stmt, [&] {
     HoldFix h;
     h.fix = Ident{ColumnText(stmt, 0), ColumnText(stmt, 1)};
     h.airport_icao = ColumnText(stmt, 2);
@@ -429,6 +452,9 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
     h.max_alt_ft = (mx > 0 && mx < kUnknownAltitudeFt) ? mx : 0;
     h.speed_limit_kt = spd > 0 ? spd : 0;
     data.hold_fixes.push_back(h);
+  });
+  if (!rows) {
+    return Result<void>::Err(rows.error());
   }
   return Result<void>::Ok();
 }
@@ -451,7 +477,7 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
   }
 
   sqlite3_stmt* stmt = s.value().get();
-  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
+  Result<void> rows = ForEachRow(stmt, [&] {
     int start_lat = ColumnInt(stmt, 0);
     int start_lon = ColumnInt(stmt, 1);
 
@@ -477,6 +503,9 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
       // dfd1 / xplane12 loaders.
       data.mora.SetCell(start_lat, start_lon + col, static_cast<int16_t>(mora_val));
     }
+  });
+  if (!rows) {
+    return Result<void>::Err(rows.error());
   }
   return Result<void>::Ok();
 }
@@ -794,17 +823,18 @@ Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
 
 // ---- airport ICAO lookup -------------------------------------------------
 
-std::unordered_map<int, std::string> LoadAirportIcaoMap(sqlite3* conn) {
+Result<std::unordered_map<int, std::string>> LoadAirportIcaoMap(sqlite3* conn) {
   std::unordered_map<int, std::string> icao_of;
   Result<SqliteStmt> s = Prepare(conn, "SELECT ID, ICAO FROM Airports");
   if (!s) {
-    return icao_of;
+    return Result<std::unordered_map<int, std::string>>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  for (Result<bool> row = Step(stmt); row && row.value(); row = Step(stmt)) {
-    icao_of[ColumnInt(stmt, 0)] = ColumnText(stmt, 1);
+  Result<void> rows = ForEachRow(stmt, [&] { icao_of[ColumnInt(stmt, 0)] = ColumnText(stmt, 1); });
+  if (!rows) {
+    return Result<std::unordered_map<int, std::string>>::Err(rows.error());
   }
-  return icao_of;
+  return Result<std::unordered_map<int, std::string>>::Ok(std::move(icao_of));
 }
 
 }  // namespace
@@ -885,7 +915,11 @@ Result<std::vector<AirportProcedureData>> FenixLoader::LoadProcedures(
   // Map airport id → ICAO; airports missing an ICAO are skipped.  Emit in
   // ascending airport_id order so the output (and any .bfdb cache built from
   // it) is reproducible across compilers and standard libraries.
-  auto icao_of = LoadAirportIcaoMap(conn);
+  auto icao_map = LoadAirportIcaoMap(conn);
+  if (!icao_map) {
+    return Result<std::vector<AirportProcedureData>>::Err(icao_map.error());
+  }
+  auto& icao_of = icao_map.value();
   std::vector<int> aids;
   aids.reserve(built.value().size());
   for (const auto& [aid, cifp] : built.value()) {
