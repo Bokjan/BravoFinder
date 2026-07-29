@@ -84,7 +84,7 @@ Result<void> NavDetailCodec::Encode(const NavDetailArchive& archive, ByteWriter&
     w.F64(h.inbound_course);
     w.F64(h.leg_time_min);
     w.F64(h.leg_dist_nm);
-    w.U8(h.turn_dir == 'L' ? 1 : 0);
+    w.U8(static_cast<uint8_t>(h.turn_dir));
     w.I32(h.min_alt_ft);
     w.I32(h.max_alt_ft);
     w.I32(h.speed_limit_kt);
@@ -176,7 +176,7 @@ Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
     h.inbound_course = inbound_course;
     h.leg_time_min = leg_time_min;
     h.leg_dist_nm = leg_dist_nm;
-    h.turn_dir = (turn_raw == 1) ? 'L' : 'R';
+    h.turn_dir = static_cast<char>(turn_raw);
     h.min_alt_ft = min_alt_ft;
     h.max_alt_ft = max_alt_ft;
     h.speed_limit_kt = speed_limit_kt;

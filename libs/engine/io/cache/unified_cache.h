@@ -102,7 +102,14 @@ class UnifiedCache {
   //      cells, silently disabling the terrain floor). v11 Fenix-sourced files
   //      carry that wrong MORA grid while staying byte- and version-valid, so v11
   //      is retired to force a rebuild with correct MORA data.
-  static constexpr uint32_t kFormatVersion = 12;
+  // v13: no layout change. The nav_detail hold turn_dir was encoded as 1-bit
+  //      ('L'->1, else->0) and decoded back to 'L'/'R', collapsing any non-L
+  //      value to 'R' -- inconsistent with cifp_codec's lossless full-char
+  //      ProcedureLeg turn_dir. v12 files store 0/1, which the new full-char
+  //      decode would read as '\0'/'\x01' (wrong), so v12 is retired. (Holds are
+  //      always 'L'/'R' in practice, so this is consistency-only, not a data
+  //      fix; done because the bump is free pre-release.)
+  static constexpr uint32_t kFormatVersion = 13;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.
