@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,17 +17,19 @@
 namespace bf {
 
 // Builds an immutable NavGraph (CSR) from a loaded NavData. Resolves airway
-// endpoints by (ident, region) to vertex indices, emits directed edges honoring
-// each segment's direction, and (for M1) connects each airport to its nearest
-// waypoints with synthetic direct (DCT) edges.
+// endpoints by (ident, region) to vertex indices and emits directed edges
+// honoring each segment's direction. Airport vertices are present but carry no
+// static edges: they connect to the enroute network per-route via
+// NearestOnNetwork (the DCT fallback) at query time, not via baked-in CSR edges.
 //
 // The builder also records the mapping needed to translate user-facing names
 // (airport ICAO, waypoint ident) into vertex indices for queries.
 class GraphBuilder {
  public:
-  // Build the graph from `data`. Airports are connected with up to
-  // `airport_dct_count` direct edges to their nearest waypoints.
-  explicit GraphBuilder(const NavData& data, int airport_dct_count = 5);
+  // Build the graph from `data`. Airport connectivity is not baked into the CSR
+  // (those static DCT edges were dead weight -- airport vertices are never
+  // traversed); airports connect per-route via NearestOnNetwork at query time.
+  explicit GraphBuilder(const NavData& data);
 
   // Assemble a builder directly from a deserialized cache snapshot (the `bf
   // route --db` path): the graph arrays and vertex metadata are moved in, and
@@ -127,13 +130,36 @@ class GraphBuilder {
   // that routes over half-dropped airways.
   bool airway_overflow() const { return airway_overflow_; }
 
+  // DegreeGrid is incomplete in this header, so the destructor and move
+  // constructor are declared here and defined (as default) in the .cc, where
+  // DegreeGrid is complete. The move constructor is declared because the
+  // user-declared destructor suppresses the implicit one, and FromSnapshot
+  // returns the builder by value. Copying is not supported (unique_ptr member).
+  ~GraphBuilder();
+  GraphBuilder(GraphBuilder&&) noexcept;
+  GraphBuilder(const GraphBuilder&) = delete;
+  GraphBuilder& operator=(const GraphBuilder&) = delete;
+
  private:
   // For FromSnapshot: constructs an empty builder to be populated from a snapshot.
   GraphBuilder() = default;
 
+  // Coarse 1°×1° spatial index over waypoint vertices, kept resident so
+  // NearestOnNetwork avoids an O(V) scan per route. Forward-declared and defined
+  // in the .cc so the index implementation stays out of this header. Built once
+  // during construction and rebuilt from coords_ on the FromSnapshot path;
+  // airports are excluded since they are never on-network (has_outbound_/
+  // has_inbound_ derive from airway edges only).
+  class DegreeGrid;
+
   // Rebuild the three lookup indices from idents_ / first_airport_vertex_. Used
   // after the vertex metadata is in place (both build paths converge here).
   void RebuildIndices();
+
+  // Rebuild grid_ from coords_ over the waypoint range [0, first_airport_vertex_).
+  // Called by both build paths so NearestOnNetwork has an index regardless of
+  // whether the builder came from parsed NavData or a cache snapshot.
+  void RebuildGrid();
 
   NavGraph graph_;
   std::vector<FixedIdent> idents_;     // per-vertex ident, size = V
@@ -145,6 +171,10 @@ class GraphBuilder {
       airport_elevations_ft_;  // per-airport elevation, size = V - first_airport_vertex_
   std::vector<std::string> airway_names_;
   bool airway_overflow_ = false;  // set when distinct airway names exceed uint16
+
+  // Spatial index backing NearestOnNetwork (see above). Null only on a
+  // default-constructed (moved-from) builder; both Open paths populate it.
+  std::unique_ptr<DegreeGrid> grid_;
 
   // Lookup indices: sorted vectors + binary search rather than hash maps. A hash
   // map of the ~270k (ident, region) keys is the second-largest on-demand
