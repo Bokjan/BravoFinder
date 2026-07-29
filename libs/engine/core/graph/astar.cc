@@ -2,6 +2,7 @@
 #include "core/graph/astar.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -37,9 +38,15 @@ UnitVec ProjectUnitSphere(const Coordinate& c) {
 bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coordinate& from_coord,
                  const NavGraph& graph, int to, double& extra_cost) {
   extra_cost = 0.0;
-  if (options.constraints.empty() || options.request == nullptr) {
+  // No constraints => nothing to evaluate (request is irrelevant). When
+  // constraints ARE present the request they evaluate against must be non-null
+  // (SearchOptions contract, astar.h); the old `|| request == nullptr` arm
+  // silently skipped every constraint and returned violating routes instead,
+  // so enforce the contract here rather than silently allowing.
+  if (options.constraints.empty()) {
     return true;
   }
+  assert(options.request != nullptr);
   const EdgeContext ctx{edge, from_coord, graph.CoordOf(to)};
   for (const Constraint* c : options.constraints) {
     const EdgeVerdict v = c->Evaluate(ctx, *options.request);

@@ -169,7 +169,7 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   route.dep_distance_nm = dep_label.empty() ? 0.0 : dep_seed;
   route.arr_distance_nm = arr_label.empty() ? 0.0 : arr_seed;
   route.enroute_distance_nm =
-      route.total_distance_nm - route.dep_distance_nm - route.arr_distance_nm;
+      std::max(0.0, route.total_distance_nm - route.dep_distance_nm - route.arr_distance_nm);
 
   // Route string in filed-flight-plan style: DEP SID FIX <airways> FIX STAR ARR,
   // where "SID"/"STAR" are literal connector keywords (the procedure names are in

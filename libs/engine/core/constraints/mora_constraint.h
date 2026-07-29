@@ -51,6 +51,14 @@ class MoraConstraint : public Constraint {
   // spacing (finer than the 1-degree grid, so no cell is skipped) and including
   // both endpoints. Returns 0 when every sampled cell is unknown.
   int16_t MaxMoraAlongLeg(const Coordinate& from, const Coordinate& to) const {
+    // Guard against non-finite coordinates (a corrupted graph from a bad parse):
+    // span would be NaN, and static_cast<int>(ceil(NaN)) is UB that yields an
+    // arbitrary step count (potentially billions of samples, or none). Bail to
+    // "unknown" so the leg is allowed, matching how MoraAt treats a bad index.
+    if (!std::isfinite(from.latitude) || !std::isfinite(from.longitude) ||
+        !std::isfinite(to.latitude) || !std::isfinite(to.longitude)) {
+      return 0;
+    }
     int16_t best = 0;
     best = std::max(best, grid_.MoraAt(from));
     best = std::max(best, grid_.MoraAt(to));
