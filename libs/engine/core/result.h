@@ -18,11 +18,9 @@ enum class ErrorCode {
   kSerializationError,
   kAirportNotFound,
   kNoRoute,
-  // A cache file is present but its contents are corrupt: bad magic, truncated,
-  // an out-of-range count/reference, or an unresolvable string pool.
+  kRouteParseError,
+  kProcedureNotFound,
   kCacheCorrupt,
-  // A cache file's format version does not match what this build reads. The
-  // remedy is to rebuild the cache, distinct from generic corruption.
   kFormatMismatch,
 };
 

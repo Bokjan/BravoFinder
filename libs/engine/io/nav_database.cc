@@ -50,7 +50,7 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   // GraphBuilder::airway_overflow); real AIRAC data never triggers this.
   if (db.builder_->airway_overflow()) {
     return Result<NavDatabase>::Err(
-        Error(ErrorCode::kParseError,
+        Error(ErrorCode::kSerializationError,
               "too many distinct airway names (>65535) for the uint16 airway_id space"));
   }
   // Build the detail archive from the same parse (navaid_details/hold_fixes are

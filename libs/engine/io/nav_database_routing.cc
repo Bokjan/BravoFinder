@@ -523,9 +523,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
 
   EndpointPlan dep = plan_endpoint(request.departure, /*departure=*/true);
   if (dep.named_procedure_unmatched) {
-    return Result<Routes>::Err(Error(ErrorCode::kNoRoute, "departure airport " + request.departure +
-                                                              " has no SID matching '" +
-                                                              request.departure_sid + "'"));
+    return Result<Routes>::Err(Error(ErrorCode::kProcedureNotFound,
+                                     "departure airport " + request.departure +
+                                         " has no SID matching '" + request.departure_sid + "'"));
   }
   if (dep.connections.empty()) {
     return Result<Routes>::Err(Error(
@@ -534,9 +534,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   }
   EndpointPlan arr = plan_endpoint(request.arrival, /*departure=*/false);
   if (arr.named_procedure_unmatched) {
-    return Result<Routes>::Err(Error(ErrorCode::kNoRoute, "arrival airport " + request.arrival +
-                                                              " has no STAR matching '" +
-                                                              request.arrival_star + "'"));
+    return Result<Routes>::Err(Error(ErrorCode::kProcedureNotFound,
+                                     "arrival airport " + request.arrival +
+                                         " has no STAR matching '" + request.arrival_star + "'"));
   }
   if (arr.connections.empty()) {
     return Result<Routes>::Err(
@@ -622,11 +622,12 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
       if (v < 0) {
         const std::string why =
             is_airport ? "' is an airport, not an enroute waypoint" : "' is not a known waypoint";
-        return Result<Routes>::Err(Error(ErrorCode::kNoRoute, "forced point '" + token + why));
+        return Result<Routes>::Err(
+            Error(ErrorCode::kRouteParseError, "forced point '" + token + why));
       }
       if (avoid_vertices.count(v) != 0) {
-        return Result<Routes>::Err(
-            Error(ErrorCode::kNoRoute, "forced point '" + token + "' is also in the avoid list"));
+        return Result<Routes>::Err(Error(ErrorCode::kRouteParseError,
+                                         "forced point '" + token + "' is also in the avoid list"));
       }
       forced.push_back(v);
       forced_echo.push_back(echo);

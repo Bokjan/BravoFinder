@@ -55,7 +55,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   }
   const std::vector<std::string> tokens = TokenizeRoute(route_str);
   if (tokens.empty()) {
-    return Result<Route>::Err(Error(ErrorCode::kNoRoute, "empty route string"));
+    return Result<Route>::Err(Error(ErrorCode::kRouteParseError, "empty route string"));
   }
   const NavGraph& graph = builder_->graph();
 
@@ -283,8 +283,9 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
       // Expecting a fix. A leading connector before any fix is an error.
       const ResolvedFix rf = resolve_fix(tok, ref);
       if (rf.vertex < 0) {
-        return Result<Route>::Err(Error(
-            ErrorCode::kNoRoute, "token '" + tok + "' is not a known waypoint at this position"));
+        return Result<Route>::Err(
+            Error(ErrorCode::kRouteParseError,
+                  "token '" + tok + "' is not a known waypoint at this position"));
       }
       if (prev_vertex < 0) {
         // First fix: just record it.
@@ -303,9 +304,9 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
         // Airway leg: expand the airway from prev to this fix.
         const std::vector<int> chain = expand_airway(pending_connector, prev_vertex, rf.vertex);
         if (chain.empty()) {
-          return Result<Route>::Err(
-              Error(ErrorCode::kNoRoute, "airway '" + pending_connector + "' does not connect " +
-                                             builder_->IdentOf(prev_vertex).ident + " to " + tok));
+          return Result<Route>::Err(Error(ErrorCode::kRouteParseError,
+                                          "airway '" + pending_connector + "' does not connect " +
+                                              builder_->IdentOf(prev_vertex).ident + " to " + tok));
         }
         int hop_from = prev_vertex;
         for (const int v : chain) {
@@ -340,15 +341,15 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   }
 
   if (point_vertices.empty()) {
-    return Result<Route>::Err(Error(ErrorCode::kNoRoute, "route has no waypoints"));
+    return Result<Route>::Err(Error(ErrorCode::kRouteParseError, "route has no waypoints"));
   }
   // A trailing connector with no following fix (e.g. "MCI J24" or "... PSB J60").
   // The loop's invariant is expect_fix==false <=> pending_connector.empty(): a
   // dangling connector always leaves expect_fix==true, so checking !expect_fix
   // here would be dead. Gate on the pending connector alone.
   if (!pending_connector.empty()) {
-    return Result<Route>::Err(
-        Error(ErrorCode::kNoRoute, "route ends with '" + pending_connector + "' but no fix"));
+    return Result<Route>::Err(Error(ErrorCode::kRouteParseError,
+                                    "route ends with '" + pending_connector + "' but no fix"));
   }
 
   // --- Prepend the departure airport / SID and append the arrival / STAR. ---
