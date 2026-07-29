@@ -64,4 +64,18 @@ std::string WrapRoutesEnvelope(const std::string& routes_body, uint32_t elapsed_
   return buffer.GetString();
 }
 
+std::string WrapRouteEnvelope(const std::string& route_body, uint32_t elapsed_ms) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("route");
+  // route_body is already valid RapidJSON output from the query layer (a single
+  // route object for parse_route); splice it in verbatim rather than re-parsing.
+  writer.RawValue(route_body.data(), route_body.size(), rapidjson::kObjectType);
+  writer.Key("elapsed_ms");
+  writer.Uint(elapsed_ms);
+  writer.EndObject();
+  return buffer.GetString();
+}
+
 }  // namespace bf::cli

@@ -159,6 +159,18 @@ std::string RenderRoutes(OutputFormat fmt, const std::vector<bf::Route>& routes,
   return os.str();
 }
 
+std::string RenderRoute(OutputFormat fmt, const bf::Route& route, uint32_t elapsed_ms) {
+  if (fmt == OutputFormat::kJson) {
+    JsonBuf buf;
+    bf::WriteRouteJson(buf.writer(), route);
+    return buf.str();
+  }
+  std::ostringstream os;
+  WriteRouteText(os, route);
+  os << "Query elapsed: " << elapsed_ms << " ms\n";
+  return os.str();
+}
+
 // ---- Batch lookups ----------------------------------------------------------
 
 std::string RenderWaypoints(OutputFormat fmt, const std::vector<std::string>& ids,

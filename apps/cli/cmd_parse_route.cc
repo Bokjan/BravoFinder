@@ -54,9 +54,11 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
       return;
     }
     if (fmt == bf::service::OutputFormat::kJson) {
-      // The query layer renders a bare routes array (the transport shape); the
-      // CLI wraps it with the elapsed_ms envelope it has shipped since v3.13.0.
-      std::cout << bf::cli::WrapRoutesEnvelope(result.body, result.elapsed_ms) << "\n";
+      // The query layer renders a single route object for parse-route (the
+      // transport shape); the CLI wraps it with the elapsed_ms envelope it has
+      // shipped since v3.13.0. parse_route yields exactly one route, so the
+      // envelope uses the singular "route" key (not the "routes" array).
+      std::cout << bf::cli::WrapRouteEnvelope(result.body, result.elapsed_ms) << "\n";
     } else {
       std::cout << result.body;
     }

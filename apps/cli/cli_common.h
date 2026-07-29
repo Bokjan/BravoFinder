@@ -24,8 +24,15 @@ Result<NavDatabase> OpenForRead(const std::string& db_path, const std::string& d
 std::optional<FlRange> ParseAltSpec(const std::string& spec);
 
 // Wrap a rendered routes array (the bare transport-shape body the query layer
-// returns) in the CLI's {"routes": <body>, "elapsed_ms": <n>} envelope, built
-// with a RapidJSON Writer + RawValue so the outer object is not hand-rolled.
+// returns for find_routes) in the CLI's {"routes": <body>, "elapsed_ms": <n>}
+// envelope, built with a RapidJSON Writer + RawValue so the outer object is not
+// hand-rolled.
 std::string WrapRoutesEnvelope(const std::string& routes_body, uint32_t elapsed_ms);
+
+// Wrap a single rendered route object (parse_route) in the CLI's
+// {"route": <body>, "elapsed_ms": <n>} envelope -- the singular "route" key
+// matches parse_route's single-object result (vs the "routes" array of
+// find_routes).
+std::string WrapRouteEnvelope(const std::string& route_body, uint32_t elapsed_ms);
 
 }  // namespace bf::cli

@@ -35,6 +35,13 @@ enum class OutputFormat {
 std::string RenderRoutes(OutputFormat fmt, const std::vector<bf::Route>& routes,
                          uint32_t elapsed_ms);
 
+// A single route (parse_route). JSON: the route object directly -- parse_route
+// always yields exactly one route, so the transports ship it as a single object
+// (matching the /v1/parse-route and MCP parse_route contracts), not a one-element
+// array. Text: the single route block plus a final "Query elapsed" line, identical
+// to RenderRoutes with one route.
+std::string RenderRoute(OutputFormat fmt, const bf::Route& route, uint32_t elapsed_ms);
+
 // ---- Batch lookups ----------------------------------------------------------
 // JSON: an array parallel to `ids` -- null (optional lookups) or an empty array
 // (grouped lookups) for a not-found id. Text: one line per match, "<id>: not

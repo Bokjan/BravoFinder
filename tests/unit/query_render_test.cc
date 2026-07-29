@@ -193,3 +193,30 @@ TEST_CASE("RenderRoutes: json is a bare array (the transport shape)", "[unit][re
   // elapsed_ms is out-of-band (in HandlerResult), not in the JSON body.
   CHECK(json.find("elapsed_ms") == std::string::npos);
 }
+
+TEST_CASE("RenderRoute: json is a single object (the parse-route shape)", "[unit][render]") {
+  bf::Route r;
+  r.route_string = "KJFK SID CANDR J60 PSB STAR KLAX";
+  r.total_distance_nm = 5181.79;
+  const std::string json = bf::service::RenderRoute(Json(), r, 7);
+  rapidjson::Document doc;
+  doc.Parse(json.c_str());
+  REQUIRE(doc.IsObject());  // single object, NOT a one-element array
+  CHECK(doc.HasMember("route"));
+  CHECK(doc.HasMember("total_distance_nm"));
+  // elapsed_ms is out-of-band (in HandlerResult), not in the JSON body.
+  CHECK(json.find("elapsed_ms") == std::string::npos);
+}
+
+TEST_CASE("RenderRoute: text has no header and ends with elapsed", "[unit][render]") {
+  bf::Route r;
+  r.route_string = "KJFK SID CANDR J60 PSB STAR KLAX";
+  r.total_distance_nm = 5181.79;
+  r.dep_distance_nm = 10.0;
+  r.enroute_distance_nm = 5141.79;
+  r.arr_distance_nm = 30.0;
+  const std::string text = bf::service::RenderRoute(Text(), r, 42);
+  CHECK(text.find("=== Route") == std::string::npos);  // single route: no header
+  CHECK(text.find("Total distance: 5181.8 NM") != std::string::npos);
+  CHECK(text.find("Query elapsed: 42 ms") != std::string::npos);
+}

@@ -59,7 +59,7 @@ HandlerResult ParseRoute(const bf::NavDatabase& db, const std::string& route_str
     // not form a valid route. The message names the offending token.
     return {RenderError(fmt, result.error().message), kUnprocessable, 0};
   }
-  return {RenderRoutes(fmt, {result.value()}, elapsed), kOk, elapsed};
+  return {RenderRoute(fmt, result.value(), elapsed), kOk, elapsed};
 }
 
 // ---- Batch lookups ----------------------------------------------------------
