@@ -15,6 +15,7 @@ enum class ErrorCode {
   kInvalidArgument,
   kDataMissing,
   kParseError,
+  kSerializationError,
   kAirportNotFound,
   kNoRoute,
   // A cache file is present but its contents are corrupt: bad magic, truncated,

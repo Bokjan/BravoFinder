@@ -83,17 +83,19 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
   const size_t e = snapshot.edges.size();
   if (snapshot.airway_names.size() > 0xFFFF) {
     return Result<void>::Err(
-        Error(ErrorCode::kParseError, "too many airway names to serialize (> 65535)"));
+        Error(ErrorCode::kSerializationError, "too many airway names to serialize (> 65535)"));
   }
   if (snapshot.offsets.size() != v + 1 || snapshot.idents.size() != v ||
       snapshot.has_outbound.size() != v || snapshot.has_inbound.size() != v ||
       snapshot.kinds.size() != v) {
-    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent snapshot array sizes"));
+    return Result<void>::Err(
+        Error(ErrorCode::kSerializationError, "inconsistent snapshot array sizes"));
   }
   const size_t airport_count = v - static_cast<size_t>(snapshot.first_airport_vertex);
   if (snapshot.first_airport_vertex < 0 || static_cast<size_t>(snapshot.first_airport_vertex) > v ||
       snapshot.airport_elevations_ft.size() != airport_count) {
-    return Result<void>::Err(Error(ErrorCode::kParseError, "inconsistent airport array size"));
+    return Result<void>::Err(
+        Error(ErrorCode::kSerializationError, "inconsistent airport array size"));
   }
 
   // Section counts, up front so Decode can allocate before reading bodies.
@@ -128,6 +130,9 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
       flags |= 0x02;
     }
     w.U8(flags);
+    if (static_cast<uint8_t>(snapshot.kinds[i]) > static_cast<uint8_t>(WaypointKind::kOther)) {
+      return Result<void>::Err(Error(ErrorCode::kSerializationError, "vertex kind out of range"));
+    }
     w.U8(static_cast<uint8_t>(snapshot.kinds[i]));
   }
 
@@ -136,11 +141,46 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
     w.I32(elev);
   }
 
-  // CSR graph structure (not per-vertex attributes, kept as flat arrays):
+  // CSR graph structure (not per-vertex attributes, kept as flat arrays).
+  // Validate the same invariants Decode checks, but on the producer side, so a
+  // malformed GraphSnapshot (a GraphBuilder bug) fails `bf build` here with a
+  // precise message instead of only surfacing as kCacheCorrupt on a later
+  // round-trip. The checks fold into the write loops -- no extra passes.
+  // CSR offsets: must start at 0, be non-decreasing, and end at the edge count
+  // (offsets.size() == v+1 is already verified above, so front/back are safe).
+  if (snapshot.offsets.front() != 0) {
+    return Result<void>::Err(Error(ErrorCode::kSerializationError, "CSR offsets must start at 0"));
+  }
+  int prev_offset = 0;
   for (int off : snapshot.offsets) {
+    if (off < prev_offset) {
+      return Result<void>::Err(
+          Error(ErrorCode::kSerializationError, "CSR offsets must be non-decreasing"));
+    }
+    prev_offset = off;
     w.I32(off);
   }
+  if (snapshot.offsets.back() != static_cast<int>(e)) {
+    return Result<void>::Err(
+        Error(ErrorCode::kSerializationError, "CSR offsets must end at the edge count"));
+  }
+  // Edges: target vertex, airway-name index, and level enum must be in range.
+  // airway_id == 0 is the DCT slot (airway_names[0]); it is valid as long as the
+  // airway table is non-empty, which is exactly what the < airway_names.size()
+  // check enforces (the > 0xFFFF check above only bounds the upper end).
   for (const GraphEdge& ed : snapshot.edges) {
+    if (ed.to < 0 || static_cast<size_t>(ed.to) >= v) {
+      return Result<void>::Err(
+          Error(ErrorCode::kSerializationError, "edge target vertex out of range"));
+    }
+    if (ed.airway_id >= snapshot.airway_names.size()) {
+      return Result<void>::Err(
+          Error(ErrorCode::kSerializationError, "edge airway-name index out of range"));
+    }
+    if (static_cast<uint8_t>(ed.level) > static_cast<uint8_t>(AirwayLevel::kBoth)) {
+      return Result<void>::Err(
+          Error(ErrorCode::kSerializationError, "edge airway level out of range"));
+    }
     w.I32(ed.to);
     w.F32(ed.distance_nm);
     w.U16(ed.airway_id);

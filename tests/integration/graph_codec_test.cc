@@ -81,8 +81,8 @@ bf::GraphSnapshot MakeValidSnapshot() {
 }
 
 // Encode a snapshot to its section body + the shared string-pool blob. REQUIREs
-// the encode to succeed (the corruption cases all keep array sizes consistent,
-// which is all Encode validates).
+// the encode to succeed (callers pass a structurally and semantically valid
+// snapshot; the encode-rejection cases below call Encode directly).
 void EncodeSnapshot(const bf::GraphSnapshot& s, std::vector<uint8_t>* body,
                     std::vector<uint8_t>* pool_blob) {
   bf::ByteWriter w(*body);
@@ -94,7 +94,7 @@ void EncodeSnapshot(const bf::GraphSnapshot& s, std::vector<uint8_t>* body,
 
 }  // namespace
 
-TEST_CASE("graph decode: a semantically corrupt section is rejected, not read out of bounds",
+TEST_CASE("graph codec: a corrupt snapshot is rejected on encode, a corrupt section on decode",
           "[unit][bfdb]") {
   // Control: the valid snapshot round-trips through Encode/Decode.
   {
@@ -105,59 +105,88 @@ TEST_CASE("graph decode: a semantically corrupt section is rejected, not read ou
     CHECK(r.value().coords.size() == 2);
   }
 
-  // Each case corrupts exactly one field of an otherwise valid snapshot; Decode
-  // must fail through Result (kCacheCorrupt), never index the graph out of range.
-  auto expect_corrupt = [](const bf::GraphSnapshot& s) {
+  // Encode-side: each case corrupts exactly one semantic field of an otherwise
+  // valid snapshot while keeping array sizes consistent. Encode now validates
+  // these invariants (not just sizes), so it rejects the snapshot with
+  // kSerializationError before any section is written -- a GraphBuilder bug surfaces at
+  // `bf build` instead of only as kCacheCorrupt on a later round-trip.
+  auto expect_encode_rejects = [](const bf::GraphSnapshot& s) {
+    std::vector<uint8_t> body, pool_blob;
+    bf::ByteWriter w(body);
+    bf::StringPool pool;
+    bf::Result<void> enc = bf::GraphCodec::Encode(s, w, pool);
+    CHECK_FALSE(enc);
+    if (!enc) {
+      CHECK(enc.error().code == bf::ErrorCode::kSerializationError);
+    }
+  };
+  SECTION("encode rejects edge target vertex out of range") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges[0].to = 5;  // >= vertex count (2)
+    expect_encode_rejects(s);
+  }
+  SECTION("encode rejects edge target vertex negative") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges[0].to = -1;
+    expect_encode_rejects(s);
+  }
+  SECTION("encode rejects edge airway-name index out of range") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges[0].airway_id = 7;  // >= airway_names count (1)
+    expect_encode_rejects(s);
+  }
+  SECTION("encode rejects edge airway level enum out of range") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges[0].level = static_cast<bf::AirwayLevel>(99);
+    expect_encode_rejects(s);
+  }
+  SECTION("encode rejects vertex kind enum out of range") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.kinds[0] = static_cast<bf::WaypointKind>(99);
+    expect_encode_rejects(s);
+  }
+  SECTION("encode rejects CSR offsets not ending at the edge count") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.offsets = {0, 1, 5};  // back != e (1)
+    expect_encode_rejects(s);
+  }
+  SECTION("encode rejects CSR offsets that are not monotonic") {
+    bf::GraphSnapshot s = MakeValidSnapshot();
+    s.edges.clear();        // e = 0, so back must be 0 to span correctly
+    s.offsets = {0, 2, 0};  // spans [0,0] at the ends but dips downward: not monotonic
+    expect_encode_rejects(s);
+  }
+
+  // Decode-side: Encode now guarantees a well-formed section, so the realistic
+  // threat is a valid encoding byte-corrupted on disk (bit-flip / half-write).
+  // Decode must still reject it through Result (kCacheCorrupt), never index the
+  // graph out of range.
+  SECTION("decode rejects trailing bytes after a valid section") {
     std::vector<uint8_t> body, pool;
-    EncodeSnapshot(s, &body, &pool);
+    EncodeSnapshot(MakeValidSnapshot(), &body, &pool);
+    body.push_back(0);  // one extra byte the decoder should not have to read
     bf::Result<bf::GraphSnapshot> r = bf::GraphCodec::Decode(body, pool);
     CHECK_FALSE(r);
     if (!r) {
       CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
     }
-  };
-
-  SECTION("edge target vertex out of range") {
-    bf::GraphSnapshot s = MakeValidSnapshot();
-    s.edges[0].to = 5;  // >= vertex count (2)
-    expect_corrupt(s);
   }
-  SECTION("edge target vertex negative") {
-    bf::GraphSnapshot s = MakeValidSnapshot();
-    s.edges[0].to = -1;
-    expect_corrupt(s);
-  }
-  SECTION("edge airway-name index out of range") {
-    bf::GraphSnapshot s = MakeValidSnapshot();
-    s.edges[0].airway_id = 7;  // >= airway_names count (1)
-    expect_corrupt(s);
-  }
-  SECTION("edge airway level enum out of range") {
-    bf::GraphSnapshot s = MakeValidSnapshot();
-    s.edges[0].level = static_cast<bf::AirwayLevel>(99);
-    expect_corrupt(s);
-  }
-  SECTION("vertex kind enum out of range") {
-    bf::GraphSnapshot s = MakeValidSnapshot();
-    s.kinds[0] = static_cast<bf::WaypointKind>(99);
-    expect_corrupt(s);
-  }
-  SECTION("CSR offsets do not end at the edge count") {
-    bf::GraphSnapshot s = MakeValidSnapshot();
-    s.offsets = {0, 1, 5};  // back != e (1)
-    expect_corrupt(s);
-  }
-  SECTION("CSR offsets are not monotonic") {
-    bf::GraphSnapshot s = MakeValidSnapshot();
-    s.edges.clear();        // e = 0, so back must be 0 to span correctly
-    s.offsets = {0, 2, 0};  // spans [0,0] at the ends but dips downward: not monotonic
-    expect_corrupt(s);
-  }
-
-  SECTION("trailing bytes after a valid section") {
+  SECTION("decode rejects a byte-corrupted edge target") {
+    // Offset of the first edge's `to` field in a MakeValidSnapshot() encoding:
+    // header (5*U32 = 20) + 2 vertex records (34 B each) + 0 airport records +
+    // 3 offsets (I32 each) = 100. The wire layout is fixed (static_asserts in
+    // graph_codec.cc guard each record size); if it changes, this and Encode's
+    // layout comment move together.
+    constexpr size_t kFirstEdgeToOffset = 5 * 4 + 2 * 34 + 0 * 4 + 3 * 4;
+    static_assert(kFirstEdgeToOffset == 100, "graph wire layout drifted");
     std::vector<uint8_t> body, pool;
     EncodeSnapshot(MakeValidSnapshot(), &body, &pool);
-    body.push_back(0);  // one extra byte the decoder should not have to read
+    REQUIRE(body.size() > kFirstEdgeToOffset + 3);
+    // Overwrite the little-endian I32 `to` with 0x7FFFFFFF (>= vertex count 2).
+    body[kFirstEdgeToOffset] = 0xFF;
+    body[kFirstEdgeToOffset + 1] = 0xFF;
+    body[kFirstEdgeToOffset + 2] = 0xFF;
+    body[kFirstEdgeToOffset + 3] = 0x7F;
     bf::Result<bf::GraphSnapshot> r = bf::GraphCodec::Decode(body, pool);
     CHECK_FALSE(r);
     if (!r) {

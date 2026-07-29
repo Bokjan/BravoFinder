@@ -54,7 +54,7 @@ bool ReadInto(std::istream& f, std::span<uint8_t> b) {
 
 Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& input) {
   if (input.graph == nullptr) {
-    return Result<void>::Err(Error(ErrorCode::kParseError, "unified cache requires a graph"));
+    return Result<void>::Err(Error(ErrorCode::kInvalidArgument, "unified cache requires a graph"));
   }
 
   // One string pool shared by every section, so a string recurring across
@@ -102,7 +102,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   // uint64, so only the shared pool is bounded this way.)
   if (pool_blob.size() > 0xFFFFFFFFull) {
     return Result<void>::Err(
-        Error(ErrorCode::kParseError,
+        Error(ErrorCode::kSerializationError,
               "unified cache string pool exceeds 4 GiB; the uint32 pool offset space "
               "cannot address it. This is unexpected for real AIRAC data."));
   }
@@ -159,7 +159,8 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
     WriteAll(f, detail_body);
   }
   if (!f) {
-    return Result<void>::Err(Error(ErrorCode::kParseError, "failed writing .bfdb: " + path));
+    return Result<void>::Err(
+        Error(ErrorCode::kSerializationError, "failed writing .bfdb: " + path));
   }
   return Result<void>::Ok();
 }
