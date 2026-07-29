@@ -313,8 +313,10 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
     if (!dr.ok()) {
       return bad("corrupt CIFP section directory");
     }
-    // ICAO resolves against the global pool.
-    if (static_cast<size_t>(icao_off) + icao_len > archive.pool_.size()) {
+    // ICAO resolves against the global pool. Use the subtraction form (as
+    // ResolveRef does) so a near-UINT32_MAX icao_off cannot wrap the sum past
+    // pool_.size() on a 32-bit size_t and slip the bounds check.
+    if (icao_off > archive.pool_.size() || icao_len > archive.pool_.size() - icao_off) {
       return bad("corrupt CIFP section: ICAO reference out of range");
     }
     // The segment must lie within the CIFP section. seg_rel is relative to the

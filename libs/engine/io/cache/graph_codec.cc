@@ -225,14 +225,15 @@ Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
   // Each fuse above bounds one count against the whole remaining section without
   // debiting the others, so a crafted header could pass all five yet demand far
   // more than `avail` in total (each resize below allocates independently). Cap
-  // the combined minimum too. Products fit in size_t: every count is a uint32
-  // and per_elem is tiny, on a 64-bit size_t.
-  const size_t min_body_bytes = static_cast<size_t>(v) * kVertexRecordSize +
-                                static_cast<size_t>(airport_count) * kAirportRecordSize +
-                                static_cast<size_t>(e) * kEdgeRecordSize +
-                                static_cast<size_t>(airway_count) * kAirwayRefSize +
-                                static_cast<size_t>(msa_count) * kMsaHeaderSize;
-  if (min_body_bytes > avail) {
+  // the combined minimum too. Each product is individually bounded to <= avail
+  // by count_fits, but the sum of five can exceed 2^32 on a 32-bit size_t with a
+  // large section, so accumulate in uint64_t before comparing.
+  const uint64_t min_body_bytes = static_cast<uint64_t>(v) * kVertexRecordSize +
+                                  static_cast<uint64_t>(airport_count) * kAirportRecordSize +
+                                  static_cast<uint64_t>(e) * kEdgeRecordSize +
+                                  static_cast<uint64_t>(airway_count) * kAirwayRefSize +
+                                  static_cast<uint64_t>(msa_count) * kMsaHeaderSize;
+  if (min_body_bytes > static_cast<uint64_t>(avail)) {
     return bad("corrupt .bfdb: combined section counts exceed section size");
   }
 
