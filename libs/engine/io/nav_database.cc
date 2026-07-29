@@ -147,6 +147,13 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
 }
 
 const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
+  // Moved-from instances have a null cache_mutex_ (the move ops are = default).
+  // They are never meant to be queried (see the class comment), but unlike
+  // LookupWaypoints/LookupAirports this path has no !builder_ early return, so
+  // guard the lock explicitly: return "no procedures" rather than null-deref.
+  if (!cache_mutex_) {
+    return nullptr;
+  }
   // Eager mode: the cache was fully populated at Open and is now frozen, so a
   // plain read needs no lock (no concurrent insert can rehash it). A miss means
   // the airport simply has no procedures.

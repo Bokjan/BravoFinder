@@ -34,6 +34,7 @@
 //     logs; a global logger set once is visible to all workers, which is the
 //     core benefit over thread-local.
 
+#include <atomic>
 #include <cstdint>
 #include <format>
 #include <memory>
@@ -65,12 +66,16 @@ class Logger {
   // BF_LOG_FATAL after Emit and before abort so ostream buffers are not lost to
   // std::abort (which does not flush C++ streams).
   virtual void Flush();
-  bool Enabled(LogLevel l) const { return l >= min_level_; }
-  void set_min_level(LogLevel l) { min_level_ = l; }
-  LogLevel min_level() const { return min_level_; }
+  // min_level_ is atomic so Enabled (read on every LogImpl, including from
+  // threadpool workers) races no UB against a concurrent set_min_level on the
+  // same Logger. Relaxed ordering suffices: a stale level just over/under-logs
+  // for one call, and the level is not used to synchronize any other state.
+  bool Enabled(LogLevel l) const { return l >= min_level_.load(std::memory_order_relaxed); }
+  void set_min_level(LogLevel l) { min_level_.store(l, std::memory_order_relaxed); }
+  LogLevel min_level() const { return min_level_.load(std::memory_order_relaxed); }
 
  protected:
-  LogLevel min_level_ = LogLevel::kDebug;
+  std::atomic<LogLevel> min_level_{LogLevel::kDebug};
 };
 
 // Generic sink writing to any std::ostream (cout/cerr/file/ostringstream).
