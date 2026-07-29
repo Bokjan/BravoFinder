@@ -11,6 +11,7 @@
 
 #include "tools.h"
 
+#include <cassert>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -167,6 +168,10 @@ std::vector<Tool> MakeTools() {
   tools.reserve(std::size(kToolMeta));
   for (const ToolMeta& meta : kToolMeta) {
     auto it = by_name.find(meta.name);
+    // A tool's name must match a handler registered by bf::service::MakeHandlers();
+    // a name drift there would otherwise silently drop the tool. Catch it in
+    // debug builds.
+    assert(it != by_name.end() && "MCP tool name has no matching bf::service handler");
     if (it == by_name.end()) {
       continue;
     }

@@ -24,12 +24,13 @@
 namespace bf::mcp {
 
 // The MCP protocol versions this server understands. Negotiation echoes the
-// client's requested version when it is one of these; otherwise it falls back to
-// kDefaultProtocolVersion (preserving the stdio behavior for a client that sends
-// no protocolVersion).
+// client's requested version when it is one of these; otherwise (an unsupported
+// or absent version) it falls back to kDefaultProtocolVersion, which aliases the
+// highest version we speak (kProtocolVersion2025), as MCP requires the server to
+// answer with its newest understood version.
 inline constexpr char kProtocolVersion2024[] = "2024-11-05";
 inline constexpr char kProtocolVersion2025[] = "2025-03-26";
-inline constexpr char kDefaultProtocolVersion[] = "2024-11-05";
+inline constexpr const char* kDefaultProtocolVersion = kProtocolVersion2025;
 
 class Dispatcher {
  public:

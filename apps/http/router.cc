@@ -3,6 +3,7 @@
 
 #include "router.h"
 
+#include <cassert>
 #include <charconv>
 #include <functional>
 #include <optional>
@@ -132,6 +133,10 @@ Router::Router(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop)
   }
   for (const Route& r : kRoutes) {
     auto it = by_name.find(r.name);
+    // Every path we expose must map to a handler registered by
+    // bf::service::MakeHandlers(); a name drift there would otherwise silently
+    // drop the endpoint. Catch it in debug builds.
+    assert(it != by_name.end() && "HTTP route name has no matching bf::service handler");
     if (it != by_name.end()) {
       routes_.emplace(r.path, std::move(it->second));
     }

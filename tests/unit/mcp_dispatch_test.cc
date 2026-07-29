@@ -92,21 +92,21 @@ TEST_CASE("mcp dispatcher: initialize negotiates the protocol version", "[unit][
     CHECK(doc["result"]["capabilities"]["tools"].IsObject());
   }
 
-  SECTION("a client sending no protocolVersion falls back to the default") {
+  SECTION("a client sending no protocolVersion falls back to the newest supported version") {
     const rapidjson::Document req = Req(R"({"jsonrpc":"2.0","id":2,"method":"initialize"})");
     const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
     REQUIRE(resp.has_response);
     rapidjson::Document doc = Parse(resp.body);
-    CHECK(std::string(doc["result"]["protocolVersion"].GetString()) == "2024-11-05");
+    CHECK(std::string(doc["result"]["protocolVersion"].GetString()) == "2025-03-26");
   }
 
-  SECTION("an unsupported protocolVersion falls back to the default") {
+  SECTION("an unsupported protocolVersion falls back to the newest supported version") {
     const rapidjson::Document req = Req(
         R"({"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"1999-01-01"}})");
     const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
     REQUIRE(resp.has_response);
     rapidjson::Document doc = Parse(resp.body);
-    CHECK(std::string(doc["result"]["protocolVersion"].GetString()) == "2024-11-05");
+    CHECK(std::string(doc["result"]["protocolVersion"].GetString()) == "2025-03-26");
   }
 }
 

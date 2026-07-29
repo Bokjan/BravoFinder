@@ -56,6 +56,7 @@ const char* NegotiateProtocolVersion(const rapidjson::Value* params) {
   if (params != nullptr && params->IsObject() && params->HasMember("protocolVersion") &&
       (*params)["protocolVersion"].IsString()) {
     const std::string_view requested = (*params)["protocolVersion"].GetString();
+    // Echo a version we support verbatim.
     if (requested == kProtocolVersion2025) {
       return kProtocolVersion2025;
     }
@@ -63,6 +64,9 @@ const char* NegotiateProtocolVersion(const rapidjson::Value* params) {
       return kProtocolVersion2024;
     }
   }
+  // The client asked for an unsupported or absent version: MCP requires the
+  // server to answer with the highest version it supports, so fall back to
+  // kDefaultProtocolVersion (2025-03-26) rather than the older 2024-11-05.
   return kDefaultProtocolVersion;
 }
 
@@ -218,16 +222,14 @@ std::string Dispatcher::MakeToolResult(const rapidjson::Value& id, const std::st
   writer.EndArray();
   writer.Key("isError");
   writer.Bool(is_error);
-  // Surface the database call's compute cost as MCP result metadata. Only a
-  // successful tool call carries a non-zero timing (error paths leave it 0), so
-  // omit the field entirely otherwise rather than reporting a misleading 0.
-  if (elapsed_ms > 0) {
-    writer.Key("_meta");
-    writer.StartObject();
-    writer.Key("elapsed_ms");
-    writer.Uint(elapsed_ms);
-    writer.EndObject();
-  }
+  // Surface the database call's compute cost as MCP result metadata. elapsed_ms
+  // is an unsigned millisecond count, so 0 is a legitimate (sub-millisecond)
+  // measurement and is reported like any other; the field is always present.
+  writer.Key("_meta");
+  writer.StartObject();
+  writer.Key("elapsed_ms");
+  writer.Uint(elapsed_ms);
+  writer.EndObject();
   writer.EndObject();
   writer.EndObject();
   return buffer.GetString();
@@ -344,8 +346,10 @@ std::string Dispatcher::HandleToolsCall(const rapidjson::Value& id,
                                      : null_args;
 
   // Resolve which database to serve from the optional "cycle" argument (absent
-  // => latest). This is the server's concern, so the tool handlers never see
-  // cycle and keep operating on a single database.
+  // => latest). This is the server's concern: the cycle is read here and the
+  // matching database is handed to the tool, while the original args (still
+  // carrying the "cycle" key) are forwarded to the handler, which ignores it
+  // (see the unknown-key contract in libs/service).
   std::optional<uint32_t> cycle;
   if (args.HasMember("cycle")) {
     // Reject a present-but-invalid cycle rather than silently falling back to
@@ -365,6 +369,9 @@ std::string Dispatcher::HandleToolsCall(const rapidjson::Value& id,
 
   for (const Tool& tool : tools_) {
     if (tool.name == name) {
+      // The same `args` (still carrying the server-level "cycle" key, which the
+      // handlers ignore -- see the unknown-key contract in libs/service) is
+      // forwarded to the tool handler; only the resolved `db` is server-chosen.
       ToolResult tr = tool.handler(args, *db.value());
       return MakeToolResult(id, tr.json_text, tr.is_error, tr.elapsed_ms);
     }

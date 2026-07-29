@@ -25,6 +25,13 @@ namespace bf::service {
 
 namespace {
 
+// Contract: a handler must ignore any key in `args` it does not recognize. The
+// MCP transport (apps/mcp) forwards the server-level "cycle" selector through to
+// the handler as part of the args object even though "cycle" is not declared in
+// any tool's JSON-Schema; a handler that rejected unknown keys would wrongly
+// fail every MCP call that pins a cycle, so strict unknown-key validation is
+// out of bounds here.
+//
 // HTTP-style status codes the adapters report on a bad request (see
 // HandlerResult in the header for the 400/404/422 semantics; 404/422 are
 // produced inside the typed entries).
