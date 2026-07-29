@@ -96,7 +96,13 @@ class UnifiedCache {
   //      scan and never flushed the last airport of each SID/STAR/IAP table, so
   //      v10 dfd1 files silently omit those procedures while staying byte- and
   //      version-valid. v10 is retired to force a rebuild of the now-complete data.
-  static constexpr uint32_t kFormatVersion = 11;
+  // v12: no layout change. The Fenix MORA loader remapped south/west-hemisphere
+  //      coords with +180/+360 (dropping the whole southern/western grid, MORA 0)
+  //      and amplified every value 100x (overflowing int16_t on high-terrain
+  //      cells, silently disabling the terrain floor). v11 Fenix-sourced files
+  //      carry that wrong MORA grid while staying byte- and version-valid, so v11
+  //      is retired to force a rebuild with correct MORA data.
+  static constexpr uint32_t kFormatVersion = 12;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

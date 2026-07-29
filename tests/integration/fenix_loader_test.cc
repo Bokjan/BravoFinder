@@ -143,7 +143,34 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
     CHECK(enrt > 1000);
     CHECK(term > 1000);
   }
-  SECTION("MORA") { CHECK(fd.data.mora.MoraAt(bf::Coordinate{28.0, 87.0}) > 100); }
+  SECTION("MORA") {
+    // MORA cells are flight levels (hundreds of feet) keyed by signed geographic
+    // degrees. Two regressions to guard against:
+    //   * H1: a +180/+360 remap once pushed the whole south/west hemisphere out
+    //     of range, silently dropping it -- so cells below the equator / west of
+    //     the prime meridian must be populated.
+    //   * H2: a *100 amplification once made every value 100x too large (and
+    //     overflowed int16_t on high-terrain cells). A real MORA never reaches
+    //     600 (60000 ft -- far above any terrain), so the grid max staying below
+    //     that bound catches the amplification.
+    int16_t max_cell = 0;
+    int south_pop = 0, west_pop = 0;
+    for (int lat = -90; lat <= 89; ++lat) {
+      for (int lon = -180; lon <= 179; ++lon) {
+        const int16_t v = fd.data.mora.MoraAt(
+            bf::Coordinate{static_cast<double>(lat) + 0.5, static_cast<double>(lon) + 0.5});
+        if (v <= 0) continue;
+        max_cell = std::max(max_cell, v);
+        if (lat < 0) ++south_pop;
+        if (lon < 0) ++west_pop;
+      }
+    }
+    CHECK(south_pop > 0);   // H1: southern hemisphere populated
+    CHECK(west_pop > 0);    // H1: western hemisphere populated
+    CHECK(max_cell < 600);  // H2: no 100x amplification
+    // NE quadrant (the only quadrant the old bug left intact) is still populated.
+    CHECK(fd.data.mora.MoraAt(bf::Coordinate{28.0, 87.0}) > 0);
+  }
 }
 
 TEST_CASE("fenix: LoadProcedures", "[integration][fenix]") {

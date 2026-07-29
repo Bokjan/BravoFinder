@@ -466,17 +466,16 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
         continue;
       }
 
-      int lat = start_lat;
-      int lon = start_lon + col;
-      if (lat < 0) {
-        lat += 180;
-      }
-      if (lon < 0) {
-        lon += 360;
-      }
-      if (lat >= 0 && lat < 180 && lon >= 0 && lon < 360) {
-        data.mora.SetCell(lat, lon, static_cast<int16_t>(mora_val * 100));
-      }
+      // MORA cells are flight levels (hundreds of feet) keyed by signed
+      // geographic degrees (lat in [-90,89], lon in [-180,179]); SetCell /
+      // Index reject anything outside that range. The DB text already encodes
+      // the flight level ("010" = FL10 = 1000 ft), so pass start_lat and the
+      // signed column longitude straight through -- no +180/+360 remap (which
+      // pushed the entire south/west hemisphere out of range and silently
+      // dropped it) and no *100 amplification (which made every value 100x too
+      // large and overflowed int16_t on high-terrain cells). This matches the
+      // dfd1 / xplane12 loaders.
+      data.mora.SetCell(start_lat, start_lon + col, static_cast<int16_t>(mora_val));
     }
   }
   return Result<void>::Ok();
