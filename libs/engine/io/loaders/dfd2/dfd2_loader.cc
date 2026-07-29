@@ -505,10 +505,14 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                ColumnInt(stmt, c.alt2));
   const double rnp = ColumnDouble(stmt, c.rnp);
-  leg.rnp_centinm = rnp > 0.0 ? static_cast<uint16_t>(std::lround(rnp * 100.0)) : 0;
+  // rnp_centinm and speed_limit_kt are uint16_t; clamp the narrowing so an
+  // out-of-range source value (negative, or beyond 65535) stays in range
+  // instead of silently wrapping. Matches dfd1's FillProcExtras.
+  const long rnp_centi = rnp > 0.0 ? std::lround(rnp * 100.0) : 0;
+  leg.rnp_centinm = static_cast<uint16_t>(std::clamp<long>(rnp_centi, 0, 65535));
   const std::string turn = ColumnText(stmt, c.turn_dir);
   leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
-  leg.speed_limit_kt = static_cast<uint16_t>(ColumnInt(stmt, c.speed_limit));
+  leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(ColumnInt(stmt, c.speed_limit), 0, 65535));
   proc.legs.push_back(std::move(leg));
 }
 

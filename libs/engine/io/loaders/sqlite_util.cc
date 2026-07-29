@@ -68,7 +68,9 @@ Result<bool> Step(sqlite3_stmt* stmt) {
   if (rc == SQLITE_DONE) {
     return Result<bool>::Ok(false);
   }
-  return Result<bool>::Err(Error(ErrorCode::kParseError, "SQLite step failed"));
+  return Result<bool>::Err(
+      Error(ErrorCode::kParseError,
+            std::string("SQLite step failed: ") + sqlite3_errmsg(sqlite3_db_handle(stmt))));
 }
 
 std::string ColumnText(sqlite3_stmt* stmt, int col) {

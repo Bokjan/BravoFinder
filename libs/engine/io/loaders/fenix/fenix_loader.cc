@@ -617,7 +617,10 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
       // '\0'.  'E' appears to mean "either" — '\0' fallback is acceptable.
       leg.turn_dir = (td == "L") ? 'L' : (td == "R") ? 'R' : '\0';
       double spd = ColumnOptDouble(stmt, 8);
-      leg.speed_limit_kt = static_cast<uint16_t>(spd > 0.0 ? spd : 0.0);
+      // uint16_t: clamp to [0, 65535] so a corrupt out-of-range speed does not
+      // wrap (matches dfd1/dfd2). Real speeds are well below this.
+      leg.speed_limit_kt =
+          static_cast<uint16_t>(std::clamp<double>(spd > 0.0 ? spd : 0.0, 0.0, 65535.0));
       // NOTE: Fenix schema has no RNP column in TerminalLegs/TerminalLegsEx,
       // so ProcedureLeg.rnp_centinm stays 0 (dfd1/dfd2/xplane12 load it).
 

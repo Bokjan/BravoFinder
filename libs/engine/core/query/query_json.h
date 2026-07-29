@@ -38,7 +38,7 @@ inline const char* ToString(ProcedureType t) {
     case ProcedureType::kApproach:
       return "approach";
   }
-  return "sid";
+  return "unknown";
 }
 
 namespace detail {

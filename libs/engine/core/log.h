@@ -5,8 +5,9 @@
 //
 // Design notes:
 //   * Default-silent: the global default logger is nullptr, so the engine stays
-//     quiet unless a caller installs a sink. The silent path costs one atomic
-//     load and never calls std::format.
+//     quiet unless a caller installs a sink. The silent path is a mutex-guarded
+//     shared_ptr copy (DefaultLogger) plus a relaxed atomic level check, and
+//     never calls std::format.
 //   * std::format + std::format_string<Args...> gives compile-time format/arg
 //     checking (a mismatch fails the build, not a runtime crash).
 //   * Source location is captured at the call site via the BF_LOG_* macros. A
@@ -155,7 +156,8 @@ inline constexpr const char* kLevelPrefix[] = {"",     "TRACE", "DEBUG", "INFO",
 // normally (a trailing defaulted source_location would make the pack deduce
 // empty -- the death of the earlier "macro-free API" draft). std::format_string
 // does the compile-time format/arg-type check here. std::format runs only after
-// Enabled passes -- the silent path is one atomic load.
+// Enabled passes -- the silent path is a mutex-guarded shared_ptr copy
+// (DefaultLogger) plus a relaxed atomic level load.
 template <typename... Args>
 void LogImpl(std::source_location loc, LogLevel level, std::format_string<Args...> fmt,
              Args&&... args) {
