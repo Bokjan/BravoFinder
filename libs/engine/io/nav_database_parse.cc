@@ -90,22 +90,36 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     return {best, graph.CoordOf(best)};
   };
 
+  // Dijkstra scratch for expand_airway, reused across every airway leg in this
+  // route. The vectors are allocated once (V ~ 270k, ~3 MB) instead of per leg;
+  // a generation stamp avoids re-clearing dist each leg -- a vertex's dist is
+  // valid only for the current generation, so untouched vertices read as +inf
+  // without being wiped. Mirrors the A* SearchWorkspace reuse pattern.
+  const int n = graph.VertexCount();
+  std::vector<double> dist(n);
+  std::vector<int> prev(n, -1);
+  std::vector<int> gen(n, 0);
+  int cur_gen = 0;
+
   // Walk airway `name` from `from` to `to`, following only edges whose
   // designators include `name` (Dijkstra restricted to that airway). Returns the
   // intermediate + destination vertices (excluding `from`) in order, or empty if
   // the airway does not connect them. Small, bounded search per airway.
   auto expand_airway = [&](const std::string& name, int from, int to) -> std::vector<int> {
-    const int n = graph.VertexCount();
-    std::vector<double> dist(n, std::numeric_limits<double>::infinity());
-    std::vector<int> prev(n, -1);
+    ++cur_gen;  // new generation: every dist[] reads as +inf until touched
+    auto dist_of = [&](int v) -> double {
+      return gen[v] == cur_gen ? dist[v] : std::numeric_limits<double>::infinity();
+    };
     using QN = std::pair<double, int>;
     std::priority_queue<QN, std::vector<QN>, std::greater<>> pq;
+    gen[from] = cur_gen;
     dist[from] = 0.0;
+    prev[from] = -1;
     pq.push({0.0, from});
     while (!pq.empty()) {
       const auto [d, u] = pq.top();
       pq.pop();
-      if (d > dist[u]) {
+      if (d > dist_of(u)) {
         continue;
       }
       if (u == to) {
@@ -126,14 +140,15 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
           continue;
         }
         const double nd = d + e->distance_nm;
-        if (nd < dist[e->to]) {
+        if (nd < dist_of(e->to)) {
+          gen[e->to] = cur_gen;
           dist[e->to] = nd;
           prev[e->to] = u;
           pq.push({nd, e->to});
         }
       }
     }
-    if (std::isinf(dist[to])) {
+    if (std::isinf(dist_of(to))) {
       return {};  // airway does not connect from -> to
     }
     std::vector<int> chain;
