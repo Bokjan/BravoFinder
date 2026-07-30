@@ -2,7 +2,6 @@
 #include "core/graph/astar.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -46,7 +45,14 @@ bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coor
   if (options.constraints.empty()) {
     return true;
   }
-  assert(options.request != nullptr);
+  // Enforce the SearchOptions contract in release, not just debug: a bare
+  // assert is stripped under NDEBUG and would let the Evaluate call below
+  // dereference null. Refuse the edge instead so a violating caller gets "no
+  // route" rather than UB. The sole caller (NavDatabaseRouting) always sets
+  // request before pushing constraints, so this guard is defensive, not live.
+  if (options.request == nullptr) {
+    return false;
+  }
   const EdgeContext ctx{edge, from_coord, graph.CoordOf(to)};
   for (const Constraint* c : options.constraints) {
     const EdgeVerdict v = c->Evaluate(ctx, *options.request);

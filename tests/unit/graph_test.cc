@@ -270,4 +270,24 @@ TEST_CASE("SelectEdge returns the cost-model edge among parallel airways", "[uni
   CHECK(builder.AirwayName(lo->airway_id) == "V1");
 }
 
+TEST_CASE("constraints with a null request refuse edges, not UB", "[unit][graph]") {
+  // SearchOptions contract: request must be set when constraints are present.
+  // A null request must not dereference null in release (NDEBUG) builds; the
+  // guard refuses the edge so the search reports no path rather than crashing.
+  // Regression for M8: the old bare assert let release dereference null here.
+  bf::GraphBuilder builder(MakeLineData());
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int b = builder.VerticesByIdent("BBB")[0];
+  const int d = builder.VerticesByIdent("DDD")[0];
+
+  const bf::LevelPreferenceConstraint level_pref;
+  bf::SearchOptions opts;
+  opts.constraints = {&level_pref};  // request intentionally left null
+
+  // SelectEdge returns nullptr (every edge refused) instead of dereferencing null.
+  CHECK(bf::SelectEdge(builder.graph(), a, b, opts) == nullptr);
+  // A full search reports no path through the refused edges.
+  CHECK_FALSE(bf::FindShortestPath(builder.graph(), a, d, opts).found);
+}
+
 }  // namespace
