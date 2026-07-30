@@ -157,6 +157,59 @@ std::vector<Connection> Finalize(std::unordered_map<int, Connection>& by_fix) {
   return out;
 }
 
+// Gap-gated doorstep filter, shared by both procedure sides.
+//
+// A seed is the estimated procedure distance flown between the runway and the
+// connection fix (see Build{Departure,Arrival}). A fix seeded at ~0 NM sits on
+// the runway threshold itself: seeding the search there lets the enroute network
+// fly straight to the airport door and reduces the SID/STAR to a zero-length
+// stub (the KJFK->YSSY "...B450 TESAT STAR YSSY", arr 0.3 NM case). Such a fix
+// must not be a connection point.
+//
+// But a small seed alone does not prove degeneracy: some airports legitimately
+// have their only close entry at 2-5 NM (a genuine short final), and dropping it
+// would force a 60-150 NM detour. The distinguishing signal is the SECOND entry:
+// a degenerate "airway reached the doorstep" airport still exposes the real
+// procedure body at a moderate distance, whereas a genuine short-final airport
+// has one close entry then a large jump. So we drop the doorstep entries only
+// when a fallback entry exists in [kNearSeedNm, kFallbackSeedNm] -- a normal
+// procedure-body length. This never empties the set: the surviving fallback is
+// what licenses the drop.
+//
+// Thresholds are empirical (the seed distribution is continuous, with no natural
+// gap; see .notes/research/2026-07-29_arrival_star_connection.md §8):
+//   kNearSeedNm     1.0  -- below this a fix is effectively on the threshold;
+//                           the degenerate cluster lives here.
+//   kFallbackSeedNm 20.0 -- an upper bound on a normal SID/STAR body; a fallback
+//                           within it confirms a real procedure was bypassed.
+//                           Chosen over 15 to also catch busy airports whose real
+//                           body sits at 15-20 NM (e.g. RPLL, LIRQ, KFLL, LLBG),
+//                           with zero false positives observed across cycle 2601.
+constexpr double kNearSeedNm = 1.0;
+constexpr double kFallbackSeedNm = 20.0;
+
+void DropDoorstepConnections(std::unordered_map<int, Connection>& by_fix) {
+  bool has_doorstep = false;
+  bool has_fallback = false;
+  for (const auto& [vertex, conn] : by_fix) {
+    if (conn.seed_distance_nm < kNearSeedNm) {
+      has_doorstep = true;
+    } else if (conn.seed_distance_nm <= kFallbackSeedNm) {
+      has_fallback = true;
+    }
+  }
+  if (!has_doorstep || !has_fallback) {
+    return;
+  }
+  for (auto it = by_fix.begin(); it != by_fix.end();) {
+    if (it->second.seed_distance_nm < kNearSeedNm) {
+      it = by_fix.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
 }  // namespace
 
 std::vector<Connection> ProcedureConnector::BuildDeparture(const CifpData& cifp,
@@ -189,6 +242,7 @@ std::vector<Connection> ProcedureConnector::BuildDeparture(const CifpData& cifp,
       Accumulate(by_fix, hit.vertex, seed, MakeRef(p));
     }
   }
+  DropDoorstepConnections(by_fix);
   return Finalize(by_fix);
 }
 
@@ -219,6 +273,7 @@ std::vector<Connection> ProcedureConnector::BuildArrival(const CifpData& cifp,
       Accumulate(by_fix, hit.vertex, seed, MakeRef(p));
     }
   }
+  DropDoorstepConnections(by_fix);
   return Finalize(by_fix);
 }
 

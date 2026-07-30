@@ -833,4 +833,37 @@ TEST_CASE("real data: ParseRoute rejects a trailing dangling connector", "[integ
   CHECK_FALSE(r);
 }
 
+// Gap-gated doorstep filter (procedure_connector.cc): the enroute network must
+// not fly to the runway threshold and reduce the STAR to a zero-length stub.
+// See .notes/research/2026-07-29_arrival_star_connection.md §8. Anchors:
+// YSSY has a degenerate 0.3 NM STAR-end fix (TESAT) on an airway that must be
+// dropped; KLAX's nearest real entry is at ~4.7 NM and must be kept.
+TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+
+  // KJFK->YSSY used to end "...B450 TESAT STAR YSSY" with a 0.3 NM arrival: the
+  // Pacific airways flew to the threshold and the STAR was a stub. With the
+  // doorstep filter the search must pick a real STAR entry (arrival >> 1 NM).
+  bf::Result<std::vector<bf::Route>> yssy = db->FindRoutes(MakeRequest("KJFK", "YSSY"));
+  REQUIRE(yssy);
+  REQUIRE_FALSE(yssy.value().empty());
+  const bf::Route& ry = yssy.value().front();
+  CHECK(ry.points.back().ident == "YSSY");
+  // A genuine STAR body is tens of NM; the degenerate stub was 0.3 NM.
+  CHECK(ry.arr_distance_nm > 5.0);
+
+  // KLAX is the keep-side anchor: its nearest real entry sits at ~4.7 NM (a
+  // normal short final, not a doorstep stub), so the filter must not gut it.
+  // KDEN->KLAX still connects via DOWNE at 14.2 NM.
+  bf::Result<std::vector<bf::Route>> klax = db->FindRoutes(MakeRequest("KDEN", "KLAX"));
+  REQUIRE(klax);
+  REQUIRE_FALSE(klax.value().empty());
+  const bf::Route& rk = klax.value().front();
+  CHECK(rk.points.back().ident == "KLAX");
+  CHECK(rk.arr_distance_nm > 5.0);
+}
+
 }  // namespace
