@@ -11,21 +11,6 @@ namespace bf {
 
 namespace {
 
-// Accumulate an estimated leg distance. Definite-fix legs use the great-circle
-// distance between consecutive resolved fixes; heading/altitude/arc legs, which
-// have no resolvable end fix, fall back to the CIFP-provided leg distance (0.0
-// when the leg carries none).
-double LegDistance(const ProcedureLeg& leg, const Coordinate* prev_coord,
-                   const Coordinate* this_coord) {
-  if (prev_coord != nullptr && this_coord != nullptr) {
-    return prev_coord->DistanceTo(*this_coord);
-  }
-  if (leg.distance_nm > 0.0) {
-    return leg.distance_nm;
-  }
-  return 0.0;
-}
-
 // Resolve a procedure leg's fix to a graph vertex by its full (ident, region)
 // key. Returns -1 when the leg has no resolvable fix. The ident-only fallback
 // was removed: a procedure leg carries its region, so resolving by
@@ -107,35 +92,49 @@ enum class WalkDir { kOutbound, kInbound };
 
 WalkResult WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder, WalkDir dir) {
   WalkResult result;
+  // `cumulative` measures the polyline from the FIRST resolved fix to the
+  // current one. The runway-to-first-fix portion is covered separately by the
+  // runway bridge (a straight line to first_coord), so the legs closing that
+  // span are not added here -- counting them would double-count it.
   double cumulative = 0.0;
   bool have_prev = false;
   Coordinate prev_coord{};
+  // Distance accrued by no-fix legs (heading/altitude/arc, no resolvable end
+  // fix) since the last resolved fix. It stands in for the along-track length of
+  // the gap the next resolved fix closes, so the gap is counted once -- via this
+  // accrued distance -- rather than twice (this AND the great-circle to the next
+  // fix). Legs before the first fix accrue here too but are spent nowhere: the
+  // first fix resets pending without spending it (the bridge already covers that
+  // runway-to-first-fix span).
+  double pending_nm = 0.0;
   for (const ProcedureLeg& leg : p.legs) {
-    int v = leg.fix_is_definite() ? ResolveFix(leg, builder) : -1;
-    Coordinate this_coord{};
-    bool have_this = false;
-    if (v >= 0) {
-      this_coord = builder.graph().CoordOf(v);
-      have_this = true;
-    }
-    cumulative +=
-        LegDistance(leg, have_prev ? &prev_coord : nullptr, have_this ? &this_coord : nullptr);
-    if (v >= 0) {
-      const bool usable = dir == WalkDir::kInbound ? builder.HasInbound(v) : builder.HasOutbound(v);
-      if (usable) {
-        result.hits.push_back(FixHit{v, cumulative});
+    const int v = leg.fix_is_definite() ? ResolveFix(leg, builder) : -1;
+    if (v < 0) {
+      if (leg.distance_nm > 0.0) {
+        pending_nm += leg.distance_nm;
       }
+      continue;
     }
-    if (have_this) {
-      if (!result.have_first) {
-        result.first_coord = this_coord;
-        result.have_first = true;
-      }
-      result.last_coord = this_coord;
-      result.have_last = true;
-      prev_coord = this_coord;
-      have_prev = true;
+    const Coordinate this_coord = builder.graph().CoordOf(v);
+    if (have_prev) {
+      // Count the prev->this span exactly once: the accrued no-fix distance if
+      // any legs crossed it, else the direct great-circle. Adding both would
+      // double-count the same geographic span.
+      cumulative += pending_nm > 0.0 ? pending_nm : prev_coord.DistanceTo(this_coord);
     }
+    pending_nm = 0.0;
+    const bool usable = dir == WalkDir::kInbound ? builder.HasInbound(v) : builder.HasOutbound(v);
+    if (usable) {
+      result.hits.push_back(FixHit{v, cumulative});
+    }
+    if (!result.have_first) {
+      result.first_coord = this_coord;
+      result.have_first = true;
+    }
+    result.last_coord = this_coord;
+    result.have_last = true;
+    prev_coord = this_coord;
+    have_prev = true;
   }
   result.total_nm = cumulative;
   return result;

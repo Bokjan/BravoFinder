@@ -3,9 +3,12 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "core/constraints/altitude_constraints.h"
+#include "core/domain/fixed_ident.h"
+#include "core/domain/procedure.h"
 #include "core/graph/astar.h"
 #include "core/routing/route_request.h"
 #include "io/graph_builder.h"
+#include "io/procedure_connector.h"
 
 using Catch::Matchers::WithinRel;
 
@@ -288,6 +291,57 @@ TEST_CASE("constraints with a null request refuse edges, not UB", "[unit][graph]
   CHECK(bf::SelectEdge(builder.graph(), a, b, opts) == nullptr);
   // A full search reports no path through the refused edges.
   CHECK_FALSE(bf::FindShortestPath(builder.graph(), a, d, opts).found);
+}
+
+TEST_CASE("procedure seed counts each leg span once, not twice", "[unit][graph]") {
+  // A SID whose legs cross two on-network fixes (AAA, then CCC) with a no-fix
+  // heading leg between them. The seed (estimated runway->fix distance) must
+  // count each geographic span once, never twice. Regression for M3: the old
+  // WalkOnNetworkFixes added the first leg's distance on top of the runway
+  // bridge (runway->first-fix counted twice) AND added both the no-fix leg's
+  // distance and the great-circle to the next fix (the between-fix span twice).
+  bf::GraphBuilder builder(MakeLineData());
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int c = builder.VerticesByIdent("CCC")[0];
+  // Airport half a degree off AAA so the runway bridge (~30 NM) is well clear
+  // of the doorstep threshold (no DropDoorstep interference).
+  const bf::Coordinate airport{0.5, 0.0};
+  const double bridge = builder.graph().CoordOf(a).DistanceTo(airport);
+  const double aaa_to_ccc = builder.graph().CoordOf(a).DistanceTo(builder.graph().CoordOf(c));
+
+  bf::Procedure p;
+  p.type = bf::ProcedureType::kSid;
+  p.name = "TST";
+  // Leg 0: first resolved fix AAA. Its own distance is the runway->AAA portion,
+  // which the bridge already covers, so it must not enter the seed.
+  bf::ProcedureLeg l0;
+  l0.path_term = bf::PathTerminator::kTF;
+  l0.fix = bf::FixedIdent::FromParts("AAA", "ZZ");
+  l0.distance_nm = 5.0;
+  p.legs.push_back(l0);
+  // Leg 1: a no-fix heading leg whose distance stands in for the AAA->CCC span.
+  bf::ProcedureLeg l1;
+  l1.path_term = bf::PathTerminator::kVA;  // heading-to-altitude: no resolved fix
+  l1.distance_nm = 7.0;
+  p.legs.push_back(l1);
+  // Leg 2: second resolved fix CCC.
+  bf::ProcedureLeg l2;
+  l2.path_term = bf::PathTerminator::kTF;
+  l2.fix = bf::FixedIdent::FromParts("CCC", "ZZ");
+  p.legs.push_back(l2);
+
+  bf::CifpData cifp;
+  cifp.procedures.push_back(p);
+  const auto conns = bf::ProcedureConnector::BuildDeparture(cifp, airport, builder, "");
+  REQUIRE(conns.size() == 2);
+  REQUIRE(conns[0].fix_vertex == a);  // AAA, smaller seed
+  REQUIRE(conns[1].fix_vertex == c);  // CCC
+  // AAA seed: bridge only (~30 NM), NOT bridge + the first leg's 5.0.
+  CHECK_THAT(conns[0].seed_distance_nm, WithinRel(bridge, 0.5));
+  // CCC seed: bridge + the heading leg's 7.0, NOT bridge + 5.0 + 7.0 + AAA->CCC.
+  CHECK_THAT(conns[1].seed_distance_nm, WithinRel(bridge + 7.0, 0.5));
+  // Guard: the old double-counted value (bridge + 5 + 7 + AAA->CCC) is far larger.
+  CHECK(conns[1].seed_distance_nm < bridge + 5.0 + 7.0 + aaa_to_ccc - 1.0);
 }
 
 }  // namespace
