@@ -152,9 +152,10 @@ int main(int argc, char** argv) {
   // text, satisfying LGPLv3 section 4c for this combined work.
   app.set_version_flag(
       "--version",
-      std::string("BravoFinder ") + bf::kBravoFinderVersion + "\n" + "Copyright (c) Boyin Chen\n" +
+      std::string("BravoFinder ") + bf::kBravoFinderVersion + "\n" +
+          "Copyright (c) Boyin Chen, and all contributors\n"
           "MIT-licensed, except the route engine (libs/engine/) which is under the GNU LGPL "
-          "v3.0-or-later.\n" +
+          "v3.0-or-later.\n"
           "See LICENSE.md, LICENSE.MIT, libs/engine/LICENSE and libs/engine/LICENSE.GPLv3.");
   CLI11_PARSE(app, argc, argv);
   const std::string dir = db_dir;
