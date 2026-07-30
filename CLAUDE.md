@@ -11,7 +11,7 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 
 ## Language
 
-- Conversations, comments, documentation, and commit messages default to **Simplified Chinese**; docs prefer Chinese.
+- Conversations, comments, and documentation default to **Simplified Chinese**; docs prefer Chinese. Commit messages use **English** (see Git), overriding this default.
 - Exceptions (keep in original): code identifiers, existing code style, technical proper nouns/commands/APIs, and **code comments use English**.
 - **Markdown is never hard-wrapped (iron rule).** Every paragraph — in `README.md`, `docs/*.md`, and GitHub release notes — is **one logical line**; let the renderer soft-wrap. No manual column-80 folding inside a paragraph. Hard-wrapped paragraphs render as broken/odd line breaks when synced to GitHub releases (the changelog → `gh release edit` flow), and they make diffs noisy. This is the same discipline as git commit-message bodies (see Git). Code fences, tables, and ASCII/box diagrams are pre-formatted — leave their line breaks intact.
 
