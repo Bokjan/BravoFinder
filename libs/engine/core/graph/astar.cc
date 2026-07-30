@@ -32,8 +32,11 @@ UnitVec ProjectUnitSphere(const Coordinate& c) {
 // by the caller (it is constant across a vertex's out-edges). `to_coord` is
 // fetched lazily -- only when constraints are actually present -- so the common
 // unconstrained path (EdgeAllowed returns true on the first line) pays zero
-// Coordinate fetches per edge instead of two 16-byte copies that were never
-// read. `graph` is taken by reference so the lazy CoordOf(to) stays O(1).
+// Coordinate fetches per edge. `graph` is taken by reference so the lazy
+// CoordOf(to) stays O(1); when constraints are present, the two endpoint
+// Coordinates are copied into EdgeContext (a register-level, sub-nanosecond
+// cost -- a reference member would trade that copy for an indirection on every
+// coordinate read, with no measured benefit).
 bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coordinate& from_coord,
                  const NavGraph& graph, int to, double& extra_cost) {
   extra_cost = 0.0;
