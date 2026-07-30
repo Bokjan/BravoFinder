@@ -118,13 +118,27 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   // Points: optional departure airport, the connection fixes along the path,
   // then the optional arrival airport.
   if (!dep_label.empty()) {
-    route.points.push_back(RoutePoint{dep_label, graph.CoordOf(path.vertices.front())});
+    // The departure airport is not a vertex on the path: the search is seeded
+    // from its connection fixes (the path starts at the first on-network fix),
+    // so path.vertices.front() is that fix, not the airport. Resolve the airport
+    // endpoint's own coordinate from the airport vertex instead of borrowing the
+    // connection fix's coordinate (which would render the airport at the fix).
+    const int dep_apt = builder.VertexByAirport(ToUpper(dep_label));
+    const Coordinate dep_coord =
+        dep_apt >= 0 ? graph.CoordOf(dep_apt) : graph.CoordOf(path.vertices.front());
+    route.points.push_back(RoutePoint{dep_label, dep_coord});
   }
   for (int v : path.vertices) {
     route.points.push_back(RoutePoint{builder.IdentOf(v).ident, graph.CoordOf(v)});
   }
   if (!arr_label.empty()) {
-    route.points.push_back(RoutePoint{arr_label, graph.CoordOf(path.vertices.back())});
+    // Same reasoning as the departure endpoint above: the airport is not the last
+    // path vertex, so read its coordinate from the airport vertex, not the last
+    // connection fix (which previously made the airport render at the fix).
+    const int arr_apt = builder.VertexByAirport(ToUpper(arr_label));
+    const Coordinate arr_coord =
+        arr_apt >= 0 ? graph.CoordOf(arr_apt) : graph.CoordOf(path.vertices.back());
+    route.points.push_back(RoutePoint{arr_label, arr_coord});
   }
 
   // Leading procedure leg: airport -> first connection fix. The leg's `via`

@@ -892,4 +892,33 @@ TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[in
   CHECK(rw.arr_distance_nm < 50.0);
 }
 
+// Regression: the departure/arrival airport endpoints must carry the airport's
+// own coordinate, not the coordinate of the first/last on-network connection
+// fix. The search is seeded from the connection fixes (the path starts at the
+// first fix), so a naive RoutePoint built from path.vertices.front()/back() used
+// to render ZBSJ at fix OC and ZGGG at fix IKAVO. The endpoint and its adjacent
+// fix are physically distinct, so their separation must equal the phase
+// distance the route already reports -- a collapsed endpoint would read ~0 NM.
+TEST_CASE("real data: airport endpoints keep their own coordinate", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("ZBSJ", "ZGGG"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+
+  REQUIRE(r.points.size() >= 3);
+  CHECK(r.points.front().ident == "ZBSJ");
+  CHECK(r.points.back().ident == "ZGGG");
+
+  const double dep_gap = r.points.front().coord.DistanceTo(r.points[1].coord);
+  CHECK(dep_gap == Catch::Approx(r.dep_distance_nm).margin(0.1));
+
+  const double arr_gap = r.points.back().coord.DistanceTo(r.points[r.points.size() - 2].coord);
+  CHECK(arr_gap == Catch::Approx(r.arr_distance_nm).margin(0.1));
+}
+
 }  // namespace
