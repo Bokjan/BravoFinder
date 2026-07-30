@@ -14,7 +14,7 @@ double ToRadians(double degrees) { return degrees * kPi / 180.0; }
 
 }  // namespace
 
-double Coordinate::DistanceTo(const Coordinate& other) const {
+double Coordinate::DistanceTo(const Coordinate& other) const noexcept {
   const double lat1 = ToRadians(latitude);
   const double lat2 = ToRadians(other.latitude);
   const double d_lat = lat2 - lat1;

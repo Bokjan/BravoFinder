@@ -14,7 +14,7 @@ struct Coordinate {
 
   // Great-circle distance to another coordinate, in nautical miles (NM),
   // computed with the haversine formula on a spherical earth model.
-  double DistanceTo(const Coordinate& other) const;
+  double DistanceTo(const Coordinate& other) const noexcept;
 };
 
 // Mean earth radius in nautical miles. 6371.0088 km is the IUGG mean radius;

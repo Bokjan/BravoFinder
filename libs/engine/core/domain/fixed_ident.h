@@ -42,14 +42,14 @@ struct alignas(1) FixedIdent {
   std::string_view IdentView() const BF_LIFETIMEBOUND { return {ident, ident_len}; }
   std::string_view RegionView() const BF_LIFETIMEBOUND { return {region, region_len}; }
 
-  bool operator==(const FixedIdent& o) const {
+  bool operator==(const FixedIdent& o) const noexcept {
     return ident_len == o.ident_len && region_len == o.region_len &&
            std::memcmp(ident, o.ident, ident_len) == 0 &&
            std::memcmp(region, o.region, region_len) == 0;
   }
 
   // Order by (ident, region) for sorted-vector indices + binary search.
-  bool operator<(const FixedIdent& o) const {
+  bool operator<(const FixedIdent& o) const noexcept {
     const int c = IdentView().compare(o.IdentView());
     return c != 0 ? c < 0 : RegionView() < o.RegionView();
   }

@@ -75,6 +75,12 @@ class GraphBuilder::DegreeGrid {
   // three digits so the pair is injective across the whole globe. Fixed-width
   // types (not long/int) so the key is identical on every platform.
   static int64_t CellKey(int32_t lat, int32_t lon) {
+    // Wrap longitude to [-180, 180) so a fix at exactly +180.0 is stored under
+    // the same cell the antimeridian-wrapped search (Near maps lon 180 -> -180)
+    // probes. Without this the +180 fix stores under (180+180)=360 while the
+    // search reads (-180+180)=0 and never finds it.
+    if (lon >= 180) lon -= 360;
+    if (lon < -180) lon += 360;
     return static_cast<int64_t>(lat + 90) * 1000 + (lon + 180);
   }
 
