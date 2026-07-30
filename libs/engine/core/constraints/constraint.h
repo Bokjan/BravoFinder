@@ -20,10 +20,20 @@ struct EdgeVerdict {
 // Context for evaluating one directed edge: the edge itself and the coordinates
 // of both endpoints, so position-dependent constraints (e.g. MORA, which must
 // sample terrain along the whole leg) can look up the relevant cells.
+//
+// Both coordinates are references, not copies: EdgeContext is constructed per
+// edge on A*'s relaxation hot path (when constraints are active), and the
+// endpoints already live in the graph / caller -- from_coord is the popped
+// vertex's coordinate (an lvalue), to_coord is graph.CoordOf(to) (a const
+// reference into coords_). Binding references avoids a 32-byte copy per edge.
+// EdgeContext must not outlive its referents; it is only used for the duration
+// of one EdgeAllowed call (the graph is immutable during search), and the
+// constraint tests bind it to temporaries whose aggregate-init lifetime is
+// extended to match the context (same pattern the `edge` member already uses).
 struct EdgeContext {
   const GraphEdge& edge;
-  Coordinate from_coord;
-  Coordinate to_coord;
+  const Coordinate& from_coord;
+  const Coordinate& to_coord;
 };
 
 // A pluggable routing constraint. Each constraint inspects an edge under the
