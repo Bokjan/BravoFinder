@@ -280,6 +280,13 @@ std::vector<Connection> ProcedureConnector::BuildArrival(const CifpData& cifp,
 std::vector<Connection> ProcedureConnector::BuildDctFallback(const Coordinate& airport_coord,
                                                              const GraphBuilder& builder, int count,
                                                              bool arrival) {
+  // Intentionally NOT passed through DropDoorstepConnections: the doorstep
+  // degeneracy is procedure-specific (an airway reaching the threshold bypasses
+  // the STAR/SID body). A DCT fallback fix near the field is a legitimate direct
+  // join by great-circle distance with no procedure body to bypass, so a near
+  // seed there is correct, not degenerate. It is also mutually exclusive with
+  // procedure connections (see nav_database_routing.cc): when procedures exist
+  // the filtered set is never emptied, so DCT never re-introduces a doorstep.
   std::vector<Connection> out;
   for (int v : builder.NearestOnNetwork(airport_coord, count, /*inbound=*/arrival)) {
     Connection c;

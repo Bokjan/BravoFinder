@@ -837,7 +837,9 @@ TEST_CASE("real data: ParseRoute rejects a trailing dangling connector", "[integ
 // not fly to the runway threshold and reduce the STAR to a zero-length stub.
 // See .notes/research/2026-07-29_arrival_star_connection.md §8. Anchors:
 // YSSY has a degenerate 0.3 NM STAR-end fix (TESAT) on an airway that must be
-// dropped; KLAX's nearest real entry is at ~4.7 NM and must be kept.
+// dropped (both unfiltered and under a runway restriction); KLAX's nearest real
+// entry is at ~4.7 NM and must be kept; WAAA's genuine 2.2 NM short final has no
+// moderate fallback and must be kept (dropping it would force a 147.9 NM detour).
 TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
@@ -855,6 +857,19 @@ TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[in
   // A genuine STAR body is tens of NM; the degenerate stub was 0.3 NM.
   CHECK(ry.arr_distance_nm > 5.0);
 
+  // Under a runway restriction the filter still sees a real STAR-body fallback
+  // (the gap-gated guard runs on the already-runway-filtered connection set), so
+  // the doorstep must still be dropped: KJFK->YSSY --rwy-arr RW07 must not
+  // degenerate to the TESAT stub either.
+  bf::RouteRequest yssy_rwy = MakeRequest("KJFK", "YSSY");
+  yssy_rwy.arrival_runway = "RW07";
+  bf::Result<std::vector<bf::Route>> yssy_r07 = db->FindRoutes(yssy_rwy);
+  REQUIRE(yssy_r07);
+  REQUIRE_FALSE(yssy_r07.value().empty());
+  const bf::Route& ry07 = yssy_r07.value().front();
+  CHECK(ry07.points.back().ident == "YSSY");
+  CHECK(ry07.arr_distance_nm > 5.0);
+
   // KLAX is the keep-side anchor: its nearest real entry sits at ~4.7 NM (a
   // normal short final, not a doorstep stub), so the filter must not gut it.
   // KDEN->KLAX still connects via DOWNE at 14.2 NM.
@@ -864,6 +879,17 @@ TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[in
   const bf::Route& rk = klax.value().front();
   CHECK(rk.points.back().ident == "KLAX");
   CHECK(rk.arr_distance_nm > 5.0);
+
+  // WAAA is the keep-side genuine-short-final anchor: its only close entry is
+  // ~2.2 NM with a huge 147.9 NM jump to the next one, so there is no moderate
+  // fallback and the filter must preserve the 2.2 NM entry. If it were wrongly
+  // dropped, the arrival would balloon toward 147.9 NM.
+  bf::Result<std::vector<bf::Route>> waaa = db->FindRoutes(MakeRequest("KLAX", "WAAA"));
+  REQUIRE(waaa);
+  REQUIRE_FALSE(waaa.value().empty());
+  const bf::Route& rw = waaa.value().front();
+  CHECK(rw.points.back().ident == "WAAA");
+  CHECK(rw.arr_distance_nm < 50.0);
 }
 
 }  // namespace
