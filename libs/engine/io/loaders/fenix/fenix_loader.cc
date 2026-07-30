@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -109,6 +110,26 @@ WaypointKind NavaidKindFromType(int type_id) {
     default:
       return WaypointKind::kOther;
   }
+}
+
+// Fenix stores navaid frequencies as 8-digit packed BCD -- one decimal digit per
+// hex nibble, encoding freq*10000 (the ARINC 424 BCD frequency convention). E.g.
+// LAX VORTAC 113.6 MHz is stored as 0x01136000 (nibbles "01136000" -> 1136000 ->
+// /10000 = 113.6); an NDB at 292.0 kHz is 0x02920000. sqlite3_column_int returns
+// the raw packed integer, so decode it here, then scale to the
+// NavaidDetail.freq_raw contract (kHz for NDBs, MHz*100 for VOR/DME/ILS) to match
+// DFD1/DFD2. A nibble >= 10 means the value is not BCD (never seen in real
+// data); return -1 so the caller stores 0 instead of decoding garbage.
+double DecodeFenixBcdFreq(int packed) {
+  double value = 0.0;
+  for (int shift = 28; shift >= 0; shift -= 4) {
+    const int digit = (packed >> shift) & 0xF;
+    if (digit > 9) {
+      return -1.0;
+    }
+    value = value * 10.0 + static_cast<double>(digit);
+  }
+  return value / 10000.0;
 }
 
 // ---- altitude constraint parsing ----------------------------------------
@@ -287,7 +308,17 @@ Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
     detail.ident = Ident{ColumnText(stmt, 0), ""};
     detail.kind = NavaidKindFromType(ColumnInt(stmt, 1));
     detail.elev_ft = ColumnInt(stmt, 2);
-    detail.freq_raw = ColumnInt(stmt, 3);
+    // Fenix Freq is packed BCD of freq*10000; decode to the natural unit (MHz for
+    // VOR/DME/ILS, kHz for NDB) then scale to the freq_raw contract (kHz as-is
+    // for NDBs, MHz*100 otherwise), matching DFD1/DFD2. Invalid BCD -> 0.
+    const double freq_value = DecodeFenixBcdFreq(ColumnInt(stmt, 3));
+    if (freq_value < 0.0) {
+      detail.freq_raw = 0;
+    } else if (detail.kind == WaypointKind::kNdb) {
+      detail.freq_raw = static_cast<int>(std::lround(freq_value));
+    } else {
+      detail.freq_raw = static_cast<int>(std::lround(freq_value * 100.0));
+    }
     detail.range_nm = ColumnDouble(stmt, 4);
     data.navaid_details.push_back(detail);
   });

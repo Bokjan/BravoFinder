@@ -100,6 +100,37 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
     CHECK(n > 3000);
     CHECK(d > 1000);
   }
+  SECTION("navaid freq BCD decode") {
+    // Fenix stores freq as 8-digit packed BCD (freq*10000); the loader must
+    // decode it to the freq_raw contract (kHz for NDB, MHz*100 otherwise).
+    // Before the fix ColumnInt was stored verbatim, so every freq was ~1000x
+    // off and landed far outside the aviation bands.
+    const auto find = [](const std::vector<bf::NavaidDetail>& v, const std::string& id,
+                         bf::WaypointKind k) -> const bf::NavaidDetail* {
+      for (const auto& d : v)
+        if (d.ident.ident == id && d.kind == k) return &d;
+      return nullptr;
+    };
+    // LAX VORTAC 113.6 MHz -> 11360; ATL NDB 422.0 kHz -> 422.
+    const auto* lax = find(fd.data.navaid_details, "LAX", bf::WaypointKind::kVor);
+    REQUIRE(lax != nullptr);
+    CHECK(lax->freq_raw == 11360);
+    const auto* atl = find(fd.data.navaid_details, "ATL", bf::WaypointKind::kNdb);
+    REQUIRE(atl != nullptr);
+    CHECK(atl->freq_raw == 422);
+    // Decoded VOR/DME/ILS freqs must land in the VHF band; NDBs in the MF band.
+    int bad = 0;
+    for (const auto& d : fd.data.navaid_details) {
+      if (d.kind == bf::WaypointKind::kNdb) {
+        if (d.freq_raw < 100 || d.freq_raw > 2000) ++bad;
+      } else if (d.kind == bf::WaypointKind::kVor || d.kind == bf::WaypointKind::kDme ||
+                 d.kind == bf::WaypointKind::kOther) {
+        const double mhz = d.freq_raw / 100.0;
+        if (mhz < 108.0 || mhz > 136.0) ++bad;
+      }
+    }
+    CHECK(bad == 0);
+  }
   SECTION("AROKE") {
     auto it = std::find_if(fd.data.waypoints.begin(), fd.data.waypoints.end(),
                            [](auto& w) { return w.ident.ident == "AROKE"; });
