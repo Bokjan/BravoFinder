@@ -160,7 +160,14 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
   data_out.procedures.resize(proc_count);
   for (uint32_t i = 0; i < proc_count; ++i) {
     Procedure& p = data_out.procedures[i];
-    p.type = static_cast<ProcedureType>(br.U8());
+    const uint8_t type_byte = br.U8();
+    // Reject an out-of-range enum byte instead of reinterpreting it; a corrupt
+    // or half-written same-version file could otherwise inject an invalid
+    // ProcedureType that downstream switches handle as a silent wrong branch.
+    if (type_byte > static_cast<uint8_t>(ProcedureType::kApproach)) {
+      return std::nullopt;
+    }
+    p.type = static_cast<ProcedureType>(type_byte);
     p.route_type = br.I32();
     ref(p.name);
     ref(p.transition_ident);
@@ -176,10 +183,18 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
       const std::string fix_ident = read_ref();
       const std::string fix_region = read_ref();
       leg.fix = FixedIdent::FromParts(fix_ident, fix_region);
-      leg.path_term = static_cast<PathTerminator>(br.U8());
+      const uint8_t path_byte = br.U8();
+      if (path_byte > static_cast<uint8_t>(PathTerminator::kUnknown)) {
+        return std::nullopt;
+      }
+      leg.path_term = static_cast<PathTerminator>(path_byte);
       leg.course_deg = br.F64();
       leg.distance_nm = br.F64();
-      leg.alt.kind = static_cast<AltConstraintKind>(br.U8());
+      const uint8_t alt_byte = br.U8();
+      if (alt_byte > static_cast<uint8_t>(AltConstraintKind::kBetween)) {
+        return std::nullopt;
+      }
+      leg.alt.kind = static_cast<AltConstraintKind>(alt_byte);
       leg.alt.alt1_ft = br.I32();
       leg.alt.alt2_ft = br.I32();
       leg.rnp_centinm = br.U16();

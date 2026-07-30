@@ -15,6 +15,7 @@
 #include "core/env.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
+#include "io/cache/byte_io.h"
 #include "io/cache/unified_cache.h"
 #include "io/loaders/xplane12/cifp_parser.h"
 #include "io/nav_database.h"
@@ -234,4 +235,60 @@ TEST_CASE("cifp section: concurrent fetches on one archive are race-free", "[int
   }
   CHECK(found.load() > 0);
   std::remove(path.c_str());
+}
+
+TEST_CASE("cifp codec: a byte-corrupted procedure type is rejected", "[unit][cifp]") {
+  // One airport, one SID with one leg -- minimal valid CifpData, no real data
+  // needed. Decode must reject an out-of-range ProcedureType byte (mirrors
+  // graph_codec's enum guards) rather than reinterpreting it into a switch.
+  bf::CifpData data;
+  bf::Procedure proc;
+  proc.type = bf::ProcedureType::kSid;
+  proc.name = "TST1";
+  proc.transition_ident = "T";
+  proc.runway = "01";
+  bf::ProcedureLeg leg;
+  leg.path_term = bf::PathTerminator::kTF;
+  proc.legs.push_back(leg);
+  data.procedures.push_back(proc);
+  bf::Runway rwy;
+  rwy.ident = "01";
+  data.runways.push_back(rwy);
+
+  std::vector<std::pair<std::string, bf::CifpData>> procs = {{"KTTT", std::move(data)}};
+  bf::StringPool pool;
+  std::vector<uint8_t> body;
+  bf::ByteWriter w(body);
+  REQUIRE(bf::CifpCodec::Encode(procs, w, pool));
+
+  // Section: airport_count U32 (4) + 1 directory entry (icao_off U32, icao_len
+  // U32, seg_offset U64, seg_len U32 = 20) + segment. The segment begins with
+  // proc_count U32 (4); the first procedure header's first field is type U8.
+  constexpr size_t kFirstProcTypeOffset = 4 + 20 + 4;
+  REQUIRE(body.size() > kFirstProcTypeOffset);
+  std::vector<uint8_t> pool_blob(pool.blob().begin(), pool.blob().end());
+
+  auto write_body = [&](const std::string& p) {
+    std::ofstream f(p, std::ios::binary);
+    f.write(reinterpret_cast<const char*>(body.data()), static_cast<std::streamsize>(body.size()));
+  };
+
+  // Control: the valid encoding fetches back.
+  const std::string ok_path = TempPath("ctrl");
+  write_body(ok_path);
+  bf::Result<bf::CifpArchive> ok_arch =
+      bf::CifpCodec::OpenSection(ok_path, 0, body.size(), pool_blob);
+  REQUIRE(ok_arch);
+  REQUIRE(ok_arch.value().Fetch("KTTT").has_value());
+
+  // Corrupt the first procedure's type byte (> ProcedureType::kApproach = 2).
+  body[kFirstProcTypeOffset] = 0xFF;
+  const std::string bad_path = TempPath("bad");
+  write_body(bad_path);
+  bf::Result<bf::CifpArchive> bad_arch =
+      bf::CifpCodec::OpenSection(bad_path, 0, body.size(), pool_blob);
+  REQUIRE(bad_arch);
+  CHECK_FALSE(bad_arch.value().Fetch("KTTT").has_value());
+  std::remove(ok_path.c_str());
+  std::remove(bad_path.c_str());
 }

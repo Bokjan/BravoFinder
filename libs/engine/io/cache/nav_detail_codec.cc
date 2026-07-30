@@ -128,7 +128,13 @@ Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
     const uint32_t ident_len = r.U32();
     const uint32_t region_off = r.U32();
     const uint32_t region_len = r.U32();
-    const auto kind = static_cast<WaypointKind>(r.U8());
+    const uint8_t kind_byte = r.U8();
+    // Reject an out-of-range WaypointKind byte (mirrors graph_codec.cc:405)
+    // rather than reinterpreting it into a lookup table slot.
+    if (kind_byte > static_cast<uint8_t>(WaypointKind::kOther)) {
+      return bad("corrupt nav detail section: navaid kind out of range");
+    }
+    const auto kind = static_cast<WaypointKind>(kind_byte);
     const int32_t elev_ft = r.I32();
     const int32_t freq_raw = r.I32();
     const double range_nm = r.F64();

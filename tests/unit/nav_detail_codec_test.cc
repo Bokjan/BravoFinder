@@ -144,3 +144,26 @@ TEST_CASE("nav detail codec: empty data round-trips to an empty archive", "[unit
   CHECK(opened.value().FindNavaids("SEA").empty());
   CHECK(opened.value().FindHolds("AE701").empty());
 }
+
+TEST_CASE("nav detail codec: a byte-corrupted navaid kind is rejected", "[unit][detail]") {
+  // Decode must reject an out-of-range WaypointKind byte (mirrors graph_codec's
+  // vertex-kind guard) instead of reinterpreting it into a lookup slot. The
+  // threat is a valid encoding byte-corrupted on disk (bit-flip / half-write).
+  bf::NavDetailArchive src = bf::NavDetailArchive::FromData(MakeSampleData());
+  bf::StringPool pool;
+  std::vector<uint8_t> body;
+  bf::ByteWriter w(body);
+  REQUIRE(bf::NavDetailCodec::Encode(src, w, pool));
+
+  // Header (navaid_count U32 + hold_count U32 = 8) then the first navaid record:
+  // 4 ref U32s (ident_off/ident_len/region_off/region_len = 16) -> kind U8 at 24.
+  constexpr size_t kFirstKindOffset = 8 + 4 * 4;
+  static_assert(kFirstKindOffset == 24, "nav detail wire layout drifted");
+  REQUIRE(body.size() > kFirstKindOffset);
+  body[kFirstKindOffset] = 0xFF;  // > WaypointKind::kOther (4)
+  bf::Result<bf::NavDetailArchive> r = bf::NavDetailCodec::Decode(body, pool.blob());
+  CHECK_FALSE(r);
+  if (!r) {
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
+  }
+}
