@@ -89,7 +89,7 @@ struct SearchOptions {
 };
 
 // Reusable per-vertex A* scratch, defined below; forward-declared here so the
-// hot-path FindShortestPath overload can take it by reference.
+// reused FindShortestPathMulti overload can take it by reference.
 class SearchWorkspace;
 
 // Among the parallel edges from `from` to `to`, return the one the search would
@@ -105,22 +105,15 @@ class SearchWorkspace;
 const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const SearchOptions& options,
                             double* out_cost = nullptr);
 
-// Find the shortest path from `start` to `goal` using A* with an admissible
-// great-circle heuristic. Soft penalties only add cost, so the geographic
-// heuristic remains a lower bound and the result is optimal under the effective
-// (penalized) cost. Returns found=false when no path exists.
+// Find the shortest path from `start` to `goal`. A thin wrapper over the
+// multi-source search (a single zero-seed source/goal), so the single- and
+// multi-source paths share one A* loop and one heuristic (the chord form) and
+// cannot drift apart; unit tests of this entry point exercise the production
+// search loop. Soft penalties only add cost, so the heuristic remains a lower
+// bound and the result is optimal under the effective (penalized) cost. Returns
+// found=false when no path exists.
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
                               const SearchOptions& options);
-
-// Reused form for Yen: the caller supplies a workspace whose per-vertex arrays
-// are allocated once and cleared in O(1) between searches via a generation stamp.
-// Yen's single-source variant spurs the search hundreds of times over the same
-// graph; without a shared workspace each spur re-ran the O(V) Reset (five arrays
-// sized to ~270k vertices), which is exactly the cost the stamp design removes.
-// The workspace is reset to a fresh generation on entry, so callers may pass a
-// dirty one; it must not be shared across concurrent searches.
-ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
-                              const SearchOptions& options, SearchWorkspace& ws);
 
 // Convenience overload: unconstrained shortest path.
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal);

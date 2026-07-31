@@ -89,110 +89,14 @@ bool CostOfPathMulti(const NavGraph& graph, const std::vector<int>& path,
 
 std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, int goal, int k,
                                              const SearchOptions& base_options) {
-  std::vector<ShortestPath> result;
-  if (k <= 0) {
-    return result;
-  }
-
-  ShortestPath first = FindShortestPath(graph, start, goal, base_options);
-  if (!first.found) {
-    return result;
-  }
-  result.push_back(std::move(first));
-
-  // One workspace reused by every spur search: its per-vertex arrays are
-  // allocated once and cleared in O(1) between searches via a generation stamp,
-  // instead of each spur reallocating and O(V)-initializing fresh arrays (the
-  // same optimization FindKShortestPathsMulti already applies). Stack-local to
-  // this call, so concurrent queries never share it.
-  SearchWorkspace ws;
-
-  // Candidate set B, kept sorted/deduped by (cost, vertices). B persists across
-  // the outer k iterations (Lawler): candidates not chosen this round stay for
-  // the next.
-  std::set<Candidate> candidates;
-
-  // Lawler's optimization: the deviation index of the most recently accepted
-  // path -- the spur position at which it branched from its parent. Spur nodes
-  // before this index would reproduce root prefixes already fully explored in an
-  // earlier round, so the next round starts spurring here. The first (shortest)
-  // path has no parent; index 0 spurs it in full.
-  int last_deviation = 0;
-
-  for (int kth = 1; kth < k; ++kth) {
-    const std::vector<int>& prev_path = result.back().vertices;
-
-    // Spur from the previous path's deviation index onward (Lawler), not from 0.
-    for (size_t i = static_cast<size_t>(last_deviation); i + 1 < prev_path.size(); ++i) {
-      const int spur_node = prev_path[i];
-      // Root = prev_path[0..i]; the spur search starts at spur_node.
-      const std::vector<int> root(prev_path.begin(), prev_path.begin() + i + 1);
-
-      // Ban the (i -> i+1) edge of every accepted/known path that shares this
-      // root, so the spur search must diverge here. Built as a const sorted
-      // vector (the IIFE sorts in place, then binds to const) so binary_search
-      // is valid by construction -- the type system prevents any later write.
-      const std::vector<int64_t> banned_edges = [&] {
-        std::vector<int64_t> v;
-        v.reserve(result.size());
-        for (const ShortestPath& p : result) {
-          if (p.vertices.size() > i + 1 &&
-              std::equal(root.begin(), root.end(), p.vertices.begin())) {
-            v.push_back(EdgeKey(p.vertices[i], p.vertices[i + 1]));
-          }
-        }
-        std::sort(v.begin(), v.end());
-        return v;
-      }();
-      // Root nodes (except the spur node) are off-limits to keep paths loopless.
-      const std::vector<int> banned_nodes = [&] {
-        std::vector<int> v(root.begin(), root.end() - 1);
-        std::sort(v.begin(), v.end());
-        return v;
-      }();
-
-      SearchOptions spur_opts = base_options;
-      // Compose Yen's bans with any caller-supplied filter (e.g. the "no transit
-      // through airports" rule) rather than overwriting it: spur_opts starts as
-      // a copy of base_options (so the base node_filter's airport range is
-      // inherited), then this spur's banned nodes/edges are layered on as sorted
-      // vectors the filters binary_search. The const vectors outlive the spur
-      // search -- same loop iteration, stack-local.
-      spur_opts.node_filter.banned = &banned_nodes;
-      spur_opts.edge_filter.banned = &banned_edges;
-
-      const ShortestPath spur = FindShortestPath(graph, spur_node, goal, spur_opts, ws);
-      if (!spur.found) {
-        continue;
-      }
-
-      // Total path = root (without the spur node) + spur path.
-      std::vector<int> total(root.begin(), root.end() - 1);
-      total.insert(total.end(), spur.vertices.begin(), spur.vertices.end());
-
-      double cost = 0.0;
-      double distance = 0.0;
-      if (CostOfPath(graph, total, base_options, cost, distance)) {
-        candidates.insert(Candidate{cost, distance, std::move(total), static_cast<int>(i)});
-      }
-    }
-
-    if (candidates.empty()) {
-      break;
-    }
-    // Accept the cheapest candidate not already in the result set.
-    auto best = candidates.begin();
-    ShortestPath next;
-    next.vertices = best->vertices;
-    next.cost = best->cost;
-    next.distance_nm = best->distance;
-    next.found = true;
-    last_deviation = best->deviation;
-    candidates.erase(best);
-    result.push_back(std::move(next));
-  }
-
-  return result;
+  // Delegate to the multi-source Yen search with a single zero-seed source/goal.
+  // The single-source entry point is kept as a minimal API and unit-test seam,
+  // but no longer maintains a separate Yen loop: one loop serves both, so unit
+  // tests exercise the production Yen path and the single-source heuristic cannot
+  // diverge from the multi-source one. The multi-source search manages its own
+  // reused workspace internally, so workspace sharing across spurs is preserved.
+  return FindKShortestPathsMulti(graph, {SeededEndpoint{start, 0.0}}, {SeededEndpoint{goal, 0.0}},
+                                 k, base_options);
 }
 
 std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,

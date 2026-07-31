@@ -128,90 +128,15 @@ std::vector<double> BuildSeedTable(const std::vector<SeededEndpoint>& endpoints,
 }
 
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
-                              const SearchOptions& options, SearchWorkspace& ws) {
-  ShortestPath result;
-  const int n = graph.VertexCount();
-  if (start < 0 || goal < 0 || start >= n || goal >= n) {
-    return result;
-  }
-  if (options.node_filter.Blocks(start) || options.node_filter.Blocks(goal)) {
-    return result;
-  }
-
-  const Coordinate goal_coord = graph.CoordOf(goal);
-  // Heuristic: straight-line great-circle distance to the goal.
-  auto heuristic = [&](int v) { return graph.CoordOf(v).DistanceTo(goal_coord); };
-
-  ws.Reset(n);
-  ws.NextGeneration();
-
-  // Reuse the workspace's open-set vector across spur searches (clear() keeps
-  // capacity); drive it as a min-heap on f with push_heap/pop_heap, exactly as
-  // std::priority_queue does internally.
-  auto& open = ws.heap();
-  open.clear();
-  ws.Relax(start, 0.0, 0.0, -1);
-  open.push_back(QueueNode{heuristic(start), start});
-  std::push_heap(open.begin(), open.end(), std::greater<>());
-
-  while (!open.empty()) {
-    std::pop_heap(open.begin(), open.end(), std::greater<>());
-    const int u = open.back().vertex;
-    open.pop_back();
-    if (ws.Closed(u)) {
-      continue;  // stale queue entry
-    }
-    if (u == goal) {
-      break;
-    }
-    ws.MarkClosed(u);
-
-    // u is constant across its out-edges; hoist its coordinate once so the
-    // unconstrained fast path fetches no per-edge coordinates.
-    const Coordinate u_coord = graph.CoordOf(u);
-    for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
-      const int v = e->to;
-      if (ws.Closed(v)) {
-        continue;
-      }
-      if (options.node_filter.Blocks(v)) {
-        continue;
-      }
-      if (options.edge_filter.Blocks(u, v)) {
-        continue;
-      }
-      double extra_cost = 0.0;
-      if (!EdgeAllowed(options, *e, u_coord, graph, v, extra_cost)) {
-        continue;
-      }
-      const double tentative = ws.G(u) + e->distance_nm + extra_cost;
-      if (tentative < ws.G(v)) {
-        ws.Relax(v, tentative, ws.Geo(u) + e->distance_nm, u);
-        open.push_back(QueueNode{tentative + heuristic(v), v});
-        std::push_heap(open.begin(), open.end(), std::greater<>());
-      }
-    }
-  }
-
-  if (ws.G(goal) == kInfinity) {
-    return result;  // unreachable
-  }
-
-  // Reconstruct the path from goal back to start.
-  for (int at = goal; at != -1; at = ws.Prev(at)) {
-    result.vertices.push_back(at);
-  }
-  std::reverse(result.vertices.begin(), result.vertices.end());
-  result.distance_nm = ws.Geo(goal);
-  result.cost = ws.G(goal);
-  result.found = true;
-  return result;
-}
-
-ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
                               const SearchOptions& options) {
-  SearchWorkspace ws;
-  return FindShortestPath(graph, start, goal, options, ws);
+  // Delegate to the multi-source search with a single zero-seed source/goal.
+  // The single-source entry point is kept as a minimal API and unit-test seam,
+  // but no longer maintains a separate A* loop: one loop (the multi-source form,
+  // chord heuristic) serves both, so the single- and multi-source paths cannot
+  // drift apart, and unit tests of this entry point exercise the production
+  // search loop rather than a parallel implementation.
+  return FindShortestPathMulti(graph, {SeededEndpoint{start, 0.0}}, {SeededEndpoint{goal, 0.0}},
+                               options);
 }
 
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal) {
