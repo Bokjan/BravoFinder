@@ -195,8 +195,9 @@ std::string RenderWaypoints(OutputFormat fmt, const std::vector<std::string>& id
       continue;
     }
     for (const bf::WaypointInfo& w : results[i]) {
-      os << w.ident << " (" << w.region << ") " << bf::ToString(w.kind) << "  " << w.coord.latitude
-         << ", " << w.coord.longitude << (w.on_network ? "  [on-network]" : "") << "\n";
+      os << w.ident << " (" << w.arinc424_icao_code << ") " << bf::ToString(w.kind) << "  "
+         << w.coord.latitude << ", " << w.coord.longitude << (w.on_network ? "  [on-network]" : "")
+         << "\n";
     }
   }
   return os.str();
@@ -224,9 +225,9 @@ std::string RenderAirports(OutputFormat fmt, const std::vector<std::string>& ids
       continue;
     }
     const bf::AirportInfo& a = *results[i];
-    os << a.icao << " (" << a.region << ")  " << a.coord.latitude << ", " << a.coord.longitude
-       << "  elev " << a.elevation_ft << " ft" << (a.has_procedures ? "  [has procedures]" : "")
-       << "\n";
+    os << a.icao << " (" << a.arinc424_icao_code << ")  " << a.coord.latitude << ", "
+       << a.coord.longitude << "  elev " << a.elevation_ft << " ft"
+       << (a.has_procedures ? "  [has procedures]" : "") << "\n";
   }
   return os.str();
 }
@@ -311,8 +312,8 @@ std::string RenderNavaidDetails(OutputFormat fmt, const std::vector<std::string>
     }
     for (const bf::NavaidDetailInfo& d : results[i]) {
       // NDB frequencies are kHz; VOR/DME/ILS are MHz (raw = MHz * 100).
-      os << d.ident << " (" << d.region << ") " << bf::ToString(d.kind) << "  elev " << d.elev_ft
-         << " ft  freq ";
+      os << d.ident << " (" << d.arinc424_icao_code << ") " << bf::ToString(d.kind) << "  elev "
+         << d.elev_ft << " ft  freq ";
       if (d.kind == bf::WaypointKind::kNdb) {
         os << d.freq_raw << " kHz";
       } else {
@@ -346,8 +347,8 @@ std::string RenderHolds(OutputFormat fmt, const std::vector<std::string>& ids,
       continue;
     }
     for (const bf::HoldInfo& h : results[i]) {
-      os << h.fix_ident << " (" << h.fix_region << ")  " << h.airport_icao << "  inbound "
-         << h.inbound_course << "°  ";
+      os << h.fix_ident << " (" << h.fix_arinc424_icao_code << ")  " << h.airport_icao
+         << "  inbound " << h.inbound_course << "°  ";
       if (h.leg_dist_nm > 0) {
         os << "out " << h.leg_dist_nm << " NM  ";
       } else {

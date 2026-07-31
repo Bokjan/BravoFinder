@@ -34,7 +34,7 @@ TEST_CASE("RenderError: json object vs text line", "[unit][render]") {
 TEST_CASE("RenderWaypoints: text hit/miss and json grouped array", "[unit][render]") {
   bf::WaypointInfo w;
   w.ident = "NINOX";
-  w.region = "ZB";
+  w.arinc424_icao_code = "ZB";
   w.coord = bf::Coordinate{40.64, -73.78};
   w.kind = bf::WaypointKind::kFix;
   w.on_network = true;
@@ -53,7 +53,7 @@ TEST_CASE("RenderWaypoints: text hit/miss and json grouped array", "[unit][rende
 TEST_CASE("RenderAirports: text carries elevation and procedure flag", "[unit][render]") {
   bf::AirportInfo a;
   a.icao = "KJFK";
-  a.region = "K6";
+  a.arinc424_icao_code = "K6";
   a.coord = bf::Coordinate{40.64, -73.78};
   a.elevation_ft = 13;
   a.has_procedures = true;
@@ -64,7 +64,7 @@ TEST_CASE("RenderAirports: text carries elevation and procedure flag", "[unit][r
 TEST_CASE("RenderNavaidDetails: NDB kHz vs VOR MHz split", "[unit][render]") {
   bf::NavaidDetailInfo ndb;
   ndb.ident = "LV";
-  ndb.region = "ZB";
+  ndb.arinc424_icao_code = "ZB";
   ndb.kind = bf::WaypointKind::kNdb;
   ndb.elev_ft = 0;
   ndb.freq_raw = 350;  // NDB: kHz
@@ -72,7 +72,7 @@ TEST_CASE("RenderNavaidDetails: NDB kHz vs VOR MHz split", "[unit][render]") {
 
   bf::NavaidDetailInfo vor;
   vor.ident = "EWC";
-  vor.region = "ZB";
+  vor.arinc424_icao_code = "ZB";
   vor.kind = bf::WaypointKind::kVor;
   vor.elev_ft = 0;
   vor.freq_raw = 11500;  // VOR: MHz * 100 -> 115.0 MHz
@@ -86,7 +86,7 @@ TEST_CASE("RenderNavaidDetails: NDB kHz vs VOR MHz split", "[unit][render]") {
 TEST_CASE("RenderHolds: leg distance, turn, altitude range, speed limit", "[unit][render]") {
   bf::HoldInfo h;
   h.fix_ident = "AE701";
-  h.fix_region = "ZB";
+  h.fix_arinc424_icao_code = "ZB";
   h.airport_icao = "ENRT";
   h.inbound_course = 180.0;
   h.leg_dist_nm = 1.5;
@@ -101,7 +101,7 @@ TEST_CASE("RenderHolds: leg distance, turn, altitude range, speed limit", "[unit
 TEST_CASE("RenderHolds: timing leg falls back to minutes", "[unit][render]") {
   bf::HoldInfo h;
   h.fix_ident = "H";
-  h.fix_region = "ZB";
+  h.fix_arinc424_icao_code = "ZB";
   h.airport_icao = "ENRT";
   h.inbound_course = 90.0;
   h.leg_time_min = 1.0;  // leg_dist_nm == 0 -> use minutes

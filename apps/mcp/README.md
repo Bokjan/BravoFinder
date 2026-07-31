@@ -122,10 +122,10 @@ Parameter semantics:
 - `k`: number of candidate routes (Yen K-shortest), default 1, must be ≥ 1.
 - `departure_runway` / `arrival_runway`: restrict the SID / STAR to this runway, e.g. `RW31L`; empty = any.
 - `departure_sid` / `arrival_star`: pin a SID / STAR by name (e.g. `DEEZZ5`, or `DEEZZ5.TOWIN` to pin the transition); empty = auto.
-- `avoid_waypoints`: waypoints to route around, each an ident (`BOTON`) or `IDENT/REGION` (`BOTON/LF`); a bare ident avoids all its regional matches.
+- `avoid_waypoints`: waypoints to route around, each an ident (`BOTON`) or `IDENT/ARINC424_ICAO_CODE` (`BOTON/LF`); a bare ident avoids all its regional matches.
 - `avoid_airways`: airway designators to route around, e.g. `J60`; also blocks concurrency segments recorded as `J60-V123`.
 - `random_seed`: reproducible route-diversity seed; the same seed always yields the same route, different seeds explore alternative valid routes; omit for the plain optimal route.
-- `forced_points`: ordered via points, each an ident (`PSB`) or `IDENT/REGION` (`PSB/K6`); the response echoes them resolved as `IDENT/REGION`.
+- `forced_points`: ordered via points, each an ident (`PSB`) or `IDENT/ARINC424_ICAO_CODE` (`PSB/K6`); the response echoes them resolved as `IDENT/ARINC424_ICAO_CODE`.
 
 Each returned route element carries: `route` (ICAO filed-flight-plan string), `total_distance_nm`, `dep_distance_nm` / `enroute_distance_nm` / `arr_distance_nm`, `sid`, `dep_runway`, `sid_options`, `star`, `arr_runway`, `star_options`, `forced_points` (if any), `dep_connection` / `arr_connection` (`procedure` / `radar_vectors` etc.), `points` (each `{ident, lat, lon}`, ordered along the route), and `legs` (each with `from` / `to` / `via` / `distance_nm` / `cumulative_nm`; concurrency segments add `concurrent_airways`). `points` has one more entry than `legs` (the destination of leg *i* is `points[i+1]`). In `route` and in `legs[].via`, the airport↔network procedure legs show the literal connector keyword `SID`/`STAR` (or `DCT` for a direct link); the procedure names are in the `sid` / `star` fields.
 
@@ -139,7 +139,7 @@ an airway designator must actually connect its bracketing fixes (expanded to its
 
 `ids` is a string array; the result array is **parallel to `ids`**, with `null` (or an empty inner array for the grouped lookups) where an id is not found. `lookup_procedures` takes airport ICAO codes; the others match by ident / designator.
 
-`lookup_navaid_detail` and `lookup_holds` are grouped lookups (like `lookup_waypoints`): an ident maps to an array of matches. The data lives in the unified `.bfdb`'s detail section, built automatically by `bf build`. `lookup_navaid_detail` returns each navaid's `ident`, `region`, `kind`, `elev_ft`, `freq_raw` (kHz for NDBs, MHz×100 for VOR/DME/ILS), `range_nm`, and `heading`. `lookup_holds` returns each hold's `fix_ident`, `fix_region`, `airport_icao` (`ENRT` for enroute holds), `inbound_course`, `leg_time_min`, `leg_dist_nm`, `turn_dir`, `min_alt_ft`, `max_alt_ft`, and `speed_limit_kt`.
+`lookup_navaid_detail` and `lookup_holds` are grouped lookups (like `lookup_waypoints`): an ident maps to an array of matches. The data lives in the unified `.bfdb`'s detail section, built automatically by `bf build`. `lookup_navaid_detail` returns each navaid's `ident`, `arinc424_icao_code`, `kind`, `elev_ft`, `freq_raw` (kHz for NDBs, MHz×100 for VOR/DME/ILS), `range_nm`, and `heading`. `lookup_holds` returns each hold's `fix_ident`, `fix_arinc424_icao_code`, `airport_icao` (`ENRT` for enroute holds), `inbound_course`, `leg_time_min`, `leg_dist_nm`, `turn_dir`, `min_alt_ft`, `max_alt_ft`, and `speed_limit_kt`.
 
 ### `list_cycles`
 

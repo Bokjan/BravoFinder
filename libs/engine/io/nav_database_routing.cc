@@ -296,7 +296,7 @@ int ResolveForcedPoint(const GraphBuilder& builder, const std::string& token,
       is_airport = true;
       return -1;
     }
-    echo = id.ident + "/" + id.region;
+    echo = id.ident + "/" + id.arinc424_icao_code;
     return v;
   }
   // Bare ident: choose the non-airport match minimizing the added detour
@@ -322,7 +322,7 @@ int ResolveForcedPoint(const GraphBuilder& builder, const std::string& token,
     is_airport = saw_airport;  // only matches were airports
     return -1;
   }
-  echo = builder.IdentOf(best).ident + "/" + builder.IdentOf(best).region;
+  echo = builder.IdentOf(best).ident + "/" + builder.IdentOf(best).arinc424_icao_code;
   return best;
 }
 

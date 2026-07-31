@@ -221,13 +221,13 @@ void CheckTerminalWaypointRegion(const bf::NavData& data) {
   auto it = std::find_if(data.waypoints.begin(), data.waypoints.end(),
                          [](const bf::Waypoint& w) { return w.ident.ident == "WADON"; });
   REQUIRE(it != data.waypoints.end());
-  CHECK(it->ident.region == "K5");
+  CHECK(it->ident.arinc424_icao_code == "K5");
   CHECK(it->coord.latitude == Catch::Approx(39.4956).margin(0.01));
   CHECK(it->coord.longitude == Catch::Approx(-84.3001).margin(0.01));
   // Invariant guarding the whole overflow class: every waypoint region is a valid
   // 2-char ICAO region, never an airport id. A region_code leak trips this at once.
   for (const bf::Waypoint& w : data.waypoints) {
-    CHECK(w.ident.region.size() <= 2);
+    CHECK(w.ident.arinc424_icao_code.size() <= 2);
   }
 }
 

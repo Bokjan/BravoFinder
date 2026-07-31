@@ -70,10 +70,10 @@ Request body (`departure` and `arrival` required, the rest optional):
 - `k`: number of candidate routes (Yen K-shortest), default 1, must be ≥ 1.
 - `departure_runway` / `arrival_runway`: restrict the SID / STAR to this runway (e.g. `RW31L`); empty = any.
 - `departure_sid` / `arrival_star`: pin a SID / STAR by name (e.g. `DEEZZ5`, or `DEEZZ5.TOWIN` to pin the transition); empty = auto.
-- `avoid_waypoints`: idents (`BOTON`) or `IDENT/REGION` (`BOTON/LF`) to route around; a bare ident avoids all its regional matches.
+- `avoid_waypoints`: idents (`BOTON`) or `IDENT/ARINC424_ICAO_CODE` (`BOTON/LF`) to route around; a bare ident avoids all its regional matches.
 - `avoid_airways`: designators (e.g. `J60`) to route around; also blocks concurrency segments recorded as `J60-V123`.
 - `random_seed`: reproducible route-diversity seed; omit for the plain optimum.
-- `forced_points`: ordered via points, idents or `IDENT/REGION`; echoed resolved.
+- `forced_points`: ordered via points, idents or `IDENT/ARINC424_ICAO_CODE`; echoed resolved.
 
 Response `200`: an **array** of route objects, each:
 
@@ -115,12 +115,12 @@ Request (all four non-grouped and grouped lookups): `{"ids": ["...", "..."]}`. T
 
 | Endpoint | Element on hit | On miss |
 |---|---|---|
-| `/v1/airports` | `{icao, region, lat, lon, elevation_ft, has_procedures}` | `null` |
+| `/v1/airports` | `{icao, arinc424_icao_code, lat, lon, elevation_ft, has_procedures}` | `null` |
 | `/v1/procedures` | `{icao, procedures:[{type, name, transition, runway}]}` | `null` |
 | `/v1/airways` | `{name, segments:[{from, to, distance_nm, high, base_fl, top_fl}]}` | `null` |
-| `/v1/waypoints` | `WaypointInfo[]` — `{ident, region, lat, lon, kind, on_network}` | `[]` |
-| `/v1/navaid-detail` | `NavaidDetailInfo[]` — `{ident, region, kind, elev_ft, freq_raw, range_nm, heading}` | `[]` |
-| `/v1/holds` | `HoldInfo[]` — `{fix_ident, fix_region, airport_icao, inbound_course, leg_time_min, leg_dist_nm, turn_dir, min_alt_ft, max_alt_ft, speed_limit_kt}` | `[]` |
+| `/v1/waypoints` | `WaypointInfo[]` — `{ident, arinc424_icao_code, lat, lon, kind, on_network}` | `[]` |
+| `/v1/navaid-detail` | `NavaidDetailInfo[]` — `{ident, arinc424_icao_code, kind, elev_ft, freq_raw, range_nm, heading}` | `[]` |
+| `/v1/holds` | `HoldInfo[]` — `{fix_ident, fix_arinc424_icao_code, airport_icao, inbound_course, leg_time_min, leg_dist_nm, turn_dir, min_alt_ft, max_alt_ft, speed_limit_kt}` | `[]` |
 
 - The grouped lookups (`waypoints` / `navaid-detail` / `holds`) return an inner **array** per id (an ident recurs across regions), empty when unmatched.
 - `freq_raw` is kHz for NDBs, MHz×100 for VOR/DME/ILS. `airport_icao` is `ENRT` for enroute holds.

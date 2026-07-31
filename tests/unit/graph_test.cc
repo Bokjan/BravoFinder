@@ -195,14 +195,14 @@ TEST_CASE("VerticesByIdent returns every region match for a reused ident", "[uni
   // The reused ident resolves to all three regions, in insertion order.
   const std::vector<int> shared = builder.VerticesByIdent("SHARED");
   REQUIRE(shared.size() == 3);
-  CHECK(builder.IdentOf(shared[0]).region == "K6");
-  CHECK(builder.IdentOf(shared[1]).region == "EH");
-  CHECK(builder.IdentOf(shared[2]).region == "LF");
+  CHECK(builder.IdentOf(shared[0]).arinc424_icao_code == "K6");
+  CHECK(builder.IdentOf(shared[1]).arinc424_icao_code == "EH");
+  CHECK(builder.IdentOf(shared[2]).arinc424_icao_code == "LF");
 
   // A unique ident still resolves to exactly one vertex.
   const std::vector<int> lone = builder.VerticesByIdent("LONE");
   REQUIRE(lone.size() == 1);
-  CHECK(builder.IdentOf(lone[0]).region == "K6");
+  CHECK(builder.IdentOf(lone[0]).arinc424_icao_code == "K6");
 
   // An unknown ident resolves to nothing.
   CHECK(builder.VerticesByIdent("NOPE").empty());

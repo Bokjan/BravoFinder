@@ -99,7 +99,7 @@ std::vector<uint8_t> SerializeSegment(const CifpData& data, StringPool& pool) {
       // fix is a FixedIdent; serialize its two parts as pool refs, byte-identical
       // to the former Ident layout (idents <=5 chars => SSO, no heap).
       ref(std::string(leg.fix.IdentView()));
-      ref(std::string(leg.fix.RegionView()));
+      ref(std::string(leg.fix.Arinc424IcaoCodeView()));
       w.U8(static_cast<uint8_t>(leg.path_term));
       w.F64(leg.course_deg);
       w.F64(leg.distance_nm);
@@ -181,8 +181,8 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
       ProcedureLeg& leg = p.legs[j];
       // Two pool refs (ident, region) -> FixedIdent, order matching Encode.
       const std::string fix_ident = read_ref();
-      const std::string fix_region = read_ref();
-      leg.fix = FixedIdent::FromParts(fix_ident, fix_region);
+      const std::string fix_arinc424_icao_code = read_ref();
+      leg.fix = FixedIdent::FromParts(fix_ident, fix_arinc424_icao_code);
       const uint8_t path_byte = br.U8();
       if (path_byte > static_cast<uint8_t>(PathTerminator::kUnknown)) {
         return std::nullopt;

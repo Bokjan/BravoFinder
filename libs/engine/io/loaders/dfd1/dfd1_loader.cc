@@ -146,7 +146,7 @@ Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_
   // Use icao_code (the 2-char ICAO region), NOT region_code -- region_code is the
   // airport/heliport the terminal fix belongs to (e.g. "01OH", 4 chars), which is
   // not a region: keying by it mismatches how airways/procedures reference the fix
-  // (by icao_code) and overflows FixedIdent::kRegionCap. Matches LoadEnrouteWaypoints.
+  // (by icao_code) and overflows FixedIdent::kArinc424IcaoCodeCap. Matches LoadEnrouteWaypoints.
   Result<SqliteStmt> s =
       Prepare(conn,
               "SELECT icao_code, waypoint_identifier, waypoint_latitude, waypoint_longitude "
@@ -331,8 +331,9 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
     HoldFix h;
-    h.fix = Ident(ColumnText(stmt, 2), ColumnText(stmt, 1));  // region = icao_code
-    h.airport_icao = ColumnText(stmt, 0);                     // region_code = airport/ENRT
+    h.fix =
+        Ident(ColumnText(stmt, 2), ColumnText(stmt, 1));  // fix.arinc424_icao_code <- icao_code col
+    h.airport_icao = ColumnText(stmt, 0);                 // <- region_code col (airport/"ENRT")
     h.inbound_course = ColumnDouble(stmt, 3);
     const std::string turn = ColumnText(stmt, 4);
     // Hold turn direction defaults to right ('R') when absent/unknown, matching

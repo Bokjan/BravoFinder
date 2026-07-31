@@ -71,14 +71,14 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
   route->add_option("--star", a->star,
                     "Select a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS (default: auto)");
   route->add_option("--avoid-wpt", a->avoid_wpt,
-                    "Waypoint(s) to avoid; ident or IDENT/REGION. Repeatable.");
+                    "Waypoint(s) to avoid; ident or IDENT/ARINC424_ICAO_CODE. Repeatable.");
   route->add_option("--avoid-awy", a->avoid_awy,
                     "Airway designator(s) to avoid, e.g. J60. Repeatable.");
   route->add_option("--seed", a->seed,
                     "Randomize routing with this seed for reproducible route diversity");
   route->add_option("--via", a->via,
                     "Force the route through these waypoint(s), in order; ident or "
-                    "IDENT/REGION. Repeatable.");
+                    "IDENT/ARINC424_ICAO_CODE. Repeatable.");
 
   route->callback([a, &exit_code]() {
     // With --db, load the prebuilt cache (milliseconds); otherwise parse and

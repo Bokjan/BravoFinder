@@ -32,11 +32,11 @@ struct Coordinate {
 ```cpp
 struct Ident {
   std::string ident;   // 如 "JFK"、"DEEZZ"
-  std::string region;  // 两字母 ICAO 区域码,如 "K6"
+  std::string arinc424_icao_code;  // 两字母 ICAO 区域码,如 "K6"
 };
 ```
 
-**关键设计：ident 不是全局唯一的**。同一个代码在不同 ICAO 区域会复用。所以唯一标识一个点的是 `(ident, region)` **这一对**，它被建模成一个值类型，并作为全代码库统一的查找键(还特化了 `std::hash<Ident>` 用 boost 风格混合)。曾经用「仅 ident 取第一个」的查找，选中谁取决于加载顺序、 对用户不可见——v3 消除了它，宁可返回所有匹配点也不隐式挑一个。
+**关键设计：ident 不是全局唯一的**。同一个代码在不同 ICAO 区域会复用。所以唯一标识一个点的是 `(ident, arinc424_icao_code)` **这一对**，它被建模成一个值类型，并作为全代码库统一的查找键(还特化了 `std::hash<Ident>` 用 boost 风格混合)。曾经用「仅 ident 取第一个」的查找，选中谁取决于加载顺序、 对用户不可见——v3 消除了它，宁可返回所有匹配点也不隐式挑一个。
 
 值类型的红利：复制它们零 lifetime 风险，`NavDatabase` 复制/移动时不必担心悬垂指针，并发只读天然 安全——因为根本没有共享的可变间接层。
 

@@ -20,10 +20,10 @@ using bf::Ident;
 TEST_CASE("FixedIdent: round-trips ident and region", "[unit][fixed_ident]") {
   const FixedIdent f = FixedIdent::FromParts("CANDR", "K6");
   CHECK(f.IdentView() == "CANDR");
-  CHECK(f.RegionView() == "K6");
+  CHECK(f.Arinc424IcaoCodeView() == "K6");
   const Ident back = f.ToIdent();
   CHECK(back.ident == "CANDR");
-  CHECK(back.region == "K6");
+  CHECK(back.arinc424_icao_code == "K6");
 }
 
 TEST_CASE("FixedIdent: FromIdent matches FromParts", "[unit][fixed_ident]") {
@@ -35,9 +35,9 @@ TEST_CASE("FixedIdent: FromIdent matches FromParts", "[unit][fixed_ident]") {
 TEST_CASE("FixedIdent: empty ident and region round-trip", "[unit][fixed_ident]") {
   const FixedIdent f = FixedIdent::FromParts("", "");
   CHECK(f.IdentView().empty());
-  CHECK(f.RegionView().empty());
+  CHECK(f.Arinc424IcaoCodeView().empty());
   CHECK(f.ToIdent().ident.empty());
-  CHECK(f.ToIdent().region.empty());
+  CHECK(f.ToIdent().arinc424_icao_code.empty());
 }
 
 TEST_CASE("FixedIdent: equality distinguishes ident and region", "[unit][fixed_ident]") {

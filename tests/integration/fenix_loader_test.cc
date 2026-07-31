@@ -77,7 +77,7 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
     for (const auto& w : fd.data.waypoints) {
       if (w.coord.latitude < -90 || w.coord.latitude > 90) ++bad;
       if (w.coord.longitude < -180 || w.coord.longitude > 180) ++bad;
-      if (w.ident.region.size() > 2) ++reg_long;
+      if (w.ident.arinc424_icao_code.size() > 2) ++reg_long;
     }
     CHECK(bad == 0);
     CHECK(reg_long == 0);

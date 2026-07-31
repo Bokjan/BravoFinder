@@ -14,10 +14,10 @@ namespace bf {
 //   navaid_count       U32
 //   hold_count         U32
 //   Navaid records [navaid_count]:
-//     ident_off/len U32, region_off/len U32, kind U8, elev_ft I32,
+//     ident_off/len U32, arinc424_icao_code_off/len U32, kind U8, elev_ft I32,
 //     freq_raw I32, range_nm F64, heading F64
 //   Hold records [hold_count]:
-//     fix_ident_off/len U32, fix_region_off/len U32, airport_off/len U32,
+//     fix_ident_off/len U32, fix_icao_code_off/len U32, airport_off/len U32,
 //     inbound_course F64, leg_time_min F64, leg_dist_nm F64, turn_dir U8,
 //     min_alt_ft I32, max_alt_ft I32, speed_limit_kt I32
 
@@ -32,7 +32,7 @@ namespace {
 // address (#pragma pack(push,1) is portable across MSVC/GCC/Clang for sizeof).
 #pragma pack(push, 1)
 struct WireNavaid {
-  uint32_t ident_io, ident_il, region_io, region_rl;
+  uint32_t ident_io, ident_il, arinc424_icao_code_io, arinc424_icao_code_rl;
   uint8_t kind;
   int32_t elev_ft, freq_raw;
   double range_nm, heading;
@@ -68,7 +68,7 @@ Result<void> NavDetailCodec::Encode(const NavDetailArchive& archive, ByteWriter&
   for (const auto& entry : archive.navaids_) {
     const NavaidDetailInfo& d = entry.second;
     ref(d.ident);
-    ref(d.region);
+    ref(d.arinc424_icao_code);
     w.U8(static_cast<uint8_t>(d.kind));
     w.I32(d.elev_ft);
     w.I32(d.freq_raw);
@@ -79,7 +79,7 @@ Result<void> NavDetailCodec::Encode(const NavDetailArchive& archive, ByteWriter&
   // Hold records
   for (const HoldInfo& h : archive.holds_) {
     ref(h.fix_ident);
-    ref(h.fix_region);
+    ref(h.fix_arinc424_icao_code);
     ref(h.airport_icao);
     w.F64(h.inbound_course);
     w.F64(h.leg_time_min);
@@ -126,8 +126,8 @@ Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
   for (uint32_t i = 0; i < navaid_count; ++i) {
     const uint32_t ident_off = r.U32();
     const uint32_t ident_len = r.U32();
-    const uint32_t region_off = r.U32();
-    const uint32_t region_len = r.U32();
+    const uint32_t arinc424_icao_code_off = r.U32();
+    const uint32_t arinc424_icao_code_len = r.U32();
     const uint8_t kind_byte = r.U8();
     // Reject an out-of-range WaypointKind byte (mirrors graph_codec.cc:405)
     // rather than reinterpreting it into a lookup table slot.
@@ -144,13 +144,13 @@ Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
     }
     NavaidDetailInfo info;
     info.ident = resolve(ident_off, ident_len);
-    info.region = resolve(region_off, region_len);
+    info.arinc424_icao_code = resolve(arinc424_icao_code_off, arinc424_icao_code_len);
     info.kind = kind;
     info.elev_ft = elev_ft;
     info.freq_raw = freq_raw;
     info.range_nm = range_nm;
     info.heading = heading;
-    archive.navaids_[i] = {Ident(info.ident, info.region), std::move(info)};
+    archive.navaids_[i] = {Ident(info.ident, info.arinc424_icao_code), std::move(info)};
   }
 
   // Hold records
@@ -161,8 +161,8 @@ Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
   for (uint32_t i = 0; i < hold_count; ++i) {
     const uint32_t fix_ident_off = r.U32();
     const uint32_t fix_ident_len = r.U32();
-    const uint32_t fix_region_off = r.U32();
-    const uint32_t fix_region_len = r.U32();
+    const uint32_t fix_icao_code_off = r.U32();
+    const uint32_t fix_icao_code_len = r.U32();
     const uint32_t airport_off = r.U32();
     const uint32_t airport_len = r.U32();
     const double inbound_course = r.F64();
@@ -177,7 +177,7 @@ Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
     }
     HoldInfo& h = archive.holds_[i];
     h.fix_ident = resolve(fix_ident_off, fix_ident_len);
-    h.fix_region = resolve(fix_region_off, fix_region_len);
+    h.fix_arinc424_icao_code = resolve(fix_icao_code_off, fix_icao_code_len);
     h.airport_icao = resolve(airport_off, airport_len);
     h.inbound_course = inbound_course;
     h.leg_time_min = leg_time_min;
@@ -211,7 +211,7 @@ NavDetailArchive NavDetailArchive::FromData(const NavData& data) {
   for (const NavaidDetail& d : data.navaid_details) {
     NavaidDetailInfo info;
     info.ident = d.ident.ident;
-    info.region = d.ident.region;
+    info.arinc424_icao_code = d.ident.arinc424_icao_code;
     info.kind = d.kind;
     info.elev_ft = d.elev_ft;
     info.freq_raw = d.freq_raw;
@@ -224,7 +224,7 @@ NavDetailArchive NavDetailArchive::FromData(const NavData& data) {
   for (const HoldFix& h : data.hold_fixes) {
     HoldInfo info;
     info.fix_ident = h.fix.ident;
-    info.fix_region = h.fix.region;
+    info.fix_arinc424_icao_code = h.fix.arinc424_icao_code;
     info.airport_icao = h.airport_icao;
     info.inbound_course = h.inbound_course;
     info.leg_time_min = h.leg_time_min;
@@ -246,13 +246,13 @@ void NavDetailArchive::Finalize() {
     if (a.first.ident != b.first.ident) {
       return a.first.ident < b.first.ident;
     }
-    return a.first.region < b.first.region;
+    return a.first.arinc424_icao_code < b.first.arinc424_icao_code;
   });
   assert(std::is_sorted(navaids_.begin(), navaids_.end(), [](const auto& a, const auto& b) {
     if (a.first.ident != b.first.ident) {
       return a.first.ident < b.first.ident;
     }
-    return a.first.region < b.first.region;
+    return a.first.arinc424_icao_code < b.first.arinc424_icao_code;
   }));
   std::sort(holds_.begin(), holds_.end(),
             [](const HoldInfo& a, const HoldInfo& b) { return a.fix_ident < b.fix_ident; });
@@ -273,7 +273,7 @@ std::vector<NavaidDetailInfo> NavDetailArchive::FindNavaids(const std::string& i
     if (a.first.ident != b.first.ident) {
       return a.first.ident < b.first.ident;
     }
-    return a.first.region < b.first.region;
+    return a.first.arinc424_icao_code < b.first.arinc424_icao_code;
   }));
   // lower_bound on ident string; collect all matching ident (any region).
   auto it = std::lower_bound(

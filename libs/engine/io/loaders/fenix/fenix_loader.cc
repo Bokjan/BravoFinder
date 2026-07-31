@@ -267,10 +267,10 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
       return;
     }
 
-    std::string region;
+    std::string icao_code;
     auto rit = region_by_id.find(id);
     if (rit != region_by_id.end()) {
-      region = rit->second;
+      icao_code = rit->second;
     }
 
     WaypointKind kind = WaypointKind::kFix;
@@ -281,7 +281,7 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
       }
     }
 
-    data.waypoints.push_back(Waypoint{Ident{ident_str, region}, Coordinate{lat, lon}, kind});
+    data.waypoints.push_back(Waypoint{Ident{ident_str, icao_code}, Coordinate{lat, lon}, kind});
   });
   if (!rows) {
     return Result<void>::Err(rows.error());
@@ -438,8 +438,8 @@ Result<void> LoadAirports(sqlite3* conn, NavData& data) {
   Result<void> rows = ForEachRow(stmt, [&] {
     std::string icao = ColumnText(stmt, 0);
     auto rit = icao_region.find(icao);
-    std::string region = (rit != icao_region.end()) ? rit->second : "";
-    data.airports.push_back(Airport{icao, region,
+    std::string icao_code = (rit != icao_region.end()) ? rit->second : "";
+    data.airports.push_back(Airport{icao, icao_code,
                                     Coordinate{ColumnDouble(stmt, 1), ColumnDouble(stmt, 2)},
                                     ColumnInt(stmt, 3)});
   });
@@ -466,8 +466,10 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
   sqlite3_stmt* stmt = s.value().get();
   Result<void> rows = ForEachRow(stmt, [&] {
     HoldFix h;
-    h.fix = Ident{ColumnText(stmt, 0), ColumnText(stmt, 1)};
-    h.airport_icao = ColumnText(stmt, 2);
+    // col1=region_code is the airport id (or "ENRT"), NOT a region; col2=icao_code
+    // is the 2-char ICAO region. Mirror dfd1/dfd2 LoadHoldings (dfd-loader-data-traps).
+    h.fix = Ident{ColumnText(stmt, 0), ColumnText(stmt, 2)};  // fix.arinc424_icao_code <- icao_code
+    h.airport_icao = ColumnText(stmt, 1);                     // <- region_code (airport/"ENRT")
     if (h.airport_icao.empty()) {
       h.airport_icao = "ENRT";
     }
@@ -633,9 +635,9 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
         auto wit = wp_info.find(wpt_id);
         if (wit != wp_info.end()) {
           const std::string& ident = wit->second.first;
-          const std::string& region = wit->second.second;
+          const std::string& icao_code = wit->second.second;
           if (ident.size() <= FixedIdent::kIdentCap) {
-            leg.fix = FixedIdent::FromParts(ident, region);
+            leg.fix = FixedIdent::FromParts(ident, icao_code);
           }
         }
       }

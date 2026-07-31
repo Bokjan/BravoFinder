@@ -111,7 +111,14 @@ class UnifiedCache {
   //      retired. (Holds are always 'L'/'R' in practice, so this is
   //      consistency-only, not a data fix; done because the bump is free
   //      pre-release.)
-  static constexpr uint32_t kFormatVersion = 13;
+  // v14: no layout change. The Fenix holding loader swapped the Holdings table's
+  //      region_code and icao_code columns: fix.arinc424_icao_code received region_code
+  //      (the airport id, e.g. "RJTT"/"ENRT") and airport_icao received icao_code
+  //      (the 2-char region, e.g. "RJ"). v13 Fenix-sourced files carry swapped
+  //      (terminal) or ENRT-polluted (enroute) hold fix_arinc424_icao_code/airport_icao
+  //      while staying byte- and version-valid, so v13 is retired to force a
+  //      rebuild. (DFD1/DFD2 were already correct; X-Plane unaffected.)
+  static constexpr uint32_t kFormatVersion = 14;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

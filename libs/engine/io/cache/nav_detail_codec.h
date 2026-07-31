@@ -51,7 +51,7 @@ class NavDetailArchive {
   // Sort both arrays and mark the archive loaded. Shared by FromData and Decode.
   void Finalize();
 
-  // Sorted by (ident.ident, ident.region); lower_bound for exact match.
+  // Sorted by (ident.ident, ident.arinc424_icao_code); lower_bound for exact match.
   std::vector<std::pair<Ident, NavaidDetailInfo>> navaids_;
   // Sorted by fix.ident string; equal_range for multi-value lookup.
   std::vector<HoldInfo> holds_;

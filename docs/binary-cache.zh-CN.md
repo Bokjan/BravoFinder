@@ -55,9 +55,9 @@ v3 起磁盘改为**逐顶点一条自包含 record**（`coord + ident 引用 + 
 
 ## 6. 字符串：文件层用池引用，运行时按体量分层
 
-曾考虑把 idents/airway 名全改成 `string_view` + 集中字符串池省内存。**实测否决**：cycle 2601 数据里 ident 最长 5 字符、region 1–2、airway 名 99%+ ≤10 字符，**全部落在 libc++ SSO（22B） 阈值内 → 本就零堆分配**。view 化的主收益（消堆分配）不存在，代价却是贯穿全 API 的 lifetime 契约，还逆了「领域类型是不可变值类型」的设计宪法。
+曾考虑把 idents/airway 名全改成 `string_view` + 集中字符串池省内存。**实测否决**：cycle 2601 数据里 ident 最长 5 字符、arinc424_icao_code 1–2、airway 名 99%+ ≤10 字符，**全部落在 libc++ SSO（22B） 阈值内 → 本就零堆分配**。view 化的主收益（消堆分配）不存在，代价却是贯穿全 API 的 lifetime 契约，还逆了「领域类型是不可变值类型」的设计宪法。
 
-结论：**只在序列化文件层**用 `{u32 offset, u32 len}` 引用字符串池令文件紧凑，加载后重建回**拥有型** 值——零 lifetime 风险。运行时的拥有型本身按体量分层：查询边缘的少量字符串用全 SSO 的 `Ident`；而 V 级（27 万顶点 ident）与 CIFP 级（76 万 leg 的 fix）用定长 12B 的 `FixedIdent`（length-prefixed inline，零堆分配）——仍是拥有型、零 lifetime 风险，只是把「弹性」换成「紧凑」，各省约 14MB / 40MB。 `StringPool` 带**去重**（`unordered_map` 记已 intern 的串）：ident/region/airway/ICAO 高度重复，同串只存一份。去重对 reader **透明**——引用格式 `{offset,len}` 与段布局都没变。
+结论：**只在序列化文件层**用 `{u32 offset, u32 len}` 引用字符串池令文件紧凑，加载后重建回**拥有型** 值——零 lifetime 风险。运行时的拥有型本身按体量分层：查询边缘的少量字符串用全 SSO 的 `Ident`；而 V 级（27 万顶点 ident）与 CIFP 级（76 万 leg 的 fix）用定长 12B 的 `FixedIdent`（length-prefixed inline，零堆分配）——仍是拥有型、零 lifetime 风险，只是把「弹性」换成「紧凑」，各省约 14MB / 40MB。 `StringPool` 带**去重**（`unordered_map` 记已 intern 的串）：ident/arinc424_icao_code/airway/ICAO 高度重复，同串只存一份。去重对 reader **透明**——引用格式 `{offset,len}` 与段布局都没变。
 
 统一容器进一步把去重推到**全局**：graph、CIFP、detail 三段共用**一个** `StringPool`， 所以一个 fix 名即便在图顶点、几十个机场的程序腿、导航台细节里都出现，全库也只存一份。 过去 CIFP 每个 segment 各带一份局部池是重复的放大器（同名在几十段里各存一次）；统一后 segment 去掉局部池、引用直指全局池。实测 cycle 2601：三段池之和 ~8.7MB → 全局去重后 ~1.5MB（pool 体积 −83%），是单文件比三文件省 ~8MB 的主因。
 

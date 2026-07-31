@@ -63,7 +63,7 @@ TEST_CASE("CIFP parser: definite-fix legs resolve their fix and region", "[unit]
 
   // The CF leg flies to SKORR (region K6); it terminates at a fix.
   CHECK(p.legs[1].fix.IdentView() == "SKORR");
-  CHECK(p.legs[1].fix.RegionView() == "K6");
+  CHECK(p.legs[1].fix.Arinc424IcaoCodeView() == "K6");
   CHECK(p.legs[1].fix_is_definite());
 
   // The VI/VM legs have no fix and do not terminate at one.

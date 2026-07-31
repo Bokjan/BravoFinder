@@ -126,11 +126,11 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
     double lon = 0;
     std::string ident;
     std::string terminal;
-    std::string region;
-    if (!(row >> lat >> lon >> ident >> terminal >> region)) {
+    std::string icao_code;
+    if (!(row >> lat >> lon >> ident >> terminal >> icao_code)) {
       return;
     }
-    Ident key(ident, region);
+    Ident key(ident, icao_code);
     if (seen.insert(key).second) {
       data.waypoints.push_back(Waypoint{key, Coordinate{lat, lon}, WaypointKind::kFix});
     }
@@ -150,16 +150,16 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
     double hdg = 0;
     std::string ident;
     std::string terminal;
-    std::string region;
+    std::string icao_code;
     if (!(row >> code >> lat >> lon >> elev >> freq >> range >> hdg >> ident >> terminal >>
-          region)) {
+          icao_code)) {
       return;
     }
     WaypointKind kind = NavKindFromRowCode(code);
     if (kind == WaypointKind::kOther) {
       return;  // not an enroute-routable navaid
     }
-    Ident key(ident, region);
+    Ident key(ident, icao_code);
     if (seen.insert(key).second) {
       data.waypoints.push_back(Waypoint{key, Coordinate{lat, lon}, kind});
       data.navaid_details.push_back(NavaidDetail{key, kind, elev, freq, range, hdg});
@@ -201,14 +201,14 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
   // --- earth_aptmeta.dat: icao region lat lon elev ... ---
   const bool apt_ok = ForEachDataRow(data_dir + "/earth_aptmeta.dat", [&](std::istringstream& row) {
     std::string icao;
-    std::string region;
+    std::string icao_code;
     double lat = 0;
     double lon = 0;
     int elev = 0;
-    if (!(row >> icao >> region >> lat >> lon >> elev)) {
+    if (!(row >> icao >> icao_code >> lat >> lon >> elev)) {
       return;
     }
-    data.airports.push_back(Airport{icao, region, Coordinate{lat, lon}, elev});
+    data.airports.push_back(Airport{icao, icao_code, Coordinate{lat, lon}, elev});
   });
   if (!apt_ok) {
     return Result<NavData>::Err(Error(ErrorCode::kDataMissing, "cannot open earth_aptmeta.dat"));
@@ -242,14 +242,14 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
   ForEachDataRow(data_dir + "/earth_msa.dat", [&](std::istringstream& row) {
     int row_code = 0;
     std::string center;
-    std::string region;
+    std::string icao_code;
     std::string airport;
     std::string magnetic;  // 'M' or 'T' marker preceding the triplets
-    if (!(row >> row_code >> center >> region >> airport >> magnetic)) {
+    if (!(row >> row_code >> center >> icao_code >> airport >> magnetic)) {
       return;
     }
     MsaSector sector;
-    sector.center = Ident(center, region);
+    sector.center = Ident(center, icao_code);
     sector.airport_icao = airport;
     int bearing = 0;
     int alt = 0;
@@ -270,7 +270,7 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
   // Optional: a missing file simply leaves hold_fixes empty.
   ForEachDataRow(data_dir + "/earth_hold.dat", [&](std::istringstream& row) {
     std::string ident;
-    std::string region;
+    std::string icao_code;
     std::string airport;
     int row_code = 0;
     double inbound_course = 0;
@@ -280,12 +280,12 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
     int min_alt = 0;
     int max_alt = 0;
     int speed = 0;
-    if (!(row >> ident >> region >> airport >> row_code >> inbound_course >> leg_time >> leg_dist >>
-          turn >> min_alt >> max_alt >> speed)) {
+    if (!(row >> ident >> icao_code >> airport >> row_code >> inbound_course >> leg_time >>
+          leg_dist >> turn >> min_alt >> max_alt >> speed)) {
       return;
     }
     HoldFix h;
-    h.fix = Ident(ident, region);
+    h.fix = Ident(ident, icao_code);
     h.airport_icao = airport;
     h.inbound_course = inbound_course;
     h.leg_time_min = leg_time;

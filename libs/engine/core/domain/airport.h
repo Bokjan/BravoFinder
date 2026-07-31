@@ -11,8 +11,8 @@ namespace bf {
 // joins the route network either via a direct (DCT) leg to nearby waypoints or
 // via a SID/STAR procedure connection.
 struct Airport {
-  std::string icao;    // e.g. "KJFK"
-  std::string region;  // two-letter ICAO region code, e.g. "K6"
+  std::string icao;                // e.g. "KJFK"
+  std::string arinc424_icao_code;  // two-letter ICAO region code, e.g. "K6"
   Coordinate coord;
   int elevation_ft = 0;
 };

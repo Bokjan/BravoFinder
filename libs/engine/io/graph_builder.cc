@@ -116,7 +116,7 @@ GraphBuilder::GraphBuilder(const NavData& data) {
   for (int i = 0; i < airport_count; ++i) {
     const Airport& a = data.airports[i];
     graph_.coords_.push_back(a.coord);
-    idents_.push_back(FixedIdent::FromParts(a.icao, a.region));
+    idents_.push_back(FixedIdent::FromParts(a.icao, a.arinc424_icao_code));
     kinds_.push_back(WaypointKind::kFix);  // airports have no navaid kind
     airport_elevations_ft_.push_back(a.elevation_ft);
   }
@@ -248,7 +248,8 @@ int GraphBuilder::VertexByIdent(const Ident& ident) const {
   // A query string longer than the fixed caps cannot match any stored key
   // (real idents are <= 5 / regions <= 2). Short-circuit so FromIdent's
   // build-side overflow assert never fires on a legitimate over-long query.
-  if (ident.ident.size() > FixedIdent::kIdentCap || ident.region.size() > FixedIdent::kRegionCap) {
+  if (ident.ident.size() > FixedIdent::kIdentCap ||
+      ident.arinc424_icao_code.size() > FixedIdent::kArinc424IcaoCodeCap) {
     return -1;
   }
   return VertexByIdent(FixedIdent::FromIdent(ident));

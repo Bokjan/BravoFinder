@@ -35,7 +35,7 @@ std::vector<std::vector<WaypointInfo>> NavDatabase::LookupWaypoints(
         continue;
       }
       const Ident& id = builder_->IdentOf(v);
-      out[i].push_back(WaypointInfo{id.ident, id.region, builder_->graph().CoordOf(v),
+      out[i].push_back(WaypointInfo{id.ident, id.arinc424_icao_code, builder_->graph().CoordOf(v),
                                     builder_->KindOf(v), builder_->OnNetwork(v)});
     }
   }
@@ -55,7 +55,7 @@ std::vector<std::optional<AirportInfo>> NavDatabase::LookupAirports(
       continue;
     }
     const Ident& id = builder_->IdentOf(v);
-    out[i] = AirportInfo{id.ident, id.region, builder_->graph().CoordOf(v),
+    out[i] = AirportInfo{id.ident, id.arinc424_icao_code, builder_->graph().CoordOf(v),
                          builder_->ElevationOf(v), ProceduresFor(up) != nullptr};
   }
   return out;

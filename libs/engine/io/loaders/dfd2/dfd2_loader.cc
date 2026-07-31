@@ -168,7 +168,7 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_s
 Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
   // Use icao_code (2-char ICAO region), NOT region_code (the airport the fix
   // belongs to, e.g. "01OH"): region_code is not a region, mismatches how
-  // airways/procedures reference the fix, and overflows FixedIdent::kRegionCap.
+  // airways/procedures reference the fix, and overflows FixedIdent::kArinc424IcaoCodeCap.
   // (Same as dfd1; see the dfd1 LoadTerminalWaypoints comment.)
   const std::string sql = std::string(
                               "SELECT icao_code, waypoint_identifier, "

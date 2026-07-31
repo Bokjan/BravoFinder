@@ -28,7 +28,7 @@ static_assert(static_cast<int>(WaypointKind::kOther) < 256,
 #pragma pack(push, 1)
 struct WireVertex {
   double lat, lon;
-  uint32_t ident_io, ident_il, region_io, region_rl;
+  uint32_t ident_io, ident_il, arinc424_icao_code_io, arinc424_icao_code_rl;
   uint8_t flags, kind;
 };
 struct WireEdge {
@@ -67,7 +67,7 @@ static_assert(kMsaArcSize == 12, "msa-arc wire layout drifted");
 // pool):
 //   header ints : U32 v, U32 e, U32 airway_count, U32 msa_count,
 //                 U32 first_airport_vertex
-//   vertex records [v] : F64 lat, F64 lon, U32 ident_off/len, U32 region_off/len,
+//   vertex records [v] : F64 lat, F64 lon, U32 ident_off/len, U32 arinc424_icao_code_off/len,
 //                        U8 flags (bit0 = has_outbound, bit1 = has_inbound), U8 kind
 //   airport records [v - first_airport_vertex] : I32 elevation_ft
 //   offsets [v + 1] : I32
@@ -117,7 +117,7 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
     w.F64(c.longitude);
     const FixedIdent& id = snapshot.idents[i];
     const auto ir = pool.Add(std::string(id.IdentView()));
-    const auto rr = pool.Add(std::string(id.RegionView()));
+    const auto rr = pool.Add(std::string(id.Arinc424IcaoCodeView()));
     w.U32(ir.first);
     w.U32(ir.second);
     w.U32(rr.first);
@@ -198,7 +198,7 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
   }
   for (const MsaSector& s : snapshot.msa) {
     const auto ci = pool.Add(s.center.ident);
-    const auto cr = pool.Add(s.center.region);
+    const auto cr = pool.Add(s.center.arinc424_icao_code);
     const auto ai = pool.Add(s.airport_icao);
     w.U32(ci.first);
     w.U32(ci.second);
@@ -434,7 +434,7 @@ Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
   for (uint32_t i = 0; i < msa_count; ++i) {
     MsaRef& m = msa_refs[i];
     snapshot.msa[i].center.ident = ResolveRef(pool, m.cio, m.cil, refs_ok);
-    snapshot.msa[i].center.region = ResolveRef(pool, m.cro, m.crl, refs_ok);
+    snapshot.msa[i].center.arinc424_icao_code = ResolveRef(pool, m.cro, m.crl, refs_ok);
     snapshot.msa[i].airport_icao = ResolveRef(pool, m.aio, m.ail, refs_ok);
     snapshot.msa[i].arcs = std::move(m.arcs);
   }

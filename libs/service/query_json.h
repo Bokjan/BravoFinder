@@ -67,7 +67,7 @@ template <class Writer>
 void WriteWaypointJson(Writer& w, const WaypointInfo& wp) {
   w.StartObject();
   detail::WriteKeyStr(w, "ident", wp.ident);
-  detail::WriteKeyStr(w, "region", wp.region);
+  detail::WriteKeyStr(w, "arinc424_icao_code", wp.arinc424_icao_code);
   detail::WriteCoord(w, wp.coord);
   w.Key("kind");
   w.String(ToString(wp.kind));
@@ -80,7 +80,7 @@ template <class Writer>
 void WriteAirportJson(Writer& w, const AirportInfo& a) {
   w.StartObject();
   detail::WriteKeyStr(w, "icao", a.icao);
-  detail::WriteKeyStr(w, "region", a.region);
+  detail::WriteKeyStr(w, "arinc424_icao_code", a.arinc424_icao_code);
   detail::WriteCoord(w, a.coord);
   w.Key("elevation_ft");
   w.Int(a.elevation_ft);
@@ -185,7 +185,7 @@ template <class Writer>
 void WriteNavaidDetailJson(Writer& w, const NavaidDetailInfo& d) {
   w.StartObject();
   detail::WriteKeyStr(w, "ident", d.ident);
-  detail::WriteKeyStr(w, "region", d.region);
+  detail::WriteKeyStr(w, "arinc424_icao_code", d.arinc424_icao_code);
   w.Key("kind");
   w.String(ToString(d.kind));
   w.Key("elev_ft");
@@ -203,7 +203,7 @@ template <class Writer>
 void WriteHoldJson(Writer& w, const HoldInfo& h) {
   w.StartObject();
   detail::WriteKeyStr(w, "fix_ident", h.fix_ident);
-  detail::WriteKeyStr(w, "fix_region", h.fix_region);
+  detail::WriteKeyStr(w, "fix_arinc424_icao_code", h.fix_arinc424_icao_code);
   detail::WriteKeyStr(w, "airport_icao", h.airport_icao);
   w.Key("inbound_course");
   w.Double(h.inbound_course);

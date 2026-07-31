@@ -89,7 +89,7 @@ TEST_CASE("nav detail codec: encode -> decode round-trips navaids", "[unit][deta
   auto sea = a.FindNavaids("SEA");
   REQUIRE(sea.size() == 1);
   CHECK(sea[0].ident == "SEA");
-  CHECK(sea[0].region == "K1");
+  CHECK(sea[0].arinc424_icao_code == "K1");
   CHECK(sea[0].kind == bf::WaypointKind::kVor);
   CHECK(sea[0].elev_ft == 354);
   CHECK(sea[0].freq_raw == 11680);
@@ -115,7 +115,7 @@ TEST_CASE("nav detail codec: encode -> decode round-trips holds", "[unit][detail
   REQUIRE(ae.size() == 2);
   for (const bf::HoldInfo& h : ae) {
     CHECK(h.fix_ident == "AE701");
-    CHECK(h.fix_region == "DA");
+    CHECK(h.fix_arinc424_icao_code == "DA");
     CHECK(h.airport_icao == "DAAE");
     CHECK(h.min_alt_ft == 5580);
     CHECK(h.max_alt_ft == 14000);
@@ -156,7 +156,8 @@ TEST_CASE("nav detail codec: a byte-corrupted navaid kind is rejected", "[unit][
   REQUIRE(bf::NavDetailCodec::Encode(src, w, pool));
 
   // Header (navaid_count U32 + hold_count U32 = 8) then the first navaid record:
-  // 4 ref U32s (ident_off/ident_len/region_off/region_len = 16) -> kind U8 at 24.
+  // 4 ref U32s (ident_off/ident_len/arinc424_icao_code_off/arinc424_icao_code_len = 16) -> kind U8
+  // at 24.
   constexpr size_t kFirstKindOffset = 8 + 4 * 4;
   static_assert(kFirstKindOffset == 24, "nav detail wire layout drifted");
   REQUIRE(body.size() > kFirstKindOffset);

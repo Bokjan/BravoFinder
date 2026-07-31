@@ -18,7 +18,7 @@ namespace bf {
 // A navigation point (enroute waypoint or radio navaid).
 struct WaypointInfo {
   std::string ident{};
-  std::string region{};  // two-letter ICAO region code
+  std::string arinc424_icao_code{};  // two-letter ICAO region code
   Coordinate coord{};
   WaypointKind kind = WaypointKind::kFix;
   bool on_network = false;  // participates in the enroute airway network (inbound or outbound edge)
@@ -27,7 +27,7 @@ struct WaypointInfo {
 // An airport node.
 struct AirportInfo {
   std::string icao{};
-  std::string region{};
+  std::string arinc424_icao_code{};
   Coordinate coord{};
   int elevation_ft = 0;
   bool has_procedures = false;  // whether CIFP terminal procedures are available
@@ -102,7 +102,7 @@ struct AirwayInfo {
 // basic WaypointInfo from LookupWaypoints with fields not needed for routing.
 struct NavaidDetailInfo {
   std::string ident{};
-  std::string region{};
+  std::string arinc424_icao_code{};
   WaypointKind kind = WaypointKind::kOther;
   int elev_ft = 0;
   int freq_raw = 0;  // raw dat value: NDB = kHz; VOR/ILS/DME = MHz * 100
@@ -113,7 +113,7 @@ struct NavaidDetailInfo {
 // One holding pattern at a fix, from earth_hold.dat.
 struct HoldInfo {
   std::string fix_ident{};
-  std::string fix_region{};
+  std::string fix_arinc424_icao_code{};
   std::string airport_icao{};  // "ENRT" for enroute holds
   double inbound_course = 0.0;
   double leg_time_min = 0.0;
