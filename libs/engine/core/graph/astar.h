@@ -112,13 +112,16 @@ struct TurnPenalty {
   // the 157-degree case to ~120 NM, a full 180 to 200 NM. Tunable: revisit after a
   // batch before/after comparison and adjust here only.
   // kMaxPenaltyNm was raised 95 -> 200 after the batch: near-180 reversals are
-  // already eliminated at 95, but 200 also suppresses most >135/>150 turns and
-  // -- surprisingly -- also fixes doorstep stubs the gap-gated filter could not
-  // (WAAA's 2.2 NM airway-to-door entry turns sharply; at 95 the search kept the
-  // 2.2 NM stub, at 200 it joins the real 234 NM STAR via KENDO at +27 NM / 0.36%
-  // total). The residual ~11% of >90 turns is structural (DCT-fallback candidate
-  // sets lack a smooth option) and is expected to be addressed by the upcoming
-  // IF-only connection model, not by a penalty-magnitude change.
+  // already eliminated at 95, but 200 also suppresses most >135/>150 turns.
+  // It was re-measured at cycle-2601 scale after the gate-restricted connection
+  // model landed -- 200 was partly standing in for that model, so 95 was expected
+  // to suffice afterwards. It does not: at 200 every handoff class still has a
+  // shorter tail than at 95 (procedure-connected STAR entries >150: 4.96% vs
+  // 5.67%; DCT-fallback STAR entries >150: 0.24% vs 1.02%; SID exits >150: 0.00%
+  // vs 0.81%), for +1.4 NM median total distance and no change in route success
+  // rate. The reason is that most residual sharp handoffs are DCT-fallback
+  // airports with no procedure at all, which the connection model does not touch;
+  // 200 remains the calibrated value on its own merits, not as a stand-in.
   static constexpr double kThresholdDeg = 45.0;  // zero below: mid-route turns are nearly all <15
   static constexpr double kKneeDeg = 90.0;       // linear [45,90], quadratic [90,180] knee
   static constexpr double kPenaltyAtKneeNm = 20.0;  // penalty at 90 deg

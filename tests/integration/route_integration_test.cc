@@ -113,18 +113,18 @@ TEST_CASE("real data: K-shortest returns distinct ordered routes", "[integration
   }
 }
 
-TEST_CASE("real data: an arrival joins the STAR at a near fix, not a far entry", "[integration]") {
+TEST_CASE("real data: an arrival joins a published STAR entry, not the farthest one",
+          "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
 
-  // A STAR exposes every on-network fix it passes as a candidate connection, not
-  // just its published entry fix. KLAX BASET5, for instance, enters from PGS
-  // (~260 NM out) but its common segment runs through DOWNE close to the field.
-  // An arrival from the northeast should join at a near fix, so the final STAR
-  // leg (last connection fix -> airport) stays short rather than spanning the
-  // whole procedure from a far entry.
+  // An arrival joins a STAR at a PUBLISHED entry (an Initial Fix), and KLAX
+  // publishes many of them at very different distances -- BASET5 enters from PGS
+  // ~260 NM out, ANJLL4 from HAKMN ~196 NM, SADDE8 from SADDE ~20 NM. The
+  // multi-source search must weigh each entry's procedure distance against the
+  // enroute cost of reaching it rather than defaulting to the farthest one.
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KDEN", "KLAX"));
   REQUIRE(routes);
   REQUIRE_FALSE(routes.value().empty());
@@ -134,10 +134,11 @@ TEST_CASE("real data: an arrival joins the STAR at a near fix, not a far entry",
   const bf::RouteLeg& last = r.legs.back();
   CHECK(last.to == "KLAX");
   CHECK_FALSE(r.star.empty());
-  // The chosen entry must not be the far BASET5 entry fix; the final procedure
-  // leg should be a short hop, well under the ~260 NM that the far entry implied.
+  // Not the far BASET5 entry fix, and the end-to-end route stays close to the
+  // ~750 NM great circle -- a badly chosen entry shows up as a long total, since
+  // the arrival's procedure distance is priced into it.
   CHECK(last.from != "PGS");
-  CHECK(last.distance_nm < 60.0);
+  CHECK(r.total_distance_nm < 850.0);
 }
 
 TEST_CASE("real data: a STAR entry gate reached by a forward-only airway is usable",
@@ -176,10 +177,13 @@ TEST_CASE("real data: K candidates can use different procedures", "[integration]
   // The multi-endpoint K-shortest lets candidates join the network through
   // different connection fixes, so the alternatives can use genuinely different
   // SID/STAR procedures rather than sharing one fixed pair. KSEA -> KLAX has
-  // several competitive arrival options (KIMMO3, WAYVE1); with enough candidates
-  // more than one distinct STAR appears (WAYVE1 shows up beyond the first few).
+  // several competitive arrival options (KIMMO3 via LHS, WAYVE1 via LOPES); with
+  // enough candidates more than one distinct STAR appears. K is 10 rather than 8
+  // because the published-entry connection model gives the top candidates fewer
+  // distinct entry fixes to spread over, so WAYVE1 now surfaces a little deeper
+  // in the list.
   bf::RouteRequest req = MakeRequest("KSEA", "KLAX");
-  req.k = 8;
+  req.k = 10;
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
   REQUIRE(routes);
   const std::vector<bf::Route>& rs = routes.value();
@@ -834,22 +838,26 @@ TEST_CASE("real data: ParseRoute rejects a trailing dangling connector", "[integ
   CHECK_FALSE(r);
 }
 
-// Gap-gated doorstep filter (procedure_connector.cc): the enroute network must
-// not fly to the runway threshold and reduce the STAR to a zero-length stub.
-// See .notes/research/2026-07-29_arrival_star_connection.md §8. Anchors:
-// YSSY has a degenerate 0.3 NM STAR-end fix (TESAT) on an airway that must be
-// dropped (both unfiltered and under a runway restriction); KLAX's nearest real
-// entry is at ~4.7 NM and must be kept; WAAA's genuine 2.2 NM short final has no
-// moderate fallback and must be kept (dropping it would force a 147.9 NM detour).
-TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[integration]") {
+// Connection model (procedure_connector.cc): a procedure is joined only at its
+// PUBLISHED handoff point -- a STAR at its Initial Fix, a SID at its last
+// fix-bearing leg. This structurally prevents the degeneracy where the enroute
+// network flies to a fix a mile off the threshold and reduces the STAR to a
+// zero-length stub, because such near-field fixes are terminal TF/CF fixes, not
+// published entries (across cycle 2601, 1521 of 1523 sub-1-NM STAR connections
+// were TF/CF; published IFs sit at a 64 NM median). Anchors: YSSY's degenerate
+// 0.3 NM STAR-end fix TESAT (both unfiltered and under a runway restriction),
+// WAAA's 2.2 NM MKS, and KLAX, which must all now arrive over a real procedure
+// body.
+TEST_CASE("real data: an arrival does not degenerate to a doorstep STAR stub", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
   }
 
   // KJFK->YSSY used to end "...B450 TESAT STAR YSSY" with a 0.3 NM arrival: the
-  // Pacific airways flew to the threshold and the STAR was a stub. With the
-  // doorstep filter the search must pick a real STAR entry (arrival >> 1 NM).
+  // Pacific airways flew to the threshold and MARLN5 was a stub. TESAT is that
+  // STAR's terminal TF fix, not a published entry, so it is no longer a candidate
+  // at all and the search must join at a real entry (arrival >> 1 NM).
   bf::Result<std::vector<bf::Route>> yssy = db->FindRoutes(MakeRequest("KJFK", "YSSY"));
   REQUIRE(yssy);
   REQUIRE_FALSE(yssy.value().empty());
@@ -857,11 +865,13 @@ TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[in
   CHECK(ry.points.back().ident == "YSSY");
   // A genuine STAR body is tens of NM; the degenerate stub was 0.3 NM.
   CHECK(ry.arr_distance_nm > 5.0);
+  CHECK(ry.route_string.find("TESAT") == std::string::npos);
 
-  // Under a runway restriction the filter still sees a real STAR-body fallback
-  // (the gap-gated guard runs on the already-runway-filtered connection set), so
-  // the doorstep must still be dropped: KJFK->YSSY --rwy-arr RW07 must not
-  // degenerate to the TESAT stub either.
+  // Under a runway restriction the same holds. This is the case a seed-threshold
+  // filter found hardest: the runway-filtered set of MARLN5.RW07 exposes TESAT
+  // and little else, so whether the doorstep got dropped depended on what
+  // fallback happened to survive the filter. Keying on the published entry
+  // instead makes it independent of the runway filter.
   bf::RouteRequest yssy_rwy = MakeRequest("KJFK", "YSSY");
   yssy_rwy.arrival_runway = "RW07";
   bf::Result<std::vector<bf::Route>> yssy_r07 = db->FindRoutes(yssy_rwy);
@@ -870,10 +880,11 @@ TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[in
   const bf::Route& ry07 = yssy_r07.value().front();
   CHECK(ry07.points.back().ident == "YSSY");
   CHECK(ry07.arr_distance_nm > 5.0);
+  CHECK(ry07.route_string.find("TESAT") == std::string::npos);
 
-  // KLAX is the keep-side anchor: its nearest real entry sits at ~4.7 NM (a
-  // normal short final, not a doorstep stub), so the filter must not gut it.
-  // KDEN->KLAX still connects via DOWNE at 14.2 NM.
+  // KLAX must keep arriving over a real procedure body. Its nearest published
+  // entry is SADDE at ~20 NM (the ~4.7 NM SMO and ~14.2 NM DOWNE that the old
+  // model exposed are mid-procedure TF fixes, not entries).
   bf::Result<std::vector<bf::Route>> klax = db->FindRoutes(MakeRequest("KDEN", "KLAX"));
   REQUIRE(klax);
   REQUIRE_FALSE(klax.value().empty());
@@ -881,20 +892,18 @@ TEST_CASE("real data: arrival does not degenerate to a doorstep STAR stub", "[in
   CHECK(rk.points.back().ident == "KLAX");
   CHECK(rk.arr_distance_nm > 5.0);
 
-  // WAAA is the keep-side genuine-short-final anchor: its only close entry is
-  // ~2.2 NM with a huge 147.9 NM jump to the next one, so there is no moderate
-  // fallback and the doorstep filter must preserve the 2.2 NM entry as a
-  // candidate. Note the turn-angle penalty may still steer the
-  // search OFF that 2.2 NM entry onto a real STAR body (the 2.2 NM entry turns
-  // sharply, so the penalty joins a smoother farther entry) -- that is not a
-  // doorstep stub either way, so assert only that the arrival is a real STAR
-  // body (> 5 NM), not which entry was chosen.
+  // WAAA is the case a seed threshold could not catch: its 2.2 NM MKS entry had
+  // no moderate fallback to license dropping it, so a gap-gated filter had to
+  // keep it, and only the turn-angle penalty steered the search away. MKS is
+  // BIMA1F's terminal CF fix while every WAAA STAR's published entry sits 148 NM
+  // or farther out, so the connection model excludes it outright.
   bf::Result<std::vector<bf::Route>> waaa = db->FindRoutes(MakeRequest("KLAX", "WAAA"));
   REQUIRE(waaa);
   REQUIRE_FALSE(waaa.value().empty());
   const bf::Route& rw = waaa.value().front();
   CHECK(rw.points.back().ident == "WAAA");
   CHECK(rw.arr_distance_nm > 5.0);
+  CHECK(rw.route_string.find("MKS") == std::string::npos);
 }
 
 // Regression: the departure/arrival airport endpoints must carry the airport's

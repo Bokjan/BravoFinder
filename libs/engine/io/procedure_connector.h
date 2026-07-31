@@ -41,11 +41,27 @@ struct Connection {
 
 // Derives network connections for an airport from its parsed CIFP procedures.
 // SID connections are departure side (fly out to the fix); STAR connections are
-// arrival side (fly in from the fix). Only fixes that are actually on the
-// enroute network are used, so procedures whose fixes are not yet wired in do
-// not strand the search.
+// arrival side (fly in from the fix).
 //
-// When an airport has no usable procedures, BuildDctFallback synthesizes
+// A procedure hands off to the enroute network at its PUBLISHED handoff point,
+// not at any fix it happens to pass:
+//   - a STAR is entered at its Initial Fix (the leg whose path terminator is
+//     IF), which every transition of a published STAR carries;
+//   - a SID is left at its last fix-bearing leg -- the bold transition-end fix
+//     on a chart. A SID's own IF legs mark where a TRANSITION begins (the fix a
+//     branch forks from), which is the wrong end of the record, so the exit must
+//     be derived rather than read from a path terminator.
+// Restricting the handoff this way is what keeps an enroute airway from joining
+// a procedure a mile off the threshold and reducing it to a zero-length stub
+// (the KJFK->YSSY "...B450 TESAT STAR YSSY", arr 0.3 NM case).
+//
+// The handoff point must additionally be ON the enroute network, tested by
+// direction (see WalkDir in the .cc): being published and being wired in are
+// independent conditions. An airport whose procedures expose no on-network
+// handoff point on either falls back to the fixes they pass, so procedures whose
+// gates are not wired in do not strand the search.
+//
+// When an airport has no usable procedures at all, BuildDctFallback synthesizes
 // connections to the nearest on-network waypoints, preserving M1 coverage.
 class ProcedureConnector {
  public:

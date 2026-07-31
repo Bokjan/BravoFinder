@@ -294,44 +294,47 @@ TEST_CASE("constraints with a null request refuse edges, not UB", "[unit][graph]
 }
 
 TEST_CASE("procedure seed counts each leg span once, not twice", "[unit][graph]") {
-  // A SID whose legs cross two on-network fixes (AAA, then CCC) with a no-fix
-  // heading leg between them. The seed (estimated runway->fix distance) must
-  // count each geographic span once, never twice. Regression for M3: the old
+  // Two SID records over the same line: one ending at AAA, one running on to CCC
+  // with a no-fix heading leg between. Each exposes its own exit fix, so the two
+  // seeds (estimated runway->exit distance) can be checked independently. A seed
+  // must count each geographic span once, never twice. Regression for M3: the old
   // WalkOnNetworkFixes added the first leg's distance on top of the runway
   // bridge (runway->first-fix counted twice) AND added both the no-fix leg's
   // distance and the great-circle to the next fix (the between-fix span twice).
   bf::GraphBuilder builder(MakeLineData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int c = builder.VerticesByIdent("CCC")[0];
-  // Airport half a degree off AAA so the runway bridge (~30 NM) is well clear
-  // of the doorstep threshold (no DropDoorstep interference).
+  // Airport half a degree off AAA, so the runway bridge is a measurable ~30 NM.
   const bf::Coordinate airport{0.5, 0.0};
   const double bridge = builder.graph().CoordOf(a).DistanceTo(airport);
   const double aaa_to_ccc = builder.graph().CoordOf(a).DistanceTo(builder.graph().CoordOf(c));
 
-  bf::Procedure p;
-  p.type = bf::ProcedureType::kSid;
-  p.name = "TST";
-  // Leg 0: first resolved fix AAA. Its own distance is the runway->AAA portion,
-  // which the bridge already covers, so it must not enter the seed.
-  bf::ProcedureLeg l0;
-  l0.path_term = bf::PathTerminator::kTF;
-  l0.fix = bf::FixedIdent::FromParts("AAA", "ZZ");
-  l0.distance_nm = 5.0;
-  p.legs.push_back(l0);
-  // Leg 1: a no-fix heading leg whose distance stands in for the AAA->CCC span.
-  bf::ProcedureLeg l1;
-  l1.path_term = bf::PathTerminator::kVA;  // heading-to-altitude: no resolved fix
-  l1.distance_nm = 7.0;
-  p.legs.push_back(l1);
-  // Leg 2: second resolved fix CCC.
-  bf::ProcedureLeg l2;
-  l2.path_term = bf::PathTerminator::kTF;
-  l2.fix = bf::FixedIdent::FromParts("CCC", "ZZ");
-  p.legs.push_back(l2);
+  // Leg to AAA. Its own distance is the runway->AAA portion, which the bridge
+  // already covers, so it must not enter the seed.
+  bf::ProcedureLeg to_aaa;
+  to_aaa.path_term = bf::PathTerminator::kTF;
+  to_aaa.fix = bf::FixedIdent::FromParts("AAA", "ZZ");
+  to_aaa.distance_nm = 5.0;
+  // A no-fix heading leg whose distance stands in for the AAA->CCC span.
+  bf::ProcedureLeg heading;
+  heading.path_term = bf::PathTerminator::kVA;  // heading-to-altitude: no resolved fix
+  heading.distance_nm = 7.0;
+  bf::ProcedureLeg to_ccc;
+  to_ccc.path_term = bf::PathTerminator::kTF;
+  to_ccc.fix = bf::FixedIdent::FromParts("CCC", "ZZ");
+
+  bf::Procedure short_sid;
+  short_sid.type = bf::ProcedureType::kSid;
+  short_sid.name = "TSTA";
+  short_sid.legs = {to_aaa};
+
+  bf::Procedure long_sid;
+  long_sid.type = bf::ProcedureType::kSid;
+  long_sid.name = "TSTB";
+  long_sid.legs = {to_aaa, heading, to_ccc};
 
   bf::CifpData cifp;
-  cifp.procedures.push_back(p);
+  cifp.procedures = {short_sid, long_sid};
   const auto conns = bf::ProcedureConnector::BuildDeparture(cifp, airport, builder, "");
   REQUIRE(conns.size() == 2);
   REQUIRE(conns[0].fix_vertex == a);  // AAA, smaller seed
@@ -342,6 +345,74 @@ TEST_CASE("procedure seed counts each leg span once, not twice", "[unit][graph]"
   CHECK_THAT(conns[1].seed_distance_nm, WithinRel(bridge + 7.0, 0.5));
   // Guard: the old double-counted value (bridge + 5 + 7 + AAA->CCC) is far larger.
   CHECK(conns[1].seed_distance_nm < bridge + 5.0 + 7.0 + aaa_to_ccc - 1.0);
+}
+
+TEST_CASE("connections are restricted to a procedure's published handoff fix", "[unit][graph]") {
+  // A procedure hands off to the enroute network only where it is published to:
+  // a STAR at its Initial Fix, a SID at its last fix-bearing leg. The fixes in
+  // between are flown through, not joined at -- letting an airway join one of
+  // them a mile off the threshold is what reduces a procedure to a stub.
+  bf::GraphBuilder builder(MakeLineData());
+  const int a = builder.VerticesByIdent("AAA")[0];
+  const int c = builder.VerticesByIdent("CCC")[0];
+  const bf::Coordinate airport{0.5, 0.0};
+
+  auto leg = [](bf::PathTerminator term, const char* ident) {
+    bf::ProcedureLeg l;
+    l.path_term = term;
+    l.fix = bf::FixedIdent::FromParts(ident, "ZZ");
+    return l;
+  };
+
+  SECTION("a STAR is entered at its IF, not at a fix it passes later") {
+    bf::Procedure star;
+    star.type = bf::ProcedureType::kStar;
+    star.name = "TSTAR";
+    // Both AAA and CCC are on-network, but only AAA is the published entry.
+    star.legs = {leg(bf::PathTerminator::kIF, "AAA"), leg(bf::PathTerminator::kTF, "BBB"),
+                 leg(bf::PathTerminator::kTF, "CCC")};
+    bf::CifpData cifp;
+    cifp.procedures = {star};
+    const auto conns = bf::ProcedureConnector::BuildArrival(cifp, airport, builder, "");
+    REQUIRE(conns.size() == 1);
+    CHECK(conns[0].fix_vertex == a);
+  }
+
+  SECTION("a SID exits at its last fix-bearing leg, not at an earlier fix") {
+    bf::Procedure sid;
+    sid.type = bf::ProcedureType::kSid;
+    sid.name = "TSID";
+    // A SID's own IF marks where a transition BEGINS, so it must not be treated
+    // as the exit: the published exit here is CCC, the last fix-bearing leg.
+    sid.legs = {leg(bf::PathTerminator::kIF, "AAA"), leg(bf::PathTerminator::kTF, "BBB"),
+                leg(bf::PathTerminator::kTF, "CCC")};
+    bf::CifpData cifp;
+    cifp.procedures = {sid};
+    const auto conns = bf::ProcedureConnector::BuildDeparture(cifp, airport, builder, "");
+    REQUIRE(conns.size() == 1);
+    CHECK(conns[0].fix_vertex == c);
+  }
+
+  SECTION("an airport with no on-network handoff fix falls back to the fixes it passes") {
+    // The STAR's published entry XXX is not in the graph at all, so this airport
+    // exposes no on-network gate on any transition.
+    bf::Procedure star;
+    star.type = bf::ProcedureType::kStar;
+    star.name = "TSTAR";
+    star.legs = {leg(bf::PathTerminator::kIF, "XXX"), leg(bf::PathTerminator::kTF, "BBB"),
+                 leg(bf::PathTerminator::kTF, "CCC")};
+    bf::CifpData cifp;
+    cifp.procedures = {star};
+    const auto conns = bf::ProcedureConnector::BuildArrival(cifp, airport, builder, "");
+    // Rather than strand the arrival on a bare DCT link, the connector falls back
+    // to the on-network fixes the STAR passes (BBB and CCC), ordered by seed --
+    // CCC is the STAR's last fix, so its remaining distance to the runway is the
+    // shortest and it sorts first.
+    REQUIRE(conns.size() == 2);
+    const int b = builder.VerticesByIdent("BBB")[0];
+    CHECK(conns[0].fix_vertex == c);
+    CHECK(conns[1].fix_vertex == b);
+  }
 }
 
 }  // namespace

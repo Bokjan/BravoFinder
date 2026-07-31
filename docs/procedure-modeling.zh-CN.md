@@ -31,17 +31,27 @@ DESIGN §4.4 最初设想：非定点 leg 会挡住程序接入，需要用航�
 
 剩下的只是 SID 首段的 seed 精度问题，而其中 87.7% 的非定点首段是 **course-only 无距离** （CA/VA/VM），物理上无法几何推算——要算等效位移就得引入运动学假设（爬升率/转弯率/风）， 那属于后期「几何航迹推算」里程碑。所以第一阶段**不折叠等效边**；对雷达引导离场，如实标注 「RADAR VECTORS」而非伪造衔接点（见 §6）。
 
-## 4. 衔接 fix 选点：暴露「每一个」在网 fix
+## 4. 衔接 fix 选点：只接程序**发布的**入口/出口
 
-一条 SID 可以在它经过的**任意一个在网 fix** 处把飞机交给航路网——「从 XX 航路点加入航路」是 常规操作，不是只能用它的最后一个 fix.STAR 对称：可以在它经过的任意在网 fix 处接手。
+程序和航路网的交接点不是「随便哪个 fix 都行」，而是航图上公布的那一个：
 
-所以 `ProcedureConnector`（`procedure_connector.cc`）不再只暴露一个衔接点，而是把程序经过的 **全部在网 fix** 都作为候选 `Connection` 暴露出来，交给多源搜索择优。关键设计：
+- **STAR 从它的 Initial Fix 进**（`path_term == IF`，`PathTerminator::kIF`）。真实数据里这一列填得很干净——X-Plane CIFP 的 KLAX 116/116 条 STAR 每个过渡首腿都是 `IF`；三个 SQLite loader（dfd1 / dfd2 / Fenix）的 STAR 过渡首腿有 **99.8%** 是 `IF`（40798/40870、44102/44182）。
+- **SID 从它的末端 fix 出**——即「最后一条终止于定点 fix 的航段」（`LastFixBearingLeg`）。SID 没有专门的出口列，必须派生；**不能用 IF**：SID 里的 `IF` 标的是「某个过渡从哪个 fix 分叉开始」，是记录的另一端。派生结果与航图上**加粗的过渡末端 fix** 一致（KLAX `SKWRL2` 的 5 个过渡逐一核对成立）。
+
+`ProcedureConnector`（`procedure_connector.cc`）因此只把这些**发布衔接点**暴露成候选 `Connection`，交给多源搜索择优。关键设计：
 
 - **按 vertex 去重、聚合所有 ProcedureRef**：多条程序共享同一个 fix 时，列出全部可换的 SID/STAR，无需重复搜索。
-- **seed = 沿程序公布折线累计**（`FixHit.cumulative_nm`）+ 仅对「机场↔记录端点」未测段补直线。 沿航迹累计意味着：一个绕远才到达的 fix 会得到**更大（更诚实）**的 seed，而不是它的直线 距离——搜索因此自然偏向更近的在网 fix。
-- **在网判定分方向**：SID 是「飞到 fix 再沿航路飞出」，衔接 fix 需要有**出边** （`GraphBuilder::HasOutbound`）；STAR 是「沿航路飞进 fix 再由程序接手」，衔接 fix 需要有 **入边**（`HasInbound`）。二者不能共用「有出边」这一个判定——否则只作为 forward-only 航段 终点的 STAR 入口门户（只有入边、无出边）会被误判为脱网。典型：VHHH 的 `ABEY` 系列 STAR 入口 `ABBEY` 仅由 forward-only 的 `FISHA→ABBEY` 到达；用出边判定会跳过它、迫使 RJTT→VHHH 绕到西南 的 SIKOU 接 `SIER7C`；改用入边判定后走 `…FISHA→ABBEY` + `ABEY` STAR，省约 330 NM。 （`OnNetwork` 现为入边∪出边的并集，仅用于 `bf query` 的 `[on-network]` 展示。）
+- **seed = 沿程序公布折线累计**（`FixHit.cumulative_nm`）+ 仅对「机场↔记录端点」未测段补直线。沿航迹累计意味着：一个绕远才到达的 fix 会得到**更大（更诚实）**的 seed，而不是它的直线距离。
+- **在网判定分方向，且与「是否发布」正交**：SID 是「飞到 fix 再沿航路飞出」，衔接 fix 需要有**出边**（`GraphBuilder::HasOutbound`）；STAR 是「沿航路飞进 fix 再由程序接手」，衔接 fix 需要有**入边**（`HasInbound`）。二者不能共用「有出边」这一个判定——否则只作为 forward-only 航段终点的 STAR 入口门户（只有入边、无出边）会被误判为脱网。典型：VHHH 的 `ABEY` 系列 STAR 入口 `ABBEY` 仅由 forward-only 的 `FISHA→ABBEY` 到达；用出边判定会跳过它、迫使 RJTT→VHHH 绕到西南的 SIKOU 接 `SIER7C`；改用入边判定后走 `…FISHA→ABBEY` + `ABEY` STAR，省约 330 NM。（`OnNetwork` 现为入边∪出边的并集，仅用于 `bf query` 的 `[on-network]` 展示。）
+- **机场级回退**：若整个机场该侧**一个在网发布衔接点都没有**（cycle 2601：到达侧 30 个机场、离场侧 6 个），退回「暴露该程序经过的全部在网 fix」，而不是直接掉到 DCT——保住程序语义。回退刻意做在**机场级**而非**逐程序级**：按程序回退会在另外 19 个到达 / 17 个离场机场重新放进近场末端 fix（doorstep 机场 3 → 22），正是这条规则要防的退化。代价是「某条具名程序没有在网发布衔接点、而同机场其他程序有」时，它不能被 `--star` / `--sid` 按名选中。
 
-实测效果：KDEN→KLAX 现在从 BASET5 的公共段 **DOWNE 进场**（末段 STAR leg 仅 14.2 NM）， 而不再被迫接 ~260 NM 外的 PGS。
+### 为什么必须限制到发布衔接点
+
+早期模型是「暴露程序经过的**每一个**在网 fix」，理由是「从 XX 航路点加入航路」属常规操作。但它有一个结构性缺陷：程序里若存在一个**贴着跑道**（沿程序到跑道 <1 NM）又恰好在航路网上的 fix，A\* 会把它当成≈免费的落地点，用航路一路飞到机场门口，把整条 SID/STAR 压成零长度 stub。典型是 KJFK→YSSY 的 `…B450 TESAT STAR YSSY`（`arr 0.3 NM`；TESAT 是 MARLN5 的末端 `TF` fix，落在 B450 上）。这类路线**总长反而更短**（8706.9 vs 8744.9 NM），所以优化器没算错——是 seed 定价把「航路飞到贴场 fix」标成了近乎免费。
+
+全量数据说明这个病灶几乎完全落在「末端 fix」这一类上：cycle 2601 里 STAR 侧 `seed<1 NM` 的 1523 个 per-fix 命中中，**1521 个是 `TF`/`CF`**（末端 fix 类），`IF` 只有 1 个；发布 `IF` 的 seed 中位数是 **64 NM**。所以「只接发布入口/出口」在结构上就绕开了它：到达侧 doorstep 机场从 255 降到 **3**，离场侧 344 → 124，且残留全是 `total=0` 的退化单 fix 程序（没有程序主体可绕，不是同一个病）。这取代了早先按 seed 阈值事后剔除的读侧 filter（经验阈值 T=1.0 / fb=20.0），后者依赖「次落点恰好落在 [1,20] NM」才敢下手，遇到 WAAA 那种 2.2 NM 入口 + 147.9 NM 跳空就无从判断。
+
+代价是**合法的中间 fix 交接也一并取消**了——KLAX 的到达候选从 57 个降到 33 个，`DOWNE`（14.2 NM）、`SMO`（4.7 NM）这类中途 `TF` fix 不再是候选，最近的发布入口变成 `SADDE`（20.2 NM）。实测这不是回归：KDEN→KLAX 现在走 `…Q88 HAKMN STAR KLAX`（total 765.3 NM），比强制经 DOWNE 的 800.8 NM **更短**——沿程序折线累计的 seed 已经把「入口远」的成本诚实计入，搜索会自己权衡。全量抽样（1984 对）路线成功率逐字不变（1963/1984），中位总距离 +0.0 NM。
 
 ## 5. 多源 K-shortest：候选可用不同程序
 
@@ -50,7 +60,7 @@ DESIGN §4.4 最初设想：非定点 leg 会挡住程序接入，需要用航�
 - source 级 spur 禁掉已用的起始 fix、重跑多源搜索 → 换一个衔接 fix/程序；
 - 每条候选用 `CostOfPathMulti` 端到端重算（含两端 seed），使不同 fix 对之间仍能正确排序。
 
-实测：KSEA→KLAX 的 K 候选里 STAR 从 KIMMO3 切换到 WAYVE1，证明跨程序备选端到端可用。
+实测：KSEA→KLAX 的 K 候选里 STAR 从 KIMMO3 切换到 WAYVE1（分别经发布入口 LHS / LOPES），证明跨程序备选端到端可用。
 
 > 这里的 Yen 在大图上的性能优化（Lawler + heuristic memoization）单独成文： [yen-lawler-optimization.zh-CN.md](yen-lawler-optimization.zh-CN.md)。
 
