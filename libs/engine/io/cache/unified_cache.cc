@@ -119,6 +119,14 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   hw.Str(input.header.source_loader);
   hw.Str(input.header.data_dir);
   hw.U32(static_cast<uint32_t>(pool_blob.size()));
+  // A provenance string over 4 GiB cannot be length-prefixed by a U32; Str()
+  // would have set the writer failed without writing. Fail through Result rather
+  // than computing section offsets from a desynchronized header buffer.
+  if (!hw.ok()) {
+    return Result<void>::Err(Error(ErrorCode::kSerializationError,
+                                   "cache header string exceeds the 4 GiB U32 length prefix; "
+                                   "cannot serialize. This is unexpected for real AIRAC data."));
+  }
 
   // Sections begin after [header][section table][pool]. Compute each present
   // section's absolute file offset in table order (graph, cifp, detail).

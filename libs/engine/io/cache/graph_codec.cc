@@ -266,13 +266,21 @@ Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
   // debiting the others, so a crafted header could pass all five yet demand far
   // more than `avail` in total (each resize below allocates independently). Cap
   // the combined minimum too. Each product is individually bounded to <= avail
-  // by count_fits, but the sum of five can exceed 2^32 on a 32-bit size_t with a
-  // large section, so accumulate in uint64_t before comparing.
-  const uint64_t min_body_bytes = static_cast<uint64_t>(v) * kVertexRecordSize +
-                                  static_cast<uint64_t>(airport_count) * kAirportRecordSize +
-                                  static_cast<uint64_t>(e) * kEdgeRecordSize +
-                                  static_cast<uint64_t>(airway_count) * kAirwayRefSize +
-                                  static_cast<uint64_t>(msa_count) * kMsaHeaderSize;
+  // by count_fits, but the sum can exceed 2^32 on a 32-bit size_t with a large
+  // section, so accumulate in uint64_t before comparing. Beyond the five
+  // per-count products above, the body always carries the CSR offsets row
+  // ((v+1) I32s) and the fixed MORA grid (kLatCount*kLonCount int16 cells -- see
+  // the `mora : ... I16 cells` section layout comment and the decode read at
+  // I16Span below); neither is covered by a count_fits guard, so both must be
+  // added here for the combined minimum to be complete.
+  const uint64_t min_body_bytes =
+      static_cast<uint64_t>(v) * kVertexRecordSize +
+      static_cast<uint64_t>(airport_count) * kAirportRecordSize +
+      static_cast<uint64_t>(e) * kEdgeRecordSize +
+      static_cast<uint64_t>(airway_count) * kAirwayRefSize +
+      static_cast<uint64_t>(msa_count) * kMsaHeaderSize +
+      static_cast<uint64_t>(v + 1) * sizeof(int32_t) +  // CSR offsets row
+      static_cast<uint64_t>(MoraGrid::kLatCount) * MoraGrid::kLonCount * sizeof(int16_t);
   if (min_body_bytes > static_cast<uint64_t>(avail)) {
     return bad("corrupt .bfdb: combined section counts exceed section size");
   }

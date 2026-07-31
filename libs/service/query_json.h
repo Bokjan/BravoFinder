@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include <optional>
@@ -10,8 +10,9 @@
 namespace bf {
 
 // Header-only JSON serialization for the batch lookup result types, over a
-// RapidJSON-style Writer. Header-only so core gains no dependency; callers link
-// RapidJSON and pass a Writer. Mirrors core/routing/route_json.h.
+// RapidJSON-style Writer. Header-only so the service layer adds no RapidJSON
+// dependency to the engine; callers link RapidJSON and pass a Writer. Mirrors
+// service/route_json.h.
 
 inline const char* ToString(WaypointKind k) {
   switch (k) {

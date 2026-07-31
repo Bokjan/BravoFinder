@@ -17,10 +17,10 @@
 #include <string>
 #include <vector>
 
-#include "core/query/query_json.h"
 #include "core/routing/route.h"
-#include "core/routing/route_json.h"
 #include "core/routing/route_metrics.h"
+#include "query_json.h"
+#include "route_json.h"
 
 namespace bf::service {
 

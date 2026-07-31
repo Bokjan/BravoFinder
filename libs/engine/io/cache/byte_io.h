@@ -14,6 +14,7 @@
 // std::string, since those ARE text resolved out of the shared string pool.
 
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -29,6 +30,13 @@ namespace bf {
 class ByteWriter {
  public:
   explicit ByteWriter(std::vector<uint8_t>& out) : out_(out) {}
+
+  // True unless Str() rejected a string too long for its U32 length prefix. A
+  // rejected write sets ok_ false and writes nothing, so the partial buffer must
+  // be discarded. Symmetric to ByteReader::ok: callers check once after writing
+  // rather than per field. Real data never trips this (the engine only serializes
+  // short text), so ok() is true on every valid path.
+  bool ok() const { return ok_; }
 
   // Grow the backing buffer's capacity to at least its current size plus `extra`
   // bytes, so a sequence of appends does not reallocate. A hint only; callers
@@ -77,12 +85,23 @@ class ByteWriter {
   // ByteReader::Str. Used for inline header strings (provenance, etc.) and for
   // pool-interned string bodies. The input is text; it is serialized as bytes.
   void Str(const std::string& s) {
+    // Length is a U32, so a string longer than 4 GiB cannot be represented. The
+    // engine only ever serializes short text (idents, ICAO codes, provenance
+    // strings), so this is a precondition, not a reachable path. assert catches
+    // it in debug; in release, set ok_ false and write nothing (a truncated
+    // length would desynchronize the decoder) so the caller fails through Result.
+    assert(s.size() <= 0xFFFFFFFFu);
+    if (s.size() > 0xFFFFFFFFu) {
+      ok_ = false;
+      return;
+    }
     U32(static_cast<uint32_t>(s.size()));
     Bytes(reinterpret_cast<const uint8_t*>(s.data()), s.size());
   }
 
  private:
   std::vector<uint8_t>& out_;
+  bool ok_ = true;
 };
 
 // Little-endian reader over a byte span with bounds checking. Every read

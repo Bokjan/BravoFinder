@@ -20,6 +20,7 @@ add_executable(bf_tests
                unit/codec_fuzz_test.cc
                unit/dfd_magvar_test.cc
                unit/bfdb_naming_test.cc
+               unit/byte_io_test.cc
                unit/nav_detail_codec_test.cc
                unit/query_render_test.cc
                unit/mcp_dispatch_test.cc

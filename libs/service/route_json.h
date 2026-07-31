@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include <cstddef>
@@ -12,8 +12,9 @@ namespace bf {
 
 // Serialize a Route as a JSON object into any RapidJSON-style Writer (the
 // Writer streams directly to its buffer -- no intermediate DOM -- and escapes
-// strings correctly). This is a header-only template so it adds no dependency
-// to bf3; callers link RapidJSON themselves and pass a Writer.
+// strings correctly). This is a header-only template so the service layer adds
+// no RapidJSON dependency to the engine; callers link RapidJSON themselves and
+// pass a Writer.
 //
 // The template only names Writer's duck-typed methods (StartObject, Key,
 // String, Double, StartArray, ...), so it works with rapidjson::Writer,

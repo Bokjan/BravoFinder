@@ -220,23 +220,27 @@ void SelectProcedures(const EndpointPlan& plan, int fix_vertex, std::string& nam
 // "IDENT/REGION" key resolves to that single vertex; a bare "IDENT" resolves to
 // every region's match (idents are not globally unique, so "avoid X" avoids all
 // X). Unknown idents contribute nothing (avoiding something absent is a no-op).
-std::unordered_set<int> ResolveAvoidVertices(const GraphBuilder& builder,
-                                             const std::vector<std::string>& avoid_waypoints) {
-  std::unordered_set<int> out;
+std::vector<int> ResolveAvoidVertices(const GraphBuilder& builder,
+                                      const std::vector<std::string>& avoid_waypoints) {
+  std::vector<int> out;
   for (const std::string& raw : avoid_waypoints) {
     const std::string up = ToUpper(raw);
     const size_t slash = up.find('/');
     if (slash != std::string::npos) {
       const int v = builder.VertexByIdent(Ident(up.substr(0, slash), up.substr(slash + 1)));
       if (v >= 0) {
-        out.insert(v);
+        out.push_back(v);
       }
     } else {
       for (const int v : builder.VerticesByIdent(up)) {
-        out.insert(v);
+        out.push_back(v);
       }
     }
   }
+  // Sort + unique so the constraint's binary_search (and the endpoint-pruning
+  // binary_search at the call site) see a sorted, deduped set.
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
 }
 
@@ -244,13 +248,13 @@ std::unordered_set<int> ResolveAvoidVertices(const GraphBuilder& builder,
 // to block. Because a stored airway name may be a concurrency ("J60-V123"), an
 // airway_id is included when any of its designators is in the avoid set -- so
 // avoiding "J60" also blocks segments recorded under "J60-V123".
-std::unordered_set<uint16_t> ResolveAvoidAirwayIds(const GraphBuilder& builder,
-                                                   const std::vector<std::string>& avoid_airways) {
+std::vector<uint16_t> ResolveAvoidAirwayIds(const GraphBuilder& builder,
+                                            const std::vector<std::string>& avoid_airways) {
   std::unordered_set<std::string> wanted;
   for (const std::string& a : avoid_airways) {
     wanted.insert(ToUpper(a));
   }
-  std::unordered_set<uint16_t> out;
+  std::vector<uint16_t> out;
   if (wanted.empty()) {
     return out;
   }
@@ -258,11 +262,14 @@ std::unordered_set<uint16_t> ResolveAvoidAirwayIds(const GraphBuilder& builder,
   for (size_t id = 1; id < names.size(); ++id) {  // id 0 = "DCT", never avoided
     for (const std::string& designator : SplitDesignators(names[id])) {
       if (wanted.count(designator) != 0) {
-        out.insert(static_cast<uint16_t>(id));
+        out.push_back(static_cast<uint16_t>(id));
         break;
       }
     }
   }
+  // Sort + unique so the constraint's binary_search sees a sorted, deduped set.
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
 }
 
@@ -567,8 +574,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   // also used to prune seeded endpoints (below): AvoidConstraint only blocks
   // edges entering a vertex, but a source/goal fix is seeded, not entered, so an
   // avoided connection fix must be removed from the endpoint sets directly.
-  const std::unordered_set<int> avoid_vertices =
-      ResolveAvoidVertices(*builder_, request.avoid_waypoints);
+  const std::vector<int> avoid_vertices = ResolveAvoidVertices(*builder_, request.avoid_waypoints);
   AvoidConstraint avoid(avoid_vertices, ResolveAvoidAirwayIds(*builder_, request.avoid_airways));
   RandomizeConstraint randomize(request.random_seed.value_or(0));
   SearchOptions options;
@@ -601,9 +607,11 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   // slip through as a search start/end, which AvoidConstraint cannot catch.
   if (!avoid_vertices.empty()) {
     auto drop_avoided = [&](std::vector<SeededEndpoint>& eps) {
-      eps.erase(std::remove_if(
-                    eps.begin(), eps.end(),
-                    [&](const SeededEndpoint& e) { return avoid_vertices.count(e.vertex) != 0; }),
+      eps.erase(std::remove_if(eps.begin(), eps.end(),
+                               [&](const SeededEndpoint& e) {
+                                 return std::binary_search(avoid_vertices.begin(),
+                                                           avoid_vertices.end(), e.vertex);
+                               }),
                 eps.end());
     };
     drop_avoided(sources);
@@ -639,7 +647,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         return Result<Routes>::Err(
             Error(ErrorCode::kRouteParseError, "forced point '" + token + why));
       }
-      if (avoid_vertices.count(v) != 0) {
+      if (std::binary_search(avoid_vertices.begin(), avoid_vertices.end(), v)) {
         return Result<Routes>::Err(Error(ErrorCode::kRouteParseError,
                                          "forced point '" + token + "' is also in the avoid list"));
       }

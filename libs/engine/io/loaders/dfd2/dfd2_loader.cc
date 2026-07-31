@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -22,6 +23,7 @@
 #include "core/domain/navaid_detail.h"
 #include "core/domain/procedure.h"
 #include "core/domain/waypoint.h"
+#include "core/log.h"
 #include "core/result.h"
 #include "io/loaders/sqlite_util.h"
 #include "io/nav_data.h"
@@ -490,7 +492,8 @@ std::string ProcSql(std::string_view table, bool single_airport) {
 
 // Emit one Procedure leg from a row. `magvar` converts true courses (course_flag
 // 'T'); magnetic courses ('M'/blank) are used as-is.
-void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& proc) {
+void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& proc,
+               std::optional<int>& prev_seqno) {
   ProcedureLeg leg;
   leg.fix = FixedIdent::FromParts(ColumnText(stmt, c.wp_ident), ColumnText(stmt, c.wp_icao));
   leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
@@ -514,6 +517,19 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
   leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(ColumnInt(stmt, c.speed_limit), 0, 65535));
   proc.legs.push_back(std::move(leg));
+  // Consume the seqno column (previously relied on only by ORDER BY) to validate
+  // that legs arrive non-decreasing within a procedure -- the order the
+  // partitioning into procedures depends on. A decrease means a query that dropped
+  // the intended ORDER BY or corrupt source rows; warn rather than silently
+  // mispartition. prev_seqno is reset (nullopt) at each procedure flush, so the
+  // first leg of every procedure has no predecessor to compare against.
+  const int seqno = ColumnInt(stmt, c.seqno);
+  if (prev_seqno && seqno < *prev_seqno) {
+    BF_LOG_WARN("dfd2: procedure {}/{}/{} leg seqno decreased ({} after {})",
+                ColumnText(stmt, c.airport), ColumnText(stmt, c.proc),
+                ColumnText(stmt, c.transition), seqno, *prev_seqno);
+  }
+  prev_seqno = seqno;
 }
 
 // Full-table scan appending per-airport procedures into `out`. magvar_by_airport
@@ -534,6 +550,7 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
   std::string cur_airport, cur_name, cur_trans, cur_route;
   CifpData cifp;
   double magvar = 0.0;
+  std::optional<int> prev_seqno;  // reset per procedure; consumed by AppendLeg's order check
 
   auto flush_proc = [&]() {
     if (have_current && !current.legs.empty()) {
@@ -542,6 +559,7 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
     current = Procedure{};
     current.type = type;
     have_current = false;
+    prev_seqno.reset();
   };
   auto flush_airport = [&]() {
     flush_proc();
@@ -581,7 +599,7 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
       current.route_type = rt;
       have_current = true;
     }
-    AppendLeg(stmt, c, magvar, current);
+    AppendLeg(stmt, c, magvar, current, prev_seqno);
   });
   if (!rows) {
     return Result<void>::Err(rows.error());
@@ -662,6 +680,7 @@ std::optional<CifpData> LoadAirportProcedures(
     current.type = type;
     bool have_current = false;
     std::string cur_name, cur_trans, cur_route;
+    std::optional<int> prev_seqno;  // reset per procedure; consumed by AppendLeg's order check
     auto flush_current = [&]() {
       if (have_current && !current.legs.empty()) {
         cifp.procedures.push_back(std::move(current));
@@ -669,6 +688,7 @@ std::optional<CifpData> LoadAirportProcedures(
       current = Procedure{};
       current.type = type;
       have_current = false;
+      prev_seqno.reset();
     };
     Result<void> rows = ForEachRow(stmt, [&]() {
       const std::string name = ColumnText(stmt, c.proc);
@@ -691,7 +711,7 @@ std::optional<CifpData> LoadAirportProcedures(
         current.route_type = rt;
         have_current = true;
       }
-      AppendLeg(stmt, c, magvar, current);
+      AppendLeg(stmt, c, magvar, current, prev_seqno);
     });
     if (!rows) {
       return std::nullopt;  // step error: treat as load failure for this airport

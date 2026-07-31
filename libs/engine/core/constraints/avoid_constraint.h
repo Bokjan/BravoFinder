@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -32,17 +31,20 @@ namespace bf {
 // airway set, but it would either hardcode the airway_id space or carry a large
 // zero-fill per query for what is usually a 2-3 element set.
 //
-// Sortedness invariant: the members are const, initialized once from the
-// caller's unordered_sets via MakeSorted (copy + sort). Because they are const,
-// no later code can write them, so the vectors stay sorted for every
-// binary_search in Evaluate -- the invariant is enforced by the type system,
-// not by discipline.
+// Sortedness invariant: the members are const, initialized once via DedupSort
+// (sort + unique) from the caller's vectors. Because they are const, no later
+// code can write them, so the vectors stay sorted for every binary_search in
+// Evaluate -- the invariant is enforced by the type system, not by discipline.
 class AvoidConstraint : public Constraint {
  public:
-  AvoidConstraint(std::unordered_set<int> avoid_vertices,
-                  std::unordered_set<uint16_t> avoid_airway_ids)
-      : vertices_(MakeSorted(std::move(avoid_vertices))),
-        airways_(MakeSorted(std::move(avoid_airway_ids))) {}
+  // Takes the avoid sets as vectors. The resolvers (ResolveAvoidVertices /
+  // ResolveAvoidAirwayIds) produce these straight from the request, so the
+  // unordered_set hashing and the set->vector conversion the old interface paid
+  // for are avoided. DedupSort re-sorts idempotently, keeping the members sorted
+  // regardless of the exact caller input.
+  AvoidConstraint(std::vector<int> avoid_vertices, std::vector<uint16_t> avoid_airway_ids)
+      : vertices_(DedupSort(std::move(avoid_vertices))),
+        airways_(DedupSort(std::move(avoid_airway_ids))) {}
 
   EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest&) const override {
     if (std::binary_search(vertices_.begin(), vertices_.end(), ctx.edge.to)) {
@@ -55,12 +57,13 @@ class AvoidConstraint : public Constraint {
   }
 
  private:
-  // Copy an unordered_set into a vector and sort it once. The members below are
-  // const, so this is the only code that ever writes them.
+  // Sort and dedup a vector (idempotent if the caller already did so) so the
+  // members are guaranteed sorted and unique regardless of input, keeping
+  // binary_search correct in Evaluate.
   template <typename T>
-  static std::vector<T> MakeSorted(std::unordered_set<T> set) {
-    std::vector<T> v(set.begin(), set.end());
+  static std::vector<T> DedupSort(std::vector<T> v) {
     std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
     return v;
   }
 

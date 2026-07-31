@@ -195,6 +195,44 @@ TEST_CASE("graph codec: a corrupt snapshot is rejected on encode, a corrupt sect
   }
 }
 
+// The L2 hardening completed the Decode byte-count fuse: the combined-minimum
+// check now also accounts for the fixed CSR offsets row ((v+1) I32s) and the
+// MORA grid (kLatCount*kLonCount int16 cells), both unconditionally present in
+// the body, so a header whose sections collectively demand more bytes than the
+// body holds is rejected. This forges exactly that: a header whose per-count
+// bounds ALL pass (each section individually fits the remaining bytes) but whose
+// combined minimum -- once the CSR row and MORA grid are summed in -- exceeds the
+// bytes actually present. Decode must return Err(kCacheCorrupt); ByteReader still
+// bounds-checks every read, so even if the fuse were absent the decode degrades
+// to the same Err rather than reading out of bounds, but the test locks the
+// rejection contract the fuse guarantees.
+TEST_CASE("graph codec: header passing per-count but over-combined is rejected (L2 fuse)",
+          "[unit][bfdb]") {
+  std::vector<uint8_t> body, pool;
+  EncodeSnapshot(MakeValidSnapshot(), &body, &pool);
+  REQUIRE_FALSE(body.empty());
+
+  // Forge the vertex count `v` (first U32, little-endian). The valid snapshot has
+  // v=2; we raise it to 2500, which still satisfies every per-count bound for a
+  // body that contains a full MORA grid (kLatCount*kLonCount cells ~= 64800, so
+  // the body is ~129 KiB and the per-count ceiling for v is ~3814), yet the
+  // combined minimum (v*34 + (v-2)*4 airport + (v+1)*4 CSR + MORA + ...) far
+  // exceeds the ~129 KiB actually present. Only the count field is flipped; the
+  // body bytes are left exactly as encoded, so this is purely a "counts lie about
+  // the body" forgery that the combined fuse must catch.
+  constexpr uint32_t kForgedV = 2500;
+  body[0] = static_cast<uint8_t>(kForgedV & 0xFF);
+  body[1] = static_cast<uint8_t>((kForgedV >> 8) & 0xFF);
+  body[2] = static_cast<uint8_t>((kForgedV >> 16) & 0xFF);
+  body[3] = static_cast<uint8_t>((kForgedV >> 24) & 0xFF);
+
+  bf::Result<bf::GraphSnapshot> r = bf::GraphCodec::Decode(body, pool);
+  CHECK_FALSE(r);
+  if (!r) {
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
+  }
+}
+
 TEST_CASE("bfdb: a cached route matches the freshly built route", "[integration][bfdb]") {
   const std::string dir = EnsureXPlane12();
   bf::Result<bf::NavDatabase> direct = bf::NavDatabase::Open(dir);

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -582,6 +583,7 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
   std::string cur_airport, cur_name, cur_trans, cur_route;
   CifpData cifp;  // accumulated for cur_airport
 
+  std::optional<int> prev_seqno;  // reset per procedure; consumed by the seqno order check
   auto flush_proc = [&]() {
     if (have_current && !current.legs.empty()) {
       cifp.procedures.push_back(std::move(current));
@@ -589,6 +591,7 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     current = Procedure{};
     current.type = type;
     have_current = false;
+    prev_seqno.reset();
   };
   auto flush_airport = [&]() {
     flush_proc();
@@ -648,6 +651,16 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
                                  ColumnInt(stmt, c.alt2));
     FillProcExtras(stmt, c, leg);
     current.legs.push_back(std::move(leg));
+    // Consume the seqno column (previously relied on only by ORDER BY) to validate
+    // that legs arrive non-decreasing within a procedure -- the order the
+    // partitioning depends on. A decrease means a query that dropped the intended
+    // ORDER BY or corrupt source rows; warn rather than silently mispartition.
+    const int seqno = ColumnInt(stmt, c.seqno);
+    if (prev_seqno && seqno < *prev_seqno) {
+      BF_LOG_WARN("dfd1: procedure {}/{}/{} leg seqno decreased ({} after {})", airport, name,
+                  trans, seqno, *prev_seqno);
+    }
+    prev_seqno = seqno;
   });
   if (!rows) {
     return Result<void>::Err(rows.error());
