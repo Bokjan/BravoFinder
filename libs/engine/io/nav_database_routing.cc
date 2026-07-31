@@ -579,6 +579,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   RandomizeConstraint randomize(request.random_seed.value_or(0));
   SearchOptions options;
   options.request = &request;
+  // Soft turn-angle penalty at every path vertex: suppresses the
+  // near-180-degree reversals at SID/STAR handoff fixes. Always on for routing;
+  // the calibration lives in the TurnPenalty constants (tunable there).
+  options.turn_penalty.enabled = true;
   if (request.altitude.has_value()) {
     options.constraints.push_back(&altitude_band);
     options.constraints.push_back(&mora);

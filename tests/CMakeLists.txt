@@ -5,6 +5,7 @@ add_executable(bf_tests
                unit/result_test.cc
                unit/log_test.cc
                unit/graph_test.cc
+               unit/turn_penalty_test.cc
                unit/constraint_test.cc
                unit/yen_test.cc
                unit/search_workspace_test.cc

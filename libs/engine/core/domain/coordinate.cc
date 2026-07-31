@@ -31,4 +31,18 @@ double Coordinate::DistanceTo(const Coordinate& other) const noexcept {
   return kEarthRadiusNm * c;
 }
 
+double Coordinate::BearingTo(const Coordinate& other) const noexcept {
+  const double lat1 = ToRadians(latitude);
+  const double lat2 = ToRadians(other.latitude);
+  const double d_lon = ToRadians(other.longitude - longitude);
+  const double y = std::sin(d_lon) * std::cos(lat2);
+  const double x =
+      std::cos(lat1) * std::sin(lat2) - std::sin(lat1) * std::cos(lat2) * std::cos(d_lon);
+  double deg = std::atan2(y, x) * 180.0 / kPi;
+  if (deg < 0.0) {
+    deg += 360.0;
+  }
+  return deg;
+}
+
 }  // namespace bf

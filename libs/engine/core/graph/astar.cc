@@ -107,6 +107,7 @@ void SearchWorkspace::Reset(int n) {
     g_.resize(n);
     geo_.resize(n);
     prev_.resize(n);
+    inbound_.resize(n);
     stamp_.resize(n, 0);
     closed_stamp_.resize(n, 0);
   }
@@ -125,6 +126,26 @@ std::vector<double> BuildSeedTable(const std::vector<SeededEndpoint>& endpoints,
     }
   }
   return seed;
+}
+
+std::vector<double> BuildBearingTable(const std::vector<SeededEndpoint>& endpoints, int n) {
+  // Per-vertex procedure heading for the turn-angle penalty, or -1 when v is
+  // not an endpoint or carries no procedure heading. Mirrors BuildSeedTable's
+  // "smallest seed wins" merge so the bearing matches the seed the search
+  // actually uses: when several endpoints land on v, the cheapest seed's
+  // bearing is the one the search will pick.
+  std::vector<double> bearing(n, -1.0);
+  std::vector<double> best_seed(n, -1.0);
+  for (const SeededEndpoint& e : endpoints) {
+    if (e.vertex < 0 || e.vertex >= n) {
+      continue;
+    }
+    if (best_seed[e.vertex] < 0.0 || e.cost < best_seed[e.vertex]) {
+      best_seed[e.vertex] = e.cost;
+      bearing[e.vertex] = e.bearing;
+    }
+  }
+  return bearing;
 }
 
 ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal,
@@ -193,6 +214,8 @@ double MultiGoalHeuristic::operator()(int vertex) const {
 ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& sources,
                                    const std::vector<double>& goal_seed,
+                                   const std::vector<double>& source_bearing,
+                                   const std::vector<double>& goal_bearing,
                                    const SearchOptions& options,
                                    const MultiGoalHeuristic& heuristic, SearchWorkspace& ws) {
   ShortestPath result;
@@ -203,6 +226,8 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
 
   ws.Reset(n);
   ws.NextGeneration();
+
+  const TurnPenalty& turn = options.turn_penalty;
 
   // Reuse the workspace's open-set vector across spur searches (clear() keeps
   // capacity); drive it as a min-heap on f with push_heap/pop_heap, exactly as
@@ -217,15 +242,18 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
       continue;
     }
     // A source's seed cost is the procedure distance already flown to reach it;
-    // it counts as both effective cost and geographic distance.
+    // it counts as both effective cost and geographic distance. The source's
+    // bearing is the procedure's inbound heading at the fix (or -1 when none),
+    // seeding the turn-angle penalty for the SID-exit turn onto the first edge.
+    const double seed_bearing = source_bearing[s.vertex];
     if (s.cost < ws.G(s.vertex)) {
-      ws.Relax(s.vertex, s.cost, s.cost, -1);
+      ws.Relax(s.vertex, s.cost, s.cost, -1, seed_bearing);
       open.push_back(QueueNode{s.cost + heuristic(s.vertex), s.vertex});
       std::push_heap(open.begin(), open.end(), std::greater<>());
     }
   }
 
-  double best_total = kInfinity;  // best (g + goal seed) reached so far
+  double best_total = kInfinity;  // best (g + goal seed + goal turn) reached so far
   int best_goal = -1;
 
   while (!open.empty()) {
@@ -243,9 +271,18 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
     }
     ws.MarkClosed(u);
 
-    // Finishing at u (if it is a goal) costs g[u] plus its seed.
+    // Finishing at u (if it is a goal) costs g[u] plus its seed, plus the turn
+    // between the path's inbound heading and the STAR's outbound heading at the
+    // fix (the arrival-side counterpart to the SID-exit penalty).
     if (goal_seed[u] >= 0.0) {
-      const double total = ws.G(u) + goal_seed[u];
+      double total = ws.G(u) + goal_seed[u];
+      if (turn.enabled) {
+        const double inb = ws.Inbound(u);
+        const double outb = goal_bearing[u];
+        if (inb >= 0.0 && outb >= 0.0) {
+          total += turn(TurnAngleDeg(inb, outb));
+        }
+      }
       if (total < best_total) {
         best_total = total;
         best_goal = u;
@@ -255,6 +292,7 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
     // u is constant across its out-edges; hoist its coordinate once so the
     // unconstrained fast path fetches no per-edge coordinates.
     const Coordinate u_coord = graph.CoordOf(u);
+    const double inb_u = turn.enabled ? ws.Inbound(u) : -1.0;
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
       const int v = e->to;
       if (ws.Closed(v)) {
@@ -270,9 +308,22 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
       if (!EdgeAllowed(options, *e, u_coord, graph, v, extra_cost)) {
         continue;
       }
-      const double tentative = ws.G(u) + e->distance_nm + extra_cost;
+      // Turn-angle penalty for leaving u toward v: the heading the path arrived
+      // on (inb_u) vs. the heading of edge u->v. Computed only when enabled and
+      // when u has a known inbound (sources without a procedure heading, and
+      // the very first edge out of a fresh source, fall back to no penalty).
+      // The outbound bearing is reused as v's inbound, so each relaxation pays
+      // exactly one atan2 and the inbound is never recomputed downstream.
+      double turn_cost = 0.0;
+      double outb = -1.0;
+      if (turn.enabled && inb_u >= 0.0) {
+        const Coordinate v_coord = graph.CoordOf(v);
+        outb = u_coord.BearingTo(v_coord);
+        turn_cost = turn(TurnAngleDeg(inb_u, outb));
+      }
+      const double tentative = ws.G(u) + e->distance_nm + extra_cost + turn_cost;
       if (tentative < ws.G(v)) {
-        ws.Relax(v, tentative, ws.Geo(u) + e->distance_nm, u);
+        ws.Relax(v, tentative, ws.Geo(u) + e->distance_nm, u, outb);
         open.push_back(QueueNode{tentative + heuristic(v), v});
         std::push_heap(open.begin(), open.end(), std::greater<>());
       }
@@ -287,7 +338,8 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
     result.vertices.push_back(at);
   }
   std::reverse(result.vertices.begin(), result.vertices.end());
-  // Include the chosen goal's seed cost in the reported totals.
+  // Include the chosen goal's seed cost in the reported totals. Soft turn
+  // penalties live in `cost` (best_total) but not in geographic distance.
   result.distance_nm = ws.Geo(best_goal) + goal_seed[best_goal];
   result.cost = best_total;
   result.found = true;
@@ -299,9 +351,13 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& goals,
                                    const SearchOptions& options) {
   const MultiGoalHeuristic heuristic(graph, goals);
-  const std::vector<double> goal_seed = BuildSeedTable(goals, graph.VertexCount());
+  const int n = graph.VertexCount();
+  const std::vector<double> goal_seed = BuildSeedTable(goals, n);
+  const std::vector<double> source_bearing = BuildBearingTable(sources, n);
+  const std::vector<double> goal_bearing = BuildBearingTable(goals, n);
   SearchWorkspace ws;
-  return FindShortestPathMulti(graph, sources, goal_seed, options, heuristic, ws);
+  return FindShortestPathMulti(graph, sources, goal_seed, source_bearing, goal_bearing, options,
+                               heuristic, ws);
 }
 
 }  // namespace bf

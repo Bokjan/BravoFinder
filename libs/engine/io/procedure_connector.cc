@@ -43,15 +43,17 @@ ProcedureRef MakeRef(const Procedure& p) {
   return ref;
 }
 
-// Merge a (fix_vertex, seed, ref) finding into the connection map, keeping the
-// smallest seed distance per fix and collecting every procedure ref.
+// Merge a (fix_vertex, seed, bearing, ref) finding into the connection map,
+// keeping the smallest seed distance per fix (and its matching bearing) and
+// collecting every procedure ref.
 void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, double seed,
-                const ProcedureRef& ref) {
+                double bearing, const ProcedureRef& ref) {
   auto it = by_fix.find(fix_vertex);
   if (it == by_fix.end()) {
     Connection c;
     c.fix_vertex = fix_vertex;
     c.seed_distance_nm = seed;
+    c.bearing = bearing;
     c.procedures.push_back(ref);
     by_fix.emplace(fix_vertex, std::move(c));
     return;
@@ -59,6 +61,7 @@ void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, dou
   it->second.procedures.push_back(ref);
   if (seed < it->second.seed_distance_nm) {
     it->second.seed_distance_nm = seed;
+    it->second.bearing = bearing;
   }
 }
 
@@ -236,9 +239,19 @@ std::vector<Connection> ProcedureConnector::BuildDeparture(const CifpData& cifp,
       continue;
     }
     const double runway_bridge = walk.have_first ? airport_coord.DistanceTo(walk.first_coord) : 0.0;
-    for (const FixHit& hit : walk.hits) {
-      const double seed = runway_bridge + hit.cumulative_nm;
-      Accumulate(by_fix, hit.vertex, seed, MakeRef(p));
+    // Inbound heading at each hit fix: the bearing from the previous resolved
+    // fix (the runway side) into the hit. For the first hit that predecessor is
+    // the airport, matching the runway-bridge geometry the seed uses.
+    std::vector<Coordinate> hit_coords;
+    hit_coords.reserve(walk.hits.size());
+    for (const FixHit& h : walk.hits) {
+      hit_coords.push_back(builder.graph().CoordOf(h.vertex));
+    }
+    for (size_t j = 0; j < walk.hits.size(); ++j) {
+      const double seed = runway_bridge + walk.hits[j].cumulative_nm;
+      const Coordinate& prev = (j == 0) ? airport_coord : hit_coords[j - 1];
+      const double bearing = prev.BearingTo(hit_coords[j]);
+      Accumulate(by_fix, walk.hits[j].vertex, seed, bearing, MakeRef(p));
     }
   }
   DropDoorstepConnections(by_fix);
@@ -267,9 +280,19 @@ std::vector<Connection> ProcedureConnector::BuildArrival(const CifpData& cifp,
       continue;
     }
     const double runway_bridge = walk.have_last ? walk.last_coord.DistanceTo(airport_coord) : 0.0;
-    for (const FixHit& hit : walk.hits) {
-      const double seed = (walk.total_nm - hit.cumulative_nm) + runway_bridge;
-      Accumulate(by_fix, hit.vertex, seed, MakeRef(p));
+    // Outbound heading at each hit fix: the bearing from the hit toward the next
+    // resolved fix on the way to the runway. For the last hit that successor is
+    // the airport, matching the runway-bridge geometry the seed uses.
+    std::vector<Coordinate> hit_coords;
+    hit_coords.reserve(walk.hits.size());
+    for (const FixHit& h : walk.hits) {
+      hit_coords.push_back(builder.graph().CoordOf(h.vertex));
+    }
+    for (size_t j = 0; j < walk.hits.size(); ++j) {
+      const double seed = (walk.total_nm - walk.hits[j].cumulative_nm) + runway_bridge;
+      const Coordinate& next = (j + 1 < walk.hits.size()) ? hit_coords[j + 1] : airport_coord;
+      const double bearing = hit_coords[j].BearingTo(next);
+      Accumulate(by_fix, walk.hits[j].vertex, seed, bearing, MakeRef(p));
     }
   }
   DropDoorstepConnections(by_fix);
@@ -290,7 +313,13 @@ std::vector<Connection> ProcedureConnector::BuildDctFallback(const Coordinate& a
   for (int v : builder.NearestOnNetwork(airport_coord, count, /*inbound=*/arrival)) {
     Connection c;
     c.fix_vertex = v;
-    c.seed_distance_nm = airport_coord.DistanceTo(builder.graph().CoordOf(v));
+    const Coordinate fix_coord = builder.graph().CoordOf(v);
+    c.seed_distance_nm = airport_coord.DistanceTo(fix_coord);
+    // DCT has no procedure body, so the heading at the fix is the straight-line
+    // bearing to/from the airport: inbound for a departure (airport->fix), the
+    // direction the aircraft arrives at the fix; outbound for an arrival
+    // (fix->airport), the direction it leaves toward the field.
+    c.bearing = arrival ? fix_coord.BearingTo(airport_coord) : airport_coord.BearingTo(fix_coord);
     out.push_back(std::move(c));  // no ProcedureRef: this is a DCT connection
   }
   return out;
@@ -301,7 +330,7 @@ std::vector<SeededEndpoint> ProcedureConnector::ToEndpoints(
   std::vector<SeededEndpoint> endpoints;
   endpoints.reserve(connections.size());
   for (const Connection& c : connections) {
-    endpoints.push_back(SeededEndpoint{c.fix_vertex, c.seed_distance_nm});
+    endpoints.push_back(SeededEndpoint{c.fix_vertex, c.seed_distance_nm, c.bearing});
   }
   return endpoints;
 }

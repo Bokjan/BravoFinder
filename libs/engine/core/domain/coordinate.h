@@ -15,6 +15,14 @@ struct Coordinate {
   // Great-circle distance to another coordinate, in nautical miles (NM),
   // computed with the haversine formula on a spherical earth model.
   double DistanceTo(const Coordinate& other) const noexcept;
+
+  // Initial great-circle bearing to another coordinate, in degrees clockwise
+  // from true north, normalized to [0, 360). Used by the turn-angle constraint
+  // to compare the inbound and outbound headings at a path vertex. The initial
+  // bearing (not the final bearing) is the right value for a turn at the
+  // vertex: it is the heading the aircraft flies leaving one fix toward the
+  // next, which is what a heading-continuity constraint compares against.
+  double BearingTo(const Coordinate& other) const noexcept;
 };
 
 // Mean earth radius in nautical miles. 6371.0088 km is the IUGG mean radius;

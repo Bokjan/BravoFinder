@@ -32,14 +32,16 @@ TEST_CASE("search workspace: relax records cost geo and predecessor", "[unit][wo
   bf::SearchWorkspace ws;
   ws.Reset(4);
   ws.NextGeneration();
-  ws.Relax(2, /*g=*/5.0, /*geo=*/4.0, /*prev=*/1);
+  ws.Relax(2, /*g=*/5.0, /*geo=*/4.0, /*prev=*/1, /*inbound=*/90.0);
   CHECK(ws.G(2) == 5.0);
   CHECK(ws.Geo(2) == 4.0);
   CHECK(ws.Prev(2) == 1);
+  CHECK(ws.Inbound(2) == 90.0);
   CHECK_FALSE(ws.Closed(2));  // relax records cost but does not close
   // A vertex never relaxed this generation still reads initial.
   CHECK(ws.G(3) == kInf);
   CHECK(ws.Prev(3) == -1);
+  CHECK(ws.Inbound(3) == -1.0);
 }
 
 TEST_CASE("search workspace: closed is an independent generation stamp", "[unit][workspace]") {
@@ -59,8 +61,8 @@ TEST_CASE("search workspace: next generation clears all state in constant time",
   bf::SearchWorkspace ws;
   ws.Reset(4);
   ws.NextGeneration();
-  ws.Relax(0, 1.0, 1.0, -1);
-  ws.Relax(1, 2.0, 2.0, 0);
+  ws.Relax(0, 1.0, 1.0, -1, /*inbound=*/-1.0);
+  ws.Relax(1, 2.0, 2.0, 0, /*inbound=*/45.0);
   ws.MarkClosed(0);
   // Bumping the generation logically resets every slot without touching memory.
   ws.NextGeneration();
@@ -76,13 +78,14 @@ TEST_CASE("search workspace: a stale slot is cleared on first touch in a new gen
   bf::SearchWorkspace ws;
   ws.Reset(4);
   ws.NextGeneration();
-  ws.Relax(2, 5.0, 4.0, 1);  // dirties slot 2 in generation 1
-  ws.NextGeneration();       // generation 2: slot 2 is now stale
+  ws.Relax(2, 5.0, 4.0, 1, /*inbound=*/90.0);  // dirties slot 2 in generation 1
+  ws.NextGeneration();                         // generation 2: slot 2 is now stale
   // Re-relaxing must overwrite cleanly, not carry over the stale geo/prev.
-  ws.Relax(2, 9.0, 8.0, -1);
+  ws.Relax(2, 9.0, 8.0, -1, /*inbound=*/-1.0);
   CHECK(ws.G(2) == 9.0);
   CHECK(ws.Geo(2) == 8.0);
   CHECK(ws.Prev(2) == -1);
+  CHECK(ws.Inbound(2) == -1.0);
 }
 
 TEST_CASE("search workspace: stamps stay correct across many generations", "[unit][workspace]") {
@@ -91,7 +94,7 @@ TEST_CASE("search workspace: stamps stay correct across many generations", "[uni
   for (int gen = 0; gen < 5; ++gen) {
     ws.NextGeneration();
     CHECK(ws.G(0) == kInf);  // clean at the start of every generation
-    ws.Relax(0, gen + 1.0, 0.0, -1);
+    ws.Relax(0, gen + 1.0, 0.0, -1, /*inbound=*/-1.0);
     CHECK(ws.G(0) == gen + 1.0);
   }
 }
@@ -101,7 +104,7 @@ TEST_CASE("search workspace: reset grows without dropping the active generation"
   bf::SearchWorkspace ws;
   ws.Reset(2);
   ws.NextGeneration();
-  ws.Relax(1, 3.0, 3.0, 0);
+  ws.Relax(1, 3.0, 3.0, 0, /*inbound=*/-1.0);
   // Reset never shrinks and does not touch the value arrays or the generation
   // counter, so a grow preserves slots already written this generation.
   ws.Reset(16);

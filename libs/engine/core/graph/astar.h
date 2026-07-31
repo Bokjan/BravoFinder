@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -71,6 +72,78 @@ struct EdgeFilter {
   }
 };
 
+// The absolute turn angle between two headings in degrees, normalized to
+// [0, 180]: a 350->10 turn is 20, not 340. Used by the turn-angle constraint to
+// compare the inbound heading (how the path arrived at a vertex) with the
+// outbound heading (the edge leaving it).
+inline double TurnAngleDeg(double inbound_deg, double outbound_deg) {
+  double delta = std::abs(inbound_deg - outbound_deg);
+  if (delta > 180.0) {
+    delta = 360.0 - delta;
+  }
+  return delta;
+}
+
+// A soft, path-dependent penalty for sharp turns at path vertices, to suppress
+// the near-180-degree "reversals" that arise at SID/STAR handoff fixes when the
+// seed-cost-minimizing connection points the wrong way (e.g. a SID exiting at a
+// fix with a 150-plus-degree turn onto the first airway). Unlike the per-edge
+// Constraint penalties, this is path-dependent -- the cost of leaving v depends
+// on how the path entered v -- so it is applied inside the A* relaxation loop
+// (and Yen's path re-costing), not via the Constraint/SelectEdge machinery.
+//
+// This is the "greedy, single-state" form: the inbound heading is read from the
+// best-path predecessor (SearchWorkspace::Inbound) rather than expanding the A*
+// state to (vertex, heading-bin). It gives up strict global optimality (a
+// slightly longer but smoother path to v may have been discarded) in exchange
+// for zero state-space growth and ~one atan2 per relaxation. The heuristic
+// depends only on the vertex and the penalty is non-negative, so it stays
+// admissible/consistent and the closed set remains valid at the greedy-approx
+// level. Disabled (the default) adds no trig to the hot path.
+//
+// Shape (piecewise): zero up to kThresholdDeg; linear to kPenaltyAtKneeNm at
+// kKneeDeg; quadratic to kMaxPenaltyNm at 180. The quadratic upper half steepens
+// the cost of severe near-reversals (>90) more aggressively than moderate
+// course changes, steering the optimizer away from the OC-class reversals while
+// barely perturbing normal enroute routing (85% of mid-route turns are <15).
+struct TurnPenalty {
+  // Calibration constants. Chosen from the turn-angle distribution so the penalty
+  // can compete with seed/edge costs (tens to ~200 NM): a ~90 turn maps to ~20 NM,
+  // the 157-degree case to ~120 NM, a full 180 to 200 NM. Tunable: revisit after a
+  // batch before/after comparison and adjust here only.
+  // kMaxPenaltyNm was raised 95 -> 200 after the batch: near-180 reversals are
+  // already eliminated at 95, but 200 also suppresses most >135/>150 turns and
+  // -- surprisingly -- also fixes doorstep stubs the gap-gated filter could not
+  // (WAAA's 2.2 NM airway-to-door entry turns sharply; at 95 the search kept the
+  // 2.2 NM stub, at 200 it joins the real 234 NM STAR via KENDO at +27 NM / 0.36%
+  // total). The residual ~11% of >90 turns is structural (DCT-fallback candidate
+  // sets lack a smooth option) and is expected to be addressed by the upcoming
+  // IF-only connection model, not by a penalty-magnitude change.
+  static constexpr double kThresholdDeg = 45.0;  // zero below: mid-route turns are nearly all <15
+  static constexpr double kKneeDeg = 90.0;       // linear [45,90], quadratic [90,180] knee
+  static constexpr double kPenaltyAtKneeNm = 20.0;  // penalty at 90 deg
+  static constexpr double kMaxPenaltyNm = 200.0;    // penalty at 180 deg
+
+  bool enabled = false;
+
+  // Penalty in NM for a turn of `angle_deg` (expected in [0, 180]).
+  double operator()(double angle_deg) const noexcept {
+    if (!enabled || angle_deg <= kThresholdDeg) {
+      return 0.0;
+    }
+    if (angle_deg <= kKneeDeg) {
+      // Linear ramp 0 -> kPenaltyAtKneeNm over [kThresholdDeg, kKneeDeg].
+      return kPenaltyAtKneeNm * (angle_deg - kThresholdDeg) / (kKneeDeg - kThresholdDeg);
+    }
+    if (angle_deg >= 180.0) {
+      return kMaxPenaltyNm;
+    }
+    // Quadratic ramp kPenaltyAtKneeNm -> kMaxPenaltyNm over [kKneeDeg, 180].
+    const double t = (angle_deg - kKneeDeg) / (180.0 - kKneeDeg);
+    return kPenaltyAtKneeNm + (kMaxPenaltyNm - kPenaltyAtKneeNm) * t * t;
+  }
+};
+
 // Optional inputs that shape a search: routing constraints and the bans Yen's
 // algorithm uses to carve out alternative paths. All fields are optional; an
 // empty SearchOptions reproduces a plain shortest-path search.
@@ -79,6 +152,10 @@ struct SearchOptions {
   // they are evaluated against must be supplied when constraints are present.
   std::vector<const Constraint*> constraints;
   const RouteRequest* request = nullptr;
+
+  // Path-dependent soft penalty for sharp turns at vertices.
+  // Disabled by default; NavDatabase::FindRoutes enables it. See TurnPenalty.
+  TurnPenalty turn_penalty;
 
   // Yen support: vertices and directed edges that must not be used. These are
   // concrete filters (NodeFilter / EdgeFilter), not std::function, so the hot
@@ -127,6 +204,13 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal);
 struct SeededEndpoint {
   int vertex = -1;
   double cost = 0.0;  // SID distance (source) or STAR distance (goal), in NM
+  // Heading at the connection fix for the turn-angle constraint, in degrees
+  // [0, 360), or -1 when unknown (no procedure / a forced via-point). For a
+  // source (SID) this is the INBOUND heading -- the direction the procedure
+  // arrives at the fix from the runway side. For a goal (STAR) it is the
+  // OUTBOUND heading -- the direction the procedure leaves the fix toward the
+  // runway. Symmetric: both are "the procedure leg heading at the fix".
+  double bearing = -1.0;
 };
 
 // Reusable per-vertex scratch for A*. Yen runs the search hundreds of times over
@@ -165,17 +249,25 @@ class SearchWorkspace {
   double Geo(int v) const { return Live(v) ? geo_[v] : 0.0; }
   // Predecessor on the best path, or -1 until written this generation.
   int Prev(int v) const { return Live(v) ? prev_[v] : -1; }
+  // Inbound heading at v along the best path, in degrees, or -1 until written
+  // this generation. Set by Relax to the bearing of the edge the path used to
+  // reach v (or the seeded procedure heading for a source). Read by the
+  // turn-angle penalty when relaxing v's out-edges and when finishing at a goal.
+  double Inbound(int v) const { return Live(v) ? inbound_[v] : -1.0; }
   // Closed is its own generation stamp, so it clears in O(1) with the rest and
   // needs no per-slot byte array (a std::vector<bool> would add bit-masking to
   // the hot pop loop; a stamp compare is a single word comparison).
   bool Closed(int v) const { return closed_stamp_[v] == generation_; }
 
-  // Relax vertex `v`: record cost/distance/predecessor and stamp it live.
-  void Relax(int v, double g, double geo, int prev) {
+  // Relax vertex `v`: record cost/distance/predecessor/inbound and stamp it live.
+  // `inbound` is the heading the path arrived at v along (the bearing of the
+  // edge into v), or -1 for a source with no seeded procedure heading.
+  void Relax(int v, double g, double geo, int prev, double inbound) {
     Touch(v);
     g_[v] = g;
     geo_[v] = geo;
     prev_[v] = prev;
+    inbound_[v] = inbound;
   }
   void MarkClosed(int v) { closed_stamp_[v] = generation_; }
 
@@ -189,12 +281,14 @@ class SearchWorkspace {
       g_[v] = kInfinity_;
       geo_[v] = 0.0;
       prev_[v] = -1;
+      inbound_[v] = -1.0;
     }
   }
 
   std::vector<double> g_;
   std::vector<double> geo_;
   std::vector<int> prev_;
+  std::vector<double> inbound_;         // inbound heading at v along best path (deg), or -1
   std::vector<uint32_t> stamp_;         // value-slot generation tag
   std::vector<uint32_t> closed_stamp_;  // == generation_ => closed this search
   std::vector<QueueNode> heap_;         // open-set backing store, reused across spurs
@@ -272,15 +366,26 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
 // and by Yen's path re-costing so both agree on which vertices are endpoints.
 std::vector<double> BuildSeedTable(const std::vector<SeededEndpoint>& endpoints, int n);
 
+// Build a per-vertex bearing table for the turn-angle constraint:
+// bearing[v] is the procedure heading at v (inbound for a source, outbound for a
+// goal), or -1 when v is not an endpoint or has no procedure heading. Mirrors
+// BuildSeedTable so the search and Yen's re-costing agree on endpoint headings.
+std::vector<double> BuildBearingTable(const std::vector<SeededEndpoint>& endpoints, int n);
+
 // Fully reused form for Yen: the caller supplies both the prebuilt goal seed
 // table (constant across all spur searches over the same goals) and a workspace
 // whose arrays are reused across searches (cleared in O(1) via its generation
 // stamp). This is the hot path -- the plain overloads above delegate here after
 // building a throwaway seed table and workspace. `goal_seed` must match `graph`
 // (size == VertexCount, built by BuildSeedTable from the goal set).
+// `source_bearing`/`goal_bearing` (size == VertexCount, from BuildBearingTable)
+// supply the procedure headings at the endpoints for the turn-angle penalty;
+// pass all--1 tables to disable endpoint turn penalties (e.g. unit-test seams).
 ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& sources,
                                    const std::vector<double>& goal_seed,
+                                   const std::vector<double>& source_bearing,
+                                   const std::vector<double>& goal_bearing,
                                    const SearchOptions& options,
                                    const MultiGoalHeuristic& heuristic, SearchWorkspace& ws);
 

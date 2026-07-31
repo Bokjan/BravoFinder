@@ -20,11 +20,30 @@ namespace {
 // penalty) -- the SAME routine A* relaxation and route-leg labeling use, so this
 // re-costing cannot drift from the search's own edge choice (a hand-rolled copy
 // of that selection previously risked exactly that drift).
+//
+// `src_bearing`/`goal_bearing` are the procedure headings at the path's
+// endpoints (inbound at the source fix, outbound at the goal fix), or -1 when
+// unknown. When the turn-angle penalty is enabled, the per-vertex turn cost is
+// added here too -- using the same headings the A* relaxation used -- so Yen's
+// candidate ordering and reported cost stay on the same cost model as the search
+// (gap A: a path-dependent penalty that only lived in the search loop
+// would make the B-set rank paths by a different cost than they were found with).
 bool CostOfPath(const NavGraph& graph, const std::vector<int>& path, const SearchOptions& options,
-                double& cost, double& distance) {
+                double src_bearing, double goal_bearing, double& cost, double& distance) {
   cost = 0.0;
   distance = 0.0;
-  for (size_t i = 0; i + 1 < path.size(); ++i) {
+  const size_t m = path.size();
+  if (m < 2) {
+    return true;  // no edges; CostOfPathMulti handles the endpoint seeds
+  }
+  const TurnPenalty& turn = options.turn_penalty;
+  // Per-edge outbound bearings, computed only when the turn penalty is active so
+  // the re-costing hot path stays trig-free when the penalty is disabled.
+  std::vector<double> edge_bearing;
+  if (turn.enabled) {
+    edge_bearing.resize(m - 1);
+  }
+  for (size_t i = 0; i + 1 < m; ++i) {
     const int u = path[i];
     const int v = path[i + 1];
     // Delegate the parallel-edge choice to SelectEdge -- the SAME routine A*
@@ -39,6 +58,23 @@ bool CostOfPath(const NavGraph& graph, const std::vector<int>& path, const Searc
     }
     cost += edge_cost;
     distance += e->distance_nm;
+    if (turn.enabled) {
+      edge_bearing[i] = graph.CoordOf(u).BearingTo(graph.CoordOf(v));
+    }
+  }
+  if (turn.enabled) {
+    // Turn at the source fix: procedure inbound heading -> first edge outbound.
+    if (src_bearing >= 0.0) {
+      cost += turn(TurnAngleDeg(src_bearing, edge_bearing[0]));
+    }
+    // Turns at interior vertices: prev edge outbound -> next edge outbound.
+    for (size_t i = 1; i + 1 < m; ++i) {
+      cost += turn(TurnAngleDeg(edge_bearing[i - 1], edge_bearing[i]));
+    }
+    // Turn at the goal fix: last edge inbound -> procedure outbound heading.
+    if (goal_bearing >= 0.0) {
+      cost += turn(TurnAngleDeg(edge_bearing[m - 2], goal_bearing));
+    }
   }
   return true;
 }
@@ -66,7 +102,9 @@ struct Candidate {
 // edge, is blocked by a constraint, or an endpoint is not actually seeded.
 bool CostOfPathMulti(const NavGraph& graph, const std::vector<int>& path,
                      const std::vector<double>& source_seed, const std::vector<double>& goal_seed,
-                     const SearchOptions& options, double& cost, double& distance) {
+                     const std::vector<double>& source_bearing,
+                     const std::vector<double>& goal_bearing, const SearchOptions& options,
+                     double& cost, double& distance) {
   if (path.empty()) {
     return false;
   }
@@ -77,7 +115,8 @@ bool CostOfPathMulti(const NavGraph& graph, const std::vector<int>& path,
   }
   double enroute_cost = 0.0;
   double enroute_dist = 0.0;
-  if (!CostOfPath(graph, path, options, enroute_cost, enroute_dist)) {
+  if (!CostOfPath(graph, path, options, source_bearing[path.front()], goal_bearing[path.back()],
+                  enroute_cost, enroute_dist)) {
     return false;
   }
   cost = s + enroute_cost + g;
@@ -110,6 +149,12 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   const int n = graph.VertexCount();
   const std::vector<double> source_seed = BuildSeedTable(sources, n);
   const std::vector<double> goal_seed = BuildSeedTable(goals, n);
+  // Per-vertex procedure headings at the endpoints, for the turn-angle penalty.
+  // `no_source_bearing` is an all-(-1) table for mid-path spur searches whose
+  // spur node is not a real SID source (it has no procedure inbound heading).
+  const std::vector<double> source_bearing = BuildBearingTable(sources, n);
+  const std::vector<double> goal_bearing = BuildBearingTable(goals, n);
+  const std::vector<double> no_source_bearing(n, -1.0);
 
   // The goal set is fixed for the whole run, so h(v) is constant per vertex.
   // Build one memoized heuristic and share it across the first search and every
@@ -122,8 +167,8 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   // spurs. Stack-local to this call, so concurrent queries never share it.
   SearchWorkspace ws;
 
-  ShortestPath first =
-      FindShortestPathMulti(graph, sources, goal_seed, base_options, heuristic, ws);
+  ShortestPath first = FindShortestPathMulti(graph, sources, goal_seed, source_bearing,
+                                             goal_bearing, base_options, heuristic, ws);
   if (!first.found) {
     return result;
   }
@@ -149,7 +194,8 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
     total.insert(total.end(), spur_tail.vertices.begin(), spur_tail.vertices.end());
     double cost = 0.0;
     double distance = 0.0;
-    if (CostOfPathMulti(graph, total, source_seed, goal_seed, base_options, cost, distance)) {
+    if (CostOfPathMulti(graph, total, source_seed, goal_seed, source_bearing, goal_bearing,
+                        base_options, cost, distance)) {
       candidates.insert(Candidate{cost, distance, std::move(total), deviation});
     }
   };
@@ -190,7 +236,8 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
           continue;
         }
         const ShortestPath spur =
-            FindShortestPathMulti(graph, spur_sources, goal_seed, base_options, heuristic, ws);
+            FindShortestPathMulti(graph, spur_sources, goal_seed, source_bearing, goal_bearing,
+                                  base_options, heuristic, ws);
         add_candidate({}, spur, /*deviation=*/-1);
         continue;
       }
@@ -235,9 +282,13 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
 
       // Single-source (the spur node) -> any goal. The spur node's own seed is
       // irrelevant here; CostOfPathMulti re-applies the true source seed from the
-      // stitched path's first vertex.
-      const ShortestPath spur = FindShortestPathMulti(graph, {SeededEndpoint{spur_node, 0.0}},
-                                                      goal_seed, spur_opts, heuristic, ws);
+      // stitched path's first vertex. The spur node has no procedure inbound
+      // heading, so pass the all-(-1) source bearing table -- no SID-exit turn
+      // penalty is applied at the spur node during the search (the re-cost still
+      // applies the real source bearing at the stitched path's true front fix).
+      const ShortestPath spur =
+          FindShortestPathMulti(graph, {SeededEndpoint{spur_node, 0.0}}, goal_seed,
+                                no_source_bearing, goal_bearing, spur_opts, heuristic, ws);
       add_candidate(root, spur, /*deviation=*/i);
     }
 

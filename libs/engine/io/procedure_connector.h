@@ -23,12 +23,19 @@ struct ProcedureRef {
 // A point where procedures hand off to / pick up from the enroute network: the
 // connection-fix vertex, the estimated procedure distance flown to reach it
 // (from the runway, for departures) or from it (to the runway, for arrivals),
-// and every procedure that uses this same fix. Routing searches one seeded
-// endpoint per Connection; the refs let the result list all equivalent
-// SID/STAR(+runway) choices without re-searching.
+// the procedure heading at the fix (for the turn-angle constraint), and every
+// procedure that uses this same fix. Routing searches one seeded endpoint per
+// Connection; the refs let the result list all equivalent SID/STAR(+runway)
+// choices without re-searching.
 struct Connection {
   int fix_vertex = -1;
   double seed_distance_nm = 0.0;
+  // Procedure heading at the fix in degrees [0, 360), or -1 when unknown.
+  // For a SID this is the INBOUND heading (direction the procedure arrives at
+  // the fix from the runway side); for a STAR the OUTBOUND heading (direction
+  // it leaves the fix toward the runway). Drives the turn-angle penalty at the
+  // SID-exit / STAR-entry handoff.
+  double bearing = -1.0;
   std::vector<ProcedureRef> procedures;
 };
 
