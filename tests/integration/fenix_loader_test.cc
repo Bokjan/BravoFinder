@@ -240,6 +240,49 @@ TEST_CASE("fenix: LoadProcedure KJFK", "[integration][fenix]") {
   CHECK(alt > 10);
 }
 
+TEST_CASE("fenix: Procedure::runway is RW-prefixed only", "[integration][fenix]") {
+  const std::string dir = EnsureFenix();
+  if (dir.empty()) SKIP("Fenix navdata not found");
+  bf::FenixLoader l;
+  auto r = l.LoadProcedure(dir, "KJFK");
+  REQUIRE(r.has_value());
+
+  // Find a procedure record by (name, transition_ident). KJFK anchors verified
+  // against navdata/fenix/nd.db3 (cycle 2601).
+  auto find = [&](const std::string& name, const std::string& trans) -> const bf::Procedure* {
+    for (const auto& p : r->procedures) {
+      if (p.name == name && p.transition_ident == trans) return &p;
+    }
+    return nullptr;
+  };
+
+  // (a) A runway transition (RW-prefixed ident) carries the runway.
+  const bf::Procedure* sid_rwy = find("DEEZZ5", "RW31L");
+  REQUIRE(sid_rwy != nullptr);
+  CHECK(sid_rwy->type == bf::ProcedureType::kSid);
+  CHECK(sid_rwy->runway == "RW31L");
+
+  // (b) An enroute transition (fix name) carries no runway: under --rwy-dep it
+  // must stay selectable, not be wrongly excluded by RunwayMatches.
+  const bf::Procedure* sid_enr = find("DEEZZ5", "CANDR");
+  REQUIRE(sid_enr != nullptr);
+  CHECK(sid_enr->runway.empty());
+
+  // (c) An approach IAF transition (fix name) carries no runway -- approaches
+  // never have an RW-prefixed transition in Fenix, so their runway is always
+  // empty, matching DFD1/DFD2/X-Plane.
+  const bf::Procedure* apch_iaf = find("I13L", "COVIR");
+  REQUIRE(apch_iaf != nullptr);
+  CHECK(apch_iaf->type == bf::ProcedureType::kApproach);
+  CHECK(apch_iaf->runway.empty());
+
+  // Global invariant: runway is either empty or an RW-prefixed ident. The
+  // pre-fix loader populated ~120k records with a bogus fix-name runway.
+  for (const auto& p : r->procedures) {
+    CHECK((p.runway.empty() || p.runway.rfind("RW", 0) == 0));
+  }
+}
+
 TEST_CASE("fenix/dfd1: cross-loader AROKE", "[integration][fenix]") {
   auto fd = EnsureFenix(), dd = EnsureDfd1ForFenix();
   if (fd.empty() || dd.empty()) SKIP("data missing");

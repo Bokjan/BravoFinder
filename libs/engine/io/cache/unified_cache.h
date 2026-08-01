@@ -118,7 +118,16 @@ class UnifiedCache {
   //      (terminal) or ENRT-polluted (enroute) hold fix_arinc424_icao_code/airport_icao
   //      while staying byte- and version-valid, so v13 is retired to force a
   //      rebuild. (DFD1/DFD2 were already correct; X-Plane unaffected.)
-  static constexpr uint32_t kFormatVersion = 14;
+  // v15: no layout change. The Fenix procedure loader copied the TerminalLegs
+  //      Transition value into Procedure::runway unconditionally, so every
+  //      enroute/IAF transition (a fix name like "CANDR"/"COVIR", not a runway)
+  //      carried a bogus non-empty runway. Under a --rwy-dep/--rwy-arr filter
+  //      RunwayMatches then wrongly excluded those transitions from the
+  //      connection set, and approaches surfaced IAF names as their runway in
+  //      display/JSON. v14 Fenix-sourced files carry those wrong runway values
+  //      while staying byte- and version-valid, so v14 is retired to force a
+  //      rebuild. (DFD1/DFD2/X-Plane already gate runway on the RW prefix.)
+  static constexpr uint32_t kFormatVersion = 15;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

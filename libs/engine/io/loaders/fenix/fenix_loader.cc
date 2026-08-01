@@ -569,9 +569,10 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
 // scan, and a single Runways scan, then emits one CifpData per airport via the
 // shared EmitTerminalProcedure.
 
-// One procedure's legs grouped by transition.  `runway` mirrors `transition`
-// (Fenix stores the runway in the Transition column, e.g. "RW18L"); "ALL" legs
-// are split out into common_legs below.
+// One procedure's legs grouped by transition.  `runway` holds the runway ident
+// only when `transition` is a runway transition (RW-prefixed, e.g. "RW18L");
+// otherwise it is empty (enroute/IAF transitions name a fix, not a runway).
+// "ALL" legs are split out into common_legs below.
 struct LegGroup {
   std::vector<ProcedureLeg> legs;
   std::string transition;
@@ -659,7 +660,13 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
 
       auto& groups = leg_groups[tid];
       if (groups.empty() || groups.back().transition != trans) {
-        groups.push_back(LegGroup{{}, trans, trans});
+        // `runway` is set only when this transition is a runway transition
+        // (ident prefixed "RW", e.g. "RW18L"); enroute/IAF transitions carry a
+        // fix name, not a runway, so they leave `runway` empty. Mirrors the
+        // dfd1/dfd2/cifp loaders' RW-prefix guard. For approaches the
+        // Transition column always holds an IAF name (or ""), so approach
+        // `runway` is always empty -- matching the other loaders.
+        groups.push_back(LegGroup{{}, trans, trans.rfind("RW", 0) == 0 ? trans : ""});
       }
       groups.back().legs.push_back(std::move(leg));
     });
