@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "core/base/log.h"
 #include "core/domain/airport.h"
 #include "core/domain/airway.h"
 #include "core/domain/fixed_ident.h"
@@ -23,7 +24,6 @@
 #include "core/domain/navaid_detail.h"
 #include "core/domain/procedure.h"
 #include "core/domain/waypoint.h"
-#include "core/log.h"
 #include "core/result.h"
 #include "io/loaders/sqlite_util.h"
 #include "io/nav_data.h"

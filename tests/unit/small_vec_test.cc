@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "core/util/small_vec.h"
+#include "core/base/small_vec.h"
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>

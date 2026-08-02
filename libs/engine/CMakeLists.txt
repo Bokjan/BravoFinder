@@ -38,7 +38,7 @@ add_library(bravofinder STATIC
   ${_sqlite3_dir}/sqlite3.c
   core/domain/coordinate.cc
   core/domain/procedure.cc
-  core/log.cc
+  core/base/log.cc
   ${_bf_astar}
   ${_bf_yen}
   core/routing/route_parser.cc
@@ -56,8 +56,8 @@ add_library(bravofinder STATIC
   io/cache/cifp_codec.cc
   io/cache/nav_detail_codec.cc
   io/cache/unified_cache.cc
-  io/graph_builder.cc
-  io/procedure_connector.cc
+  io/build/graph_builder.cc
+  io/build/procedure_connector.cc
   io/nav_database.cc
   io/nav_database_routing.cc
   io/nav_database_parse.cc

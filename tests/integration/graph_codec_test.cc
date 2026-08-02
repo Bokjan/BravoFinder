@@ -10,10 +10,10 @@
 #include <string>
 #include <vector>
 
+#include "core/base/env.h"
 #include "core/domain/coordinate.h"
 #include "core/domain/fixed_ident.h"
 #include "core/domain/waypoint.h"
-#include "core/env.h"
 #include "core/graph/nav_graph.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"

@@ -6,8 +6,8 @@
 #include <cstring>
 #include <string_view>
 
+#include "core/base/attributes.h"
 #include "core/domain/ident.h"
-#include "core/util/attributes.h"
 
 namespace bf {
 

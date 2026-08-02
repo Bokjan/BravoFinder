@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-#include "io/procedure_connector.h"
+#include "io/build/procedure_connector.h"
 
 #include <algorithm>
 #include <unordered_map>
 
 #include "core/domain/coordinate.h"
-#include "io/graph_builder.h"
+#include "io/build/graph_builder.h"
 
 namespace bf {
 

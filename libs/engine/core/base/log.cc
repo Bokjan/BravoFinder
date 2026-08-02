@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
-#include "core/log.h"
+#include "core/base/log.h"
 
 #include <atomic>
 #include <cstdlib>

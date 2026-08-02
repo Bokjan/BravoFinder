@@ -7,10 +7,10 @@
 #include <utility>
 #include <vector>
 
+#include "core/base/string_util.h"
 #include "core/routing/route_parser.h"
 #include "core/routing/route_string.h"
-#include "core/util/string_util.h"
-#include "io/graph_builder.h"
+#include "io/build/graph_builder.h"
 #include "io/nav_database.h"
 
 namespace bf {

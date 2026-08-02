@@ -1,6 +1,6 @@
 # 合规航路引擎：不只是地理最短
 
-> BravoFinder 与「玩具版最短路」最根本的区别。面向想理解「为什么这条航路是这么走的」 的读者。相关代码：`libs/engine/core/constraints/`、`libs/engine/io/graph_builder.cc`、`libs/engine/core/graph/`。
+> BravoFinder 与「玩具版最短路」最根本的区别。面向想理解「为什么这条航路是这么走的」 的读者。相关代码：`libs/engine/core/constraints/`、`libs/engine/io/build/graph_builder.cc`、`libs/engine/core/graph/`。
 
 ## 1. 出发点：地理最短 ≠ 可飞/合规
 
@@ -20,7 +20,7 @@ v3 是一次完全重写，目标从「算最短」变成**「算真实、合规
 
 航路的方向性不是查询期才判断的，而是**建图时就编码进边**。X-Plane `earth_awy.dat` 每段 航路有一个方向字段：`N`=双向、`F`=仅正向（from→to）、`B`=仅反向（to→from）。
 
-`GraphBuilder` 据此决定给这条航路段生成哪些有向边（`libs/engine/io/graph_builder.cc`）：
+`GraphBuilder` 据此决定给这条航路段生成哪些有向边（`libs/engine/io/build/graph_builder.cc`）：
 
 - `N`（双向）→ 生成 from→to **和** to→from 两条边；
 - `F`（仅正向）→ 只生成 from→to；

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "core/log.h"
+#include "core/base/log.h"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>

@@ -6,7 +6,7 @@
 #include <cstring>
 #include <string_view>
 
-#include "core/util/attributes.h"
+#include "core/base/attributes.h"
 
 namespace bf {
 

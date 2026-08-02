@@ -10,7 +10,7 @@
 
 #include "core/graph/astar.h"
 #include "core/graph/yen_kshortest.h"
-#include "io/graph_builder.h"
+#include "io/build/graph_builder.h"
 
 namespace {
 

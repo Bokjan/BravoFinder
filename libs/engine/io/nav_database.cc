@@ -13,12 +13,12 @@
 #include "core/graph/nav_graph.h"
 #include "core/routing/route_string.h"
 #include "core/version.h"
+#include "io/build/graph_builder.h"
 #include "io/cache/cifp_codec.h"
 #include "io/cache/graph_codec.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/nav_detail_codec.h"
 #include "io/cache/unified_cache.h"
-#include "io/graph_builder.h"
 #include "io/loaders/loader.h"
 #include "io/loaders/loader_registry.h"
 

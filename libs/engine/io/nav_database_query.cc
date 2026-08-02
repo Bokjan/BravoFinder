@@ -3,8 +3,8 @@
 #include <string>
 #include <vector>
 
-#include "core/util/string_util.h"
-#include "io/graph_builder.h"
+#include "core/base/string_util.h"
+#include "io/build/graph_builder.h"
 #include "io/nav_database.h"
 
 namespace bf {

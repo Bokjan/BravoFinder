@@ -7,8 +7,8 @@
 #include "core/domain/procedure.h"
 #include "core/graph/astar.h"
 #include "core/routing/route_request.h"
-#include "io/graph_builder.h"
-#include "io/procedure_connector.h"
+#include "io/build/graph_builder.h"
+#include "io/build/procedure_connector.h"
 
 using Catch::Matchers::WithinRel;
 
