@@ -132,8 +132,7 @@ Each returned route element carries: `route` (ICAO filed-flight-plan string), `t
 ### `parse_route`
 
 `route` is an ICAO filed-flight-plan string
-(`[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]`). Each segment is validated:
-an airway designator must actually connect its bracketing fixes (expanded to its intermediate points on the graph), else an error names the offending token. The `[SID]`/`[STAR]` slots accept either the literal keyword `SID`/`STAR` or a published procedure name (the latter checked against the endpoint airport's procedures); either way it becomes a single connection leg (not expanded leg-by-leg) and the returned `route` canonicalizes to the keyword. Returns a single route object with the same shape as `find_routes` (`route` / `total_distance_nm` / `legs` etc.).
+(`DEP (SID|DCT) FIX (AWY FIX | DCT FIX)* (STAR|DCT) ARR`): both endpoints are airport ICAO codes and every adjacent waypoint pair carries an explicit connector (`DCT`, an airway, or `SID`/`STAR`). The no-fix form `DEP DCT ARR` is also accepted. Each segment is validated: an airway designator must actually connect its bracketing fixes (expanded to its intermediate points on the graph), else an error names the offending token. The `SID`/`STAR` slots accept either the literal keyword or a published procedure name (the latter checked against the endpoint airport's procedures); either way it becomes a single connection leg (not expanded leg-by-leg) and the returned `route` canonicalizes to the keyword. Returns a single route object with the same shape as `find_routes` (`route` / `total_distance_nm` / `legs` etc.).
 
 ### lookup tools
 

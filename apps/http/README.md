@@ -105,9 +105,7 @@ Status: missing `departure`/`arrival`, `min_fl > max_fl`, or `k < 1` → **400**
 
 ### POST `/v1/parse-route`
 
-Request: `{"route": "KJFK SID CANDR J60 PSB ... STAR KLAX"}` (required). The string
-is `[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]`: each airway must connect
-its bracketing fixes (expanded to intermediate points), else the error names the offending token. The `[SID]`/`[STAR]` slots accept either the literal keyword `SID`/`STAR` or a published procedure name (e.g. `DEEZZ5`); the returned `route` canonicalizes both to the keyword. Response `200`: a **single** route object, same shape as above. Status: missing `route` → **400**; a parse failure → **422**.
+Request: `{"route": "KJFK SID CANDR J60 PSB ... STAR KLAX"}` (required). The string is `DEP (SID|DCT) FIX (AWY FIX | DCT FIX)* (STAR|DCT) ARR`: both endpoints are airport ICAO codes and every adjacent waypoint pair carries an explicit connector (`DCT`, an airway, or `SID`/`STAR`). The no-fix form `DEP DCT ARR` is also accepted. Each airway must connect its bracketing fixes (expanded to intermediate points), else the error names the offending token. The `SID`/`STAR` slots accept either the literal keyword or a published procedure name (e.g. `DEEZZ5`); the returned `route` canonicalizes both to the keyword. Response `200`: a **single** route object, same shape as above. Status: missing `route` → **400**; a parse failure → **422**.
 
 ### Batch lookups
 

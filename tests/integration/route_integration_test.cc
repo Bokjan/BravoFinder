@@ -737,16 +737,18 @@ TEST_CASE("real data: ParseRoute expands an airway's intermediate fixes", "[inte
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
   }
-  // MCI J24 SLN is a short enroute hop; J24 threads at least one intermediate
-  // fix between them, which must appear as expanded points.
-  bf::Result<bf::Route> r = db->ParseRoute("MCI J24 SLN");
+  // KMCI DCT MCI J24 SLN DCT KSLN: J24 expands its intermediate fixes (JUDGE)
+  // between the MCI/SLN VORs; the DCT legs to the airports stay as own segments.
+  bf::Result<bf::Route> r = db->ParseRoute("KMCI DCT MCI J24 SLN DCT KSLN");
   if (!r) {
-    SKIP("J24 MCI->SLN not present in this AIRAC cycle");
+    SKIP("KMCI/KSLN or J24 MCI->SLN not present in this AIRAC cycle");
   }
-  CHECK(r.value().points.size() >= 3);  // MCI, >=1 intermediate, SLN
+  CHECK(r.value().points.size() >= 5);  // KMCI, MCI, >=1 intermediate, SLN, KSLN
   CHECK(r.value().total_distance_nm > 0.0);
-  for (const bf::RouteLeg& leg : r.value().legs) {
-    CHECK(leg.via == "J24");
+  CHECK(r.value().legs.front().via == "DCT");
+  CHECK(r.value().legs.back().via == "DCT");
+  for (size_t i = 1; i + 1 < r.value().legs.size(); ++i) {
+    CHECK(r.value().legs[i].via == "J24");
   }
 }
 
@@ -755,9 +757,9 @@ TEST_CASE("real data: ParseRoute reports a disconnected airway", "[integration]"
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
   }
-  // J24 does not connect MCI to an arbitrary far fix; expect an error, not a
-  // silently wrong route.
-  bf::Result<bf::Route> r = db->ParseRoute("MCI J24 SEA");
+  // J24 does not connect MCI to an arbitrary far fix (SEA); expect an error,
+  // not a silently wrong route.
+  bf::Result<bf::Route> r = db->ParseRoute("KMCI DCT MCI J24 SEA DCT KSEA");
   CHECK_FALSE(r);
 }
 
@@ -766,7 +768,7 @@ TEST_CASE("real data: ParseRoute rejects an unknown fix", "[integration]") {
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
   }
-  bf::Result<bf::Route> r = db->ParseRoute("MCI DCT ZZZQ");
+  bf::Result<bf::Route> r = db->ParseRoute("KMCI DCT ZZZQ DCT KSLN");
   CHECK_FALSE(r);
 }
 
@@ -797,8 +799,8 @@ TEST_CASE("real data: ParseRoute accepts a pure direct airport pair", "[integrat
   CHECK(r.value().arr_connection == bf::ConnectionKind::kDirect);
 
   // The no-fix shape is accepted only with an explicit DCT and airports at both
-  // ends. A bare airport pair (no connector) and an airport->fix DCT both stay
-  // errors -- they are not valid filed routes.
+  // ends. A bare airport pair (no connector) is rejected, and a route that does
+  // not end at an arrival airport ("ZHHH DCT OLMIB") is also rejected.
   CHECK_FALSE(db->ParseRoute("ZHHH ZGGG"));
   CHECK_FALSE(db->ParseRoute("ZHHH DCT OLMIB"));
 }
@@ -829,13 +831,56 @@ TEST_CASE("real data: ParseRoute rejects a trailing dangling connector", "[integ
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
   }
-  // A route that ends with an airway name but no following fix ("MCI J24") is
-  // incomplete: the airway leg has no destination. It must error, not silently
-  // drop the trailing airway and return a single-point route. (Regression: the
-  // dangling-connector guard was reachable only via expect_fix==false, which the
-  // loop invariant makes impossible, so it was dead code.)
-  bf::Result<bf::Route> r = db->ParseRoute("MCI J24");
+  // "KMCI DCT MCI J24 KSLN" -- J24 has no following fix before the arrival, so
+  // the airway leg has no destination. Must error, not silently drop it.
+  bf::Result<bf::Route> r = db->ParseRoute("KMCI DCT MCI J24 KSLN");
   CHECK_FALSE(r);
+}
+
+TEST_CASE("real data: ParseRoute accepts explicit DCT connectors to airports (#26)",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // An explicit "DCT" may connect an airport to its adjacent fix (the form
+  // FindRoutes emits with no SID/STAR); the canonical string must round-trip.
+  bf::Result<bf::Route> ok = db->ParseRoute("KMCI DCT MCI DCT KSLN");
+  if (!ok) {
+    SKIP("KMCI/KSLN/MCI not present in this AIRAC cycle");
+  }
+  CHECK(ok.value().route_string == "KMCI DCT MCI DCT KSLN");
+  REQUIRE(ok.value().legs.size() == 2);
+  CHECK(ok.value().legs.front().via == "DCT");
+  CHECK(ok.value().legs.back().via == "DCT");
+  CHECK(ok.value().dep_connection == bf::ConnectionKind::kDirect);
+  CHECK(ok.value().arr_connection == bf::ConnectionKind::kDirect);
+
+  // No connector between fixes, or between an airport and its fix, is rejected.
+  CHECK_FALSE(db->ParseRoute("KMCI DCT MCI SLN DCT KSLN"));  // MCI SLN: no connector
+  CHECK_FALSE(db->ParseRoute("KMCI MCI J24 SLN KSLN"));      // airports have no connector
+  CHECK_FALSE(db->ParseRoute("MCI J24 SLN"));                // not bracketed by airports
+}
+
+TEST_CASE("real data: ParseRoute round-trips a DCT-to-airport tail (#26/#4)", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // A no-STAR FindRoutes route ends "... FIX DCT ARR"; feeding it back must
+  // reproduce the string. KMCI->KSLN selects a SID but no STAR (DCT arrival).
+  bf::Result<std::vector<bf::Route>> routed = db->FindRoutes(MakeRequest("KMCI", "KSLN"));
+  if (!routed || routed.value().empty()) {
+    SKIP("KMCI->KSLN not present in this AIRAC cycle");
+  }
+  const std::string route_str = routed.value().front().route_string;
+  if (route_str.find(" STAR ") != std::string::npos) {
+    SKIP("KMCI->KSLN selected a STAR this cycle; DCT-tail path not exercised");
+  }
+  bf::Result<bf::Route> parsed = db->ParseRoute(route_str);
+  REQUIRE(parsed);
+  CHECK(parsed.value().route_string == route_str);
+  CHECK(parsed.value().arr_connection == bf::ConnectionKind::kDirect);
 }
 
 // Connection model (procedure_connector.cc): a procedure is joined only at its

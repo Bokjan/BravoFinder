@@ -88,7 +88,7 @@ TEST_CASE("http handlers: elapsed_ms is set on success, zero on error", "[integr
   CHECK(routes.elapsed_ms > 0);
   CHECK(routes.elapsed_ms < 10000);
   const bf::service::HandlerResult parsed =
-      Run("parse_route", R"({"route":"KJFK DEEZZ5 CANDR"})", *db);
+      Run("parse_route", R"({"route":"KJFK DEEZZ5 CANDR DCT KLAX"})", *db);
   REQUIRE(parsed.status == 200);
   CHECK(parsed.elapsed_ms < 10000);
   const bf::service::HandlerResult lookup = Run("lookup_airports", R"({"ids":["KJFK"]})", *db);
@@ -139,7 +139,7 @@ TEST_CASE("http handlers: parse_route status mapping", "[integration][http]") {
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
-  CHECK(Run("parse_route", R"({"route":"KJFK DEEZZ5 CANDR"})", *db).status == 200);
+  CHECK(Run("parse_route", R"({"route":"KJFK DEEZZ5 CANDR DCT KLAX"})", *db).status == 200);
   CHECK(Run("parse_route", R"({})", *db).status == 400);
   // A bad token is a semantic failure (422), not a bad request.
   CHECK(Run("parse_route", R"({"route":"KJFK ZZ_NOPE9 KLAX"})", *db).status == 422);

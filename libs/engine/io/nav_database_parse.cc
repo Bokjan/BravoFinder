@@ -57,6 +57,33 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   if (tokens.empty()) {
     return Result<Route>::Err(Error(ErrorCode::kRouteParseError, "empty route string"));
   }
+  // A filed route is bracketed by airports: departure ICAO first, arrival last.
+  if (builder_->VertexByAirport(tokens.front()) < 0) {
+    return Result<Route>::Err(
+        Error(ErrorCode::kRouteParseError,
+              "route must start with a departure airport ICAO (first token '" + tokens.front() +
+                  "' is not a known airport)"));
+  }
+  if (tokens.size() < 2) {
+    return Result<Route>::Err(
+        Error(ErrorCode::kRouteParseError,
+              "route has only a departure airport; expected an arrival airport and a connector"));
+  }
+  if (builder_->VertexByAirport(tokens.back()) < 0) {
+    return Result<Route>::Err(Error(ErrorCode::kRouteParseError,
+                                    "route must end with an arrival airport ICAO (last token '" +
+                                        tokens.back() + "' is not a known airport)"));
+  }
+  if (tokens.size() == 2) {
+    // "DEP ARR": two airports with nothing between them. Per the filed-plan
+    // contract every adjacent pair needs an explicit connector, so the only
+    // no-fix shape is "DEP DCT ARR". Report the missing connector rather than
+    // letting the enroute loop mistake the arrival for a bare waypoint.
+    return Result<Route>::Err(
+        Error(ErrorCode::kRouteParseError, "airport pair '" + tokens.front() + " " + tokens.back() +
+                                               "' has no connector (expected '" + tokens.front() +
+                                               " DCT " + tokens.back() + "')"));
+  }
   const NavGraph& graph = builder_->graph();
 
   // Resolve a bare waypoint ident (or IDENT/REGION) to the match nearest a
@@ -172,10 +199,18 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
 
   // --- Optional trailing arrival airport. ---
   std::string arr_airport;
+  bool arr_explicit = false;  // a STAR or explicit "DCT" precedes the airport
   size_t end = tokens.size();
   if (end > i + 1 && builder_->VertexByAirport(tokens.back()) >= 0) {
     arr_airport = tokens.back();
     end = tokens.size() - 1;
+    // The airport-append step below emits the final leg, so a trailing "DCT
+    // AIRPORT" is redundant -- consume it. Guard end > i + 1 leaves the "DEP
+    // DCT ARR" pure-direct shortcut its DCT.
+    if (end > i + 1 && tokens[end - 1] == "DCT") {
+      --end;
+      arr_explicit = true;
+    }
   }
 
   // Reference coordinate for disambiguation: the departure airport if present,
@@ -221,6 +256,15 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     dep_via_sid = true;
     ++i;
   }
+  // The airport-prepend step below emits the first leg, so a leading "AIRPORT
+  // DCT" is redundant -- consume it. dep_explicit tracks that a SID or DCT
+  // connects the airport to the first fix. Guard i + 1 < end leaves the "DEP
+  // DCT ARR" pure-direct shortcut its DCT.
+  bool dep_explicit = dep_via_sid;
+  if (!dep_airport.empty() && !dep_via_sid && i < end && tokens[i] == "DCT" && i + 1 < end) {
+    ++i;
+    dep_explicit = true;
+  }
   std::string star_name;
   bool arr_via_star = false;
   if (end > i && !arr_airport.empty() &&
@@ -231,6 +275,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     }
     arr_via_star = true;
     --end;
+    arr_explicit = true;
   }
 
   // Pure direct airport-to-airport link: "DEP DCT ARR" with no enroute fix -- the
@@ -330,11 +375,11 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
       } else if (is_airway) {
         pending_connector = tok;
       } else {
-        // Two fixes in a row with no connector: treat as an implicit DCT so
-        // "FIX FIX" is accepted (common in filed plans), then re-handle this
-        // token as a fix.
-        pending_connector = "DCT";
-        --i;  // reprocess tok as a fix on the next iteration
+        // No connector between two fixes: ICAO requires one between every pair
+        // of waypoints. Reject rather than synthesize an implicit DCT.
+        return Result<Route>::Err(Error(
+            ErrorCode::kRouteParseError,
+            "two consecutive fixes '" + tok + "' with no connector (expected DCT or airway)"));
       }
       expect_fix = true;
     }
@@ -350,6 +395,23 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   if (!pending_connector.empty()) {
     return Result<Route>::Err(Error(ErrorCode::kRouteParseError,
                                     "route ends with '" + pending_connector + "' but no fix"));
+  }
+
+  // Every airport<->fix boundary needs an explicit connector. The "DEP DCT ARR"
+  // shortcut returns before here, so any route with a fix requires both ends
+  // explicit; the append step must not synthesize a DCT leg for a bare "AIRPORT
+  // FIX" or "FIX AIRPORT".
+  if (!dep_airport.empty() && !dep_explicit) {
+    return Result<Route>::Err(
+        Error(ErrorCode::kRouteParseError,
+              "departure airport '" + dep_airport +
+                  "' has no connector to the first fix (expected DCT or SID)"));
+  }
+  if (!arr_airport.empty() && !arr_explicit) {
+    return Result<Route>::Err(
+        Error(ErrorCode::kRouteParseError,
+              "arrival airport '" + arr_airport +
+                  "' has no connector to the last fix (expected DCT or STAR)"));
   }
 
   // --- Prepend the departure airport / SID and append the arrival / STAR. ---
