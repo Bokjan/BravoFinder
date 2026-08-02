@@ -50,8 +50,15 @@ class CifpArchive {
  private:
   friend class CifpCodec;
 
+  // One airport's segment location + integrity check, looked up by ICAO.
+  struct SegmentLoc {
+    uint64_t abs_off;  // absolute file offset of the segment body
+    uint32_t len;      // segment body length in bytes
+    uint32_t crc;      // CRC-32C of the segment body (0 for an empty segment)
+  };
+
   PreadFile file_;  // shared read-only handle on the unified .bfdb
-  std::unordered_map<std::string, std::pair<uint64_t, uint32_t>> index_;  // icao -> (abs off, len)
+  std::unordered_map<std::string, SegmentLoc> index_;  // icao -> segment location + crc
   std::vector<uint8_t> pool_;  // owned copy of the container's global string pool blob
 };
 
@@ -64,8 +71,9 @@ class CifpArchive {
 // Section body layout (all string refs point into the container's global pool):
 //   airport_count : U32
 //   directory     : airport_count * (icao_off U32, icao_len U32,
-//                                     seg_offset U64, seg_len U32)
+//                                     seg_offset U64, seg_len U32, seg_crc U32)
 //                   seg_offset is RELATIVE to the CIFP section start.
+//                   seg_crc is the CRC-32C of that segment's body bytes.
 //   segments      : each a bare body (no per-segment pool); refs into global pool
 class CifpCodec {
  public:
@@ -77,12 +85,23 @@ class CifpCodec {
                                  ByteWriter& w, StringPool& pool);
 
   // Open the CIFP section of the unified file at `path` into a CifpArchive: read
-  // the directory (bounded by the section), resolve ICAO codes against the
-  // global pool blob, and hold a pread handle for lazy segment fetches. Takes an
-  // owned copy of the global pool blob (needed by Fetch). `section_offset` /
-  // `section_length` locate the CIFP section within the file.
+  // the directory (bounded by the section), verify the directory prefix against
+  // `section_crc` (the CRC stored in the section-table row, covering airport_count
+  // + directory rows -- the lazy segments carry their own per-segment CRC and are
+  // not covered here), resolve ICAO codes against the global pool blob, and hold
+  // a pread handle for lazy segment fetches. Takes an owned copy of the global
+  // pool blob (needed by Fetch). `section_offset` / `section_length` locate the
+  // CIFP section within the file.
   static Result<CifpArchive> OpenSection(const std::string& path, uint64_t section_offset,
-                                         uint64_t section_length, std::vector<uint8_t> pool_blob);
+                                         uint64_t section_length, uint32_t section_crc,
+                                         std::vector<uint8_t> pool_blob);
+
+  // Bytes a section-table CRC covers for the CIFP section: the airport_count U32
+  // plus the directory rows. The per-airport segments are NOT covered here -- they
+  // are lazy and carry their own CRC in their directory row, so a section-level
+  // CRC over the whole body would force reading every segment at Open, defeating
+  // lazy fetch. Used by the container to compute the directory-prefix CRC at Build.
+  static size_t DirectoryPrefixLen(uint32_t airport_count);
 };
 
 }  // namespace bf

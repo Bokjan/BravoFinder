@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -74,6 +75,69 @@ bf::NavDetailArchive MakeDetail() {
   nav.range_nm = 130.0;
   data.navaid_details.push_back(nav);
   return bf::NavDetailArchive::FromData(data);
+}
+
+// Locations of each .bfdb region, parsed from a built file so a CRC test can
+// flip a byte inside a specific region. Mirrors the container's own header/table
+// parse (unified_cache.cc::Open) just enough to locate the regions; if the
+// container layout changes, this parse changes with it.
+struct RegionLocs {
+  uint64_t pool_off = 0, pool_len = 0;
+  uint64_t graph_off = 0, graph_len = 0;
+  uint64_t detail_off = 0, detail_len = 0;
+  uint64_t cifp_off = 0, cifp_len = 0;
+};
+RegionLocs ReadRegionLocs(const std::vector<uint8_t>& b) {
+  size_t pos = 0;
+  auto u32 = [&]() {
+    uint32_t v = static_cast<uint32_t>(b[pos]) | (static_cast<uint32_t>(b[pos + 1]) << 8) |
+                 (static_cast<uint32_t>(b[pos + 2]) << 16) |
+                 (static_cast<uint32_t>(b[pos + 3]) << 24);
+    pos += 4;
+    return v;
+  };
+  auto u64 = [&]() {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) {
+      v |= static_cast<uint64_t>(b[pos + i]) << (8 * i);
+    }
+    pos += 8;
+    return v;
+  };
+  auto skip_str = [&]() {
+    const uint32_t len = u32();
+    pos += len;
+  };
+  pos += 4;  // magic
+  u32();     // format_version
+  u32();     // section_count
+  u32();     // cycle
+  skip_str();
+  skip_str();
+  skip_str();  // provenance
+  RegionLocs locs;
+  locs.pool_len = u32();
+  u32();  // pool_crc
+  // Pool follows the 3-row section table (each row: type U32 + crc U32 + off U64
+  // + len U64 = 24 bytes).
+  locs.pool_off = pos + 3 * 24;
+  for (int i = 0; i < 3; ++i) {
+    const uint32_t type = u32();
+    u32();  // crc
+    const uint64_t off = u64();
+    const uint64_t len = u64();
+    if (type == 1) {
+      locs.graph_off = off;
+      locs.graph_len = len;
+    } else if (type == 2) {
+      locs.cifp_off = off;
+      locs.cifp_len = len;
+    } else if (type == 3) {
+      locs.detail_off = off;
+      locs.detail_len = len;
+    }
+  }
+  return locs;
 }
 
 }  // namespace
@@ -225,4 +289,70 @@ TEST_CASE("unified: a corrupt or missing file is rejected cleanly", "[unit][unif
     CHECK(r.error().code == bf::ErrorCode::kFormatMismatch);
     std::remove(path.c_str());
   }
+}
+
+TEST_CASE("unified: CRC-32C rejects a bit-flipped region", "[unit][unified]") {
+  // Build a full file (graph + cifp + detail), then flip one byte in each region
+  // in turn and assert Open fails with kCacheCorrupt. Every region carries its
+  // own CRC-32C: the pool, each section body (graph/detail full body, CIFP
+  // directory prefix), and each CIFP segment. A single-bit flip inside a region
+  // breaks only that region's CRC, which Open (or Fetch, for a lazy segment)
+  // must catch -- the field-level decode fuses cannot, since the flipped value
+  // stays in range / enum-valid / pool-resolvable.
+  const std::string path = TempBfdb("crc");
+  const bf::GraphSnapshot graph = MakeGraph();
+  const std::vector<std::pair<std::string, bf::CifpData>> cifp = {{"KTST", MakeCifp()}};
+  const bf::NavDetailArchive detail = MakeDetail();
+  bf::UnifiedCache::BuildInput in;
+  in.graph = &graph;
+  in.cifp = &cifp;
+  in.detail = &detail;
+  in.header.cycle = 2601;
+  REQUIRE(bf::UnifiedCache::Build(path, in));
+
+  auto read_file = [](const std::string& p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), {});
+  };
+  auto write_file = [](const std::string& p, const std::vector<uint8_t>& b) {
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    f.write(reinterpret_cast<const char*>(b.data()), static_cast<std::streamsize>(b.size()));
+  };
+
+  const std::vector<uint8_t> pristine = read_file(path);
+  REQUIRE(bf::UnifiedCache::Open(path));  // control: clean file opens
+
+  const RegionLocs locs = ReadRegionLocs(pristine);
+  REQUIRE(locs.pool_len > 0);
+  REQUIRE(locs.graph_len > 0);
+  REQUIRE(locs.detail_len > 0);
+  REQUIRE(locs.cifp_len > 0);
+
+  // Flip one byte in each region Open checks at load time; each must reject with
+  // kCacheCorrupt. Open checks pool -> graph -> detail -> CIFP directory in order,
+  // so a flip in any one region fails at that region's CRC.
+  for (uint64_t off : {locs.pool_off, locs.graph_off, locs.detail_off, locs.cifp_off}) {
+    std::vector<uint8_t> b = pristine;
+    b[off] ^= 0x01;
+    write_file(path, b);
+    bf::Result<bf::UnifiedData> r = bf::UnifiedCache::Open(path);
+    CHECK_FALSE(r);
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
+  }
+
+  // A CIFP segment is lazy: flipping a byte in its body does NOT fail Open (the
+  // directory prefix CRC is intact), but Fetch rejects the one corrupt segment.
+  {
+    std::vector<uint8_t> b = pristine;
+    const uint64_t seg_body_off = locs.cifp_off + 4 + 24;  // past count + one dir row
+    b[seg_body_off] ^= 0x01;
+    write_file(path, b);
+    bf::Result<bf::UnifiedData> r = bf::UnifiedCache::Open(path);
+    REQUIRE(r);  // directory CRC passes; segments are not read at Open
+    bf::UnifiedData& u = r.value();
+    REQUIRE(u.cifp.has_value());
+    CHECK_FALSE(u.cifp->Fetch("KTST").has_value());
+  }
+
+  std::remove(path.c_str());
 }

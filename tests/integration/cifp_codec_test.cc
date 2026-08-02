@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -16,6 +17,7 @@
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "io/cache/byte_io.h"
+#include "io/cache/crc32c.h"
 #include "io/cache/unified_cache.h"
 #include "io/loaders/xplane12/cifp_parser.h"
 #include "io/nav_database.h"
@@ -237,10 +239,13 @@ TEST_CASE("cifp section: concurrent fetches on one archive are race-free", "[int
   std::remove(path.c_str());
 }
 
-TEST_CASE("cifp codec: a byte-corrupted procedure type is rejected", "[unit][cifp]") {
+TEST_CASE("cifp codec: a byte-corrupted segment is rejected by its CRC", "[unit][cifp]") {
   // One airport, one SID with one leg -- minimal valid CifpData, no real data
-  // needed. Decode must reject an out-of-range ProcedureType byte (mirrors
-  // graph_codec's enum guards) rather than reinterpreting it into a switch.
+  // needed. A bit flip inside a segment body can land on a value the decode fuses
+  // still accept (a valid enum, an in-range distance); the per-segment CRC-32C
+  // stored in the directory row is the fuse that catches it. The enum guards in
+  // DeserializeSegment remain as a write-side-bug backstop, but a black-box Fetch
+  // cannot reach them now -- CRC rejects a corrupted body first.
   bf::CifpData data;
   bf::Procedure proc;
   proc.type = bf::ProcedureType::kSid;
@@ -262,31 +267,38 @@ TEST_CASE("cifp codec: a byte-corrupted procedure type is rejected", "[unit][cif
   REQUIRE(bf::CifpCodec::Encode(procs, w, pool));
 
   // Section: airport_count U32 (4) + 1 directory entry (icao_off U32, icao_len
-  // U32, seg_offset U64, seg_len U32 = 20) + segment. The segment begins with
-  // proc_count U32 (4); the first procedure header's first field is type U8.
-  constexpr size_t kFirstProcTypeOffset = 4 + 20 + 4;
+  // U32, seg_offset U64, seg_len U32, seg_crc U32 = 24) + segment. The segment
+  // begins with proc_count U32 (4); the first procedure header's first field is
+  // type U8. The directory prefix (count + one row) is what the section-table
+  // CRC covers.
+  constexpr size_t kDirEntrySize = 24;
+  constexpr size_t kFirstProcTypeOffset = 4 + kDirEntrySize + 4;
   REQUIRE(body.size() > kFirstProcTypeOffset);
   std::vector<uint8_t> pool_blob(pool.blob().begin(), pool.blob().end());
+  const uint32_t section_crc = bf::Crc32C::Compute(
+      std::span<const uint8_t>(body).subspan(0, bf::CifpCodec::DirectoryPrefixLen(1)));
 
   auto write_body = [&](const std::string& p) {
     std::ofstream f(p, std::ios::binary);
     f.write(reinterpret_cast<const char*>(body.data()), static_cast<std::streamsize>(body.size()));
   };
 
-  // Control: the valid encoding fetches back.
+  // Control: the valid encoding fetches back (directory CRC + segment CRC pass).
   const std::string ok_path = TempPath("ctrl");
   write_body(ok_path);
   bf::Result<bf::CifpArchive> ok_arch =
-      bf::CifpCodec::OpenSection(ok_path, 0, body.size(), pool_blob);
+      bf::CifpCodec::OpenSection(ok_path, 0, body.size(), section_crc, pool_blob);
   REQUIRE(ok_arch);
   REQUIRE(ok_arch.value().Fetch("KTTT").has_value());
 
-  // Corrupt the first procedure's type byte (> ProcedureType::kApproach = 2).
-  body[kFirstProcTypeOffset] = 0xFF;
+  // Flip a byte inside the segment body. The directory prefix is untouched, so
+  // OpenSection still passes; the segment's own CRC now mismatches and Fetch
+  // rejects it.
+  body[kFirstProcTypeOffset] ^= 0x01;
   const std::string bad_path = TempPath("bad");
   write_body(bad_path);
   bf::Result<bf::CifpArchive> bad_arch =
-      bf::CifpCodec::OpenSection(bad_path, 0, body.size(), pool_blob);
+      bf::CifpCodec::OpenSection(bad_path, 0, body.size(), section_crc, pool_blob);
   REQUIRE(bad_arch);
   CHECK_FALSE(bad_arch.value().Fetch("KTTT").has_value());
   std::remove(ok_path.c_str());

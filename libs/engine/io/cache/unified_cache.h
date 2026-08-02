@@ -45,15 +45,24 @@ struct UnifiedData {
 //
 // On-disk layout:
 //   [file header]  magic "BFDB", format_version, section_count, cycle,
-//                  program_version, source_loader, data_dir, pool_len
-//   [section table]  section_count * (type U32, offset U64, length U64);
-//                    offset/length == 0 means the section is absent
-//   [global string pool]  pool_len bytes, shared by all sections
+//                  program_version, source_loader, data_dir, pool_len, pool_crc
+//   [section table]  section_count * (type U32, crc U32, offset U64, length U64);
+//                    offset/length == 0 (and crc == 0) means the section is absent.
+//                    crc covers the section body bytes Open reads: the full body
+//                    for graph/detail, and the directory prefix (count + directory
+//                    rows) for CIFP -- CIFP segments are lazy and carry their own
+//                    crc in their directory row. Field order is alignment-driven:
+//                    crc fills the 4-byte gap after type so offset/length stay
+//                    8-aligned with no padding.
+//   [global string pool]  pool_len bytes, shared by all sections; pool_crc covers it
 //   [graph section] [cifp section] [detail section]  in section-table order
 //
-// The pool precedes the section bodies so a reader has it in memory before
-// decoding any section, and CIFP on-demand can skip straight to fetching
-// segments after reading the (small) directory.
+// CRC-32C (Castagnoli) guards each region against silent media corruption -- a
+// bit flip landing on another valid value that the field-level decode fuses
+// cannot catch (a distance 10.0 -> 9.99 stays in range, enum stays valid, pool
+// ref still resolves). The pool precedes the section bodies so a reader has it
+// in memory before decoding any section, and CIFP on-demand can skip straight to
+// fetching segments after reading the (small) directory.
 class UnifiedCache {
  public:
   // The single on-disk format version for the whole container. Bump whenever ANY
@@ -63,7 +72,7 @@ class UnifiedCache {
   // wrong files, so that version is retired to force a rebuild (see CLAUDE.md,
   // "Protective (poison) format_version bump"). The reason for each bump lives in
   // the commit history, not in a comment here.
-  static constexpr uint32_t kFormatVersion = 15;
+  static constexpr uint32_t kFormatVersion = 16;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

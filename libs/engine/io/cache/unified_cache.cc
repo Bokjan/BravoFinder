@@ -10,6 +10,7 @@
 
 #include "io/cache/byte_io.h"
 #include "io/cache/cifp_codec.h"
+#include "io/cache/crc32c.h"
 #include "io/cache/graph_codec.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/nav_detail_codec.h"
@@ -28,7 +29,7 @@ constexpr uint32_t kSectionDetail = 3;
 // Fixed section count: graph + cifp + detail. Absent sections are written with
 // offset == length == 0 rather than dropped, so the table is a fixed size.
 constexpr uint32_t kSectionCount = 3;
-constexpr size_t kSectionRowSize = 4 + 8 + 8;  // type U32 + offset U64 + length U64
+constexpr size_t kSectionRowSize = 4 + 8 + 8 + 4;  // type U32 + crc U32 + offset U64 + length U64
 
 // A generous bound on the header prefix (magic + fixed U32s + three inline
 // provenance strings). Real provenance strings are a few dozen bytes and a data
@@ -74,12 +75,14 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
 
   std::vector<uint8_t> cifp_body;
   const bool has_cifp = input.cifp != nullptr;
+  uint32_t cifp_airport_count = 0;
   if (has_cifp) {
     ByteWriter cw(cifp_body);
     Result<uint32_t> enc = CifpCodec::Encode(*input.cifp, cw, pool);
     if (!enc) {
       return Result<void>::Err(std::move(enc).error());
     }
+    cifp_airport_count = enc.value();
   }
 
   std::vector<uint8_t> detail_body;
@@ -119,6 +122,12 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   hw.Str(input.header.source_loader);
   hw.Str(input.header.data_dir);
   hw.U32(static_cast<uint32_t>(pool_blob.size()));
+  // pool_crc guards the shared string pool -- every section's string refs
+  // resolve into it, so a pool bit-flip silently corrupts text across all
+  // sections while each section's own CRC (covering only its on-disk off/len
+  // refs, not the pool text) stays valid. The pool is read once at Open, so a
+  // single U32 here closes the largest hole in section-level CRC coverage.
+  hw.U32(Crc32C::Compute(pool_blob));
   // A provenance string over 4 GiB cannot be length-prefixed by a U32; Str()
   // would have set the writer failed without writing. Fail through Result rather
   // than computing section offsets from a desynchronized header buffer.
@@ -139,15 +148,28 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   cursor += cifp_body.size();
   const uint64_t detail_off = has_detail ? cursor : 0;
 
+  // Section CRCs. graph/detail cover their full body (eagerly read at Open);
+  // CIFP covers only its directory prefix (count + directory rows) -- segments
+  // are lazy and carry their own CRC in their directory row, so a section-level
+  // CRC over the whole body would force reading every segment at Open.
+  const uint32_t graph_crc = Crc32C::Compute(graph_body);
+  const uint32_t cifp_crc = has_cifp ? Crc32C::Compute(std::span<const uint8_t>(cifp_body).subspan(
+                                           0, CifpCodec::DirectoryPrefixLen(cifp_airport_count)))
+                                     : 0;
+  const uint32_t detail_crc = has_detail ? Crc32C::Compute(detail_body) : 0;
+
   std::vector<uint8_t> table;
   ByteWriter tw(table);
   tw.U32(kSectionGraph);
+  tw.U32(graph_crc);
   tw.U64(graph_off);
   tw.U64(graph_body.size());
   tw.U32(kSectionCifp);
+  tw.U32(cifp_crc);
   tw.U64(cifp_off);
   tw.U64(has_cifp ? cifp_body.size() : 0);
   tw.U32(kSectionDetail);
+  tw.U32(detail_crc);
   tw.U64(detail_off);
   tw.U64(has_detail ? detail_body.size() : 0);
 
@@ -297,6 +319,10 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   if (!readU32(pool_len)) {
     return bad("corrupt .bfdb header");
   }
+  uint32_t pool_crc = 0;
+  if (!readU32(pool_crc)) {
+    return bad("corrupt .bfdb header");
+  }
   // Bound by the bytes remaining after the cursor, not the whole file (the pool
   // and every section body still lie ahead, so pool_len can never exceed this).
   const std::streamoff pool_remaining = file_size - static_cast<std::streamoff>(f.tellg());
@@ -308,11 +334,13 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   // file bounds now, so the individual body reads below can trust them.
   struct Row {
     uint32_t type;
+    uint32_t crc;  // placed second so off/len stay 8-aligned (no padding)
     uint64_t off, len;
   };
   Row rows[kSectionCount];
   for (uint32_t i = 0; i < section_count; ++i) {
-    if (!readU32(rows[i].type) || !readU64(rows[i].off) || !readU64(rows[i].len)) {
+    if (!readU32(rows[i].type) || !readU32(rows[i].crc) || !readU64(rows[i].off) ||
+        !readU64(rows[i].len)) {
       return bad("corrupt .bfdb section table");
     }
     // Absent section: off == len == 0. Present: must lie within the file.
@@ -328,6 +356,9 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   std::vector<uint8_t> pool;
   if (!readN(pool, pool_len)) {
     return bad("truncated .bfdb string pool");
+  }
+  if (Crc32C::Compute(pool) != pool_crc) {
+    return bad("corrupt .bfdb: string pool CRC mismatch");
   }
 
   // Map section types to rows.
@@ -370,6 +401,9 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     if (!readSection(*graph_row, body)) {
       return bad("truncated .bfdb graph section");
     }
+    if (Crc32C::Compute(body) != graph_row->crc) {
+      return bad("corrupt .bfdb: graph section CRC mismatch");
+    }
     Result<GraphSnapshot> g = GraphCodec::Decode(body, pool);
     if (!g) {
       return Result<UnifiedData>::Err(std::move(g).error());
@@ -382,6 +416,9 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     std::vector<uint8_t> body;
     if (!readSection(*detail_row, body)) {
       return bad("truncated .bfdb detail section");
+    }
+    if (Crc32C::Compute(body) != detail_row->crc) {
+      return bad("corrupt .bfdb: detail section CRC mismatch");
     }
     Result<NavDetailArchive> d = NavDetailCodec::Decode(body, pool);
     if (!d) {
@@ -396,7 +433,7 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   // This is the last use of `pool`, so move it into the archive.
   if (cifp_row != nullptr && !(cifp_row->off == 0 && cifp_row->len == 0)) {
     Result<CifpArchive> c =
-        CifpCodec::OpenSection(path, cifp_row->off, cifp_row->len, std::move(pool));
+        CifpCodec::OpenSection(path, cifp_row->off, cifp_row->len, cifp_row->crc, std::move(pool));
     if (!c) {
       return Result<UnifiedData>::Err(std::move(c).error());
     }

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "io/cache/byte_io.h"
+#include "io/cache/crc32c.h"
 
 namespace bf {
 
@@ -54,6 +55,7 @@ struct WireDirEntry {
   uint32_t icao_off, icao_len;
   uint64_t seg_offset;
   uint32_t seg_len;
+  uint32_t seg_crc;  // CRC-32C of this segment's body
 };
 #pragma pack(pop)
 
@@ -63,11 +65,11 @@ struct WireDirEntry {
 constexpr size_t kProcedureHeaderSize = sizeof(WireProcedureHeader);  // 33
 constexpr size_t kProcedureLegSize = sizeof(WireProcedureLeg);        // 47
 constexpr size_t kRunwaySize = sizeof(WireRunway);                    // 28
-constexpr size_t kDirEntrySize = sizeof(WireDirEntry);                // 20
+constexpr size_t kDirEntrySize = sizeof(WireDirEntry);                // 24
 static_assert(kProcedureHeaderSize == 33, "procedure-header wire layout drifted");
 static_assert(kProcedureLegSize == 47, "procedure-leg wire layout drifted");
 static_assert(kRunwaySize == 28, "runway wire layout drifted");
-static_assert(kDirEntrySize == 20, "directory-entry wire layout drifted");
+static_assert(kDirEntrySize == 24, "directory-entry wire layout drifted");
 
 // --- One airport's CIFP data, serialized as a bare segment body. ---
 //
@@ -267,6 +269,7 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
     sw.U32(icao_refs[i].second);
     sw.U64(running);  // relative to CIFP section start
     sw.U32(static_cast<uint32_t>(entries[i].body.size()));
+    sw.U32(Crc32C::Compute(entries[i].body));  // segment body integrity
     running += entries[i].body.size();
   }
   for (const Entry& e : entries) {
@@ -278,7 +281,7 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
 }
 
 Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t section_offset,
-                                           uint64_t section_length,
+                                           uint64_t section_length, uint32_t section_crc,
                                            std::vector<uint8_t> pool_blob) {
   auto bad = [&](const char* why) {
     return Result<CifpArchive>::Err(
@@ -318,6 +321,17 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
     return bad("truncated CIFP section directory");
   }
 
+  // Verify the directory prefix (airport_count + directory rows) against the
+  // section-table CRC. Segments are lazy and carry their own per-segment CRC, so
+  // this CRC covers only what Open reads now; a section-level CRC over the whole
+  // body would force reading every segment here, defeating lazy fetch. Incremental
+  // update folds count_buf and dir without copying them into one buffer.
+  uint32_t dir_crc = Crc32C::Update(0, count_buf);
+  dir_crc = Crc32C::Update(dir_crc, dir);
+  if (dir_crc != section_crc) {
+    return bad("corrupt CIFP section: directory CRC mismatch");
+  }
+
   ByteReader dr(dir);
   archive.index_.reserve(airport_count);
   for (uint32_t i = 0; i < airport_count; ++i) {
@@ -325,6 +339,7 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
     const uint32_t icao_len = dr.U32();
     const uint64_t seg_rel = dr.U64();
     const uint32_t seg_len = dr.U32();
+    const uint32_t seg_crc = dr.U32();
     if (!dr.ok()) {
       return bad("corrupt CIFP section directory");
     }
@@ -352,19 +367,25 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
     const uint64_t abs_off = section_offset + seg_rel;
     // ICAO bounds were validated above, so the slice is in range.
     std::string icao(reinterpret_cast<const char*>(archive.pool_.data() + icao_off), icao_len);
-    archive.index_.emplace(std::move(icao), std::make_pair(abs_off, seg_len));
+    archive.index_.emplace(std::move(icao), CifpArchive::SegmentLoc{abs_off, seg_len, seg_crc});
   }
   return Result<CifpArchive>::Ok(std::move(archive));
+}
+
+size_t CifpCodec::DirectoryPrefixLen(uint32_t airport_count) {
+  return 4 + static_cast<size_t>(airport_count) * kDirEntrySize;
 }
 
 std::unordered_map<std::string, CifpData> CifpArchive::FetchAll() const {
   std::unordered_map<std::string, CifpData> out;
   out.reserve(index_.size());
   for (const auto& entry : index_) {
-    const uint64_t offset = entry.second.first;
-    const uint32_t length = entry.second.second;
-    std::vector<uint8_t> bytes(length);
-    if (length > 0 && !file_.ReadAt(bytes, offset)) {
+    const SegmentLoc& loc = entry.second;
+    std::vector<uint8_t> bytes(loc.len);
+    if (loc.len > 0 && !file_.ReadAt(bytes, loc.abs_off)) {
+      continue;
+    }
+    if (Crc32C::Compute(bytes) != loc.crc) {
       continue;
     }
     std::optional<CifpData> data = DeserializeSegment(bytes, pool_);
@@ -380,13 +401,17 @@ std::optional<CifpData> CifpArchive::Fetch(const std::string& icao) const {
   if (it == index_.end()) {
     return std::nullopt;
   }
-  const uint64_t offset = it->second.first;
-  const uint32_t length = it->second.second;
+  const SegmentLoc& loc = it->second;
   // Positional read on the shared handle: pread/ReadFile take an explicit offset
   // and touch no shared cursor, so concurrent fetches for different airports are
   // race-free without a lock (thread-safety contract). Bounds were validated at OpenSection.
-  std::vector<uint8_t> bytes(length);
-  if (length > 0 && !file_.ReadAt(bytes, offset)) {
+  std::vector<uint8_t> bytes(loc.len);
+  if (loc.len > 0 && !file_.ReadAt(bytes, loc.abs_off)) {
+    return std::nullopt;
+  }
+  // Verify the segment body before deserializing -- a bit flip into another valid
+  // value silently corrupts a procedure/leg field that the decode fuses accept.
+  if (Crc32C::Compute(bytes) != loc.crc) {
     return std::nullopt;
   }
   return DeserializeSegment(bytes, pool_);

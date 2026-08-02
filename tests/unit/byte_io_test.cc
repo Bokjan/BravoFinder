@@ -3,8 +3,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
+
+#include "io/cache/crc32c.h"
 
 namespace {
 
@@ -51,6 +54,24 @@ TEST_CASE("ByteReader::Str: a length prefix longer than remaining bytes fails cl
   const std::string s = r.Str();
   CHECK_FALSE(r.ok());
   CHECK(s.empty());
+}
+
+TEST_CASE("Crc32C: Castagnoli check value and foldable Update", "[unit][byte_io]") {
+  // CRC-32C of the ASCII string "123456789" is 0xE3069283 -- the standard check
+  // value for the Castagnoli polynomial (0x1EDC6F41), pinning both the polynomial
+  // and the init/final XOR convention against an external reference.
+  auto span_of = [](const std::string& s) {
+    return std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+  };
+  CHECK(bf::Crc32C::Compute(span_of("123456789")) == 0xE3069283u);
+  // Empty input checksums to 0 (init 0, internal ^0xFFFFFFFF, final ^0xFFFFFFFF).
+  CHECK(bf::Crc32C::Compute({}) == 0u);
+  // Update folds non-contiguous spans into the same result as one Compute -- the
+  // property the CIFP directory-prefix CRC relies on (count + directory rows read
+  // separately, checksummed as one logical span).
+  uint32_t crc = bf::Crc32C::Compute(span_of("1234"));
+  crc = bf::Crc32C::Update(crc, span_of("56789"));
+  CHECK(crc == 0xE3069283u);
 }
 
 }  // namespace
