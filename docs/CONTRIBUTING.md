@@ -111,7 +111,19 @@ build: wire up Catch2 and CLI11 via FetchContent
 - All third-party dependencies use permissive licenses (see `THIRD_PARTY_LICENSES.md`) and are fetched at build time via FetchContent; **their source is not committed to this repository**.
 - **Navigation data compliance**: Navigraph / Jeppesen data is copyrighted and may not be redistributed. Real `.dat` / `.bfdb` data is **never committed** (blocked by `.gitignore`). Local real data lives in `navdata/` (ignored).
 
-## 5. Pre-PR Checklist
+## 5. AI-Assisted Development
+
+This project is developed with AI assistance as the default, not the exception. The recommended division of labor:
+
+- **Implementation**: use an AI coding agent (an LLM agent) to write the actual code. The project's `CLAUDE.md` records the hard conventions, invariants, and minefields an agent must follow when working in this repo.
+- **Research and design**: investigation and design of an implementation approach should, in principle, use a frontier model — e.g. GPT-5.6-Sol, Claude Opus 5, or an equivalent flagship. The upfront reasoning quality gates the rest of the work, so align on the approach before implementing.
+- **Pre-send review**: before opening a PR or filing an issue, have the change reviewed by **two different mid-tier models**. Disagreements between them surface blind spots a single reviewer misses; reconcile them before sending.
+
+These are recommendations about model selection, not a substitute for the conventions above — an AI agent still follows the commit, code-style, and license rules in §1, §2, and §4.
+
+---
+
+## 6. Pre-PR Checklist
 
 Run through this list before opening a PR. CI and the local hooks catch most of it, but checking locally first saves a review round-trip.
 

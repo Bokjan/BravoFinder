@@ -2,21 +2,15 @@
 
 [![CI](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml/badge.svg?branch=v3)](https://github.com/Bokjan/BravoFinder/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/tag/Bokjan/BravoFinder)](https://github.com/Bokjan/BravoFinder/releases) [![license](https://img.shields.io/badge/license-MIT%20%2F%20LGPL--3.0-blue)](LICENSE.md) ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![sanitizers](https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20TSan-red)
 
-A flight route finder written in modern C++ (v3).
+A realistic / compliant flight-route **engine library** (`libs/engine`) in modern C++20, with three front-ends built on it — a CLI, an MCP server, and a REST server.
 
 ## About
 
-BravoFinder builds a graph from navigation data (waypoints, navaids, airways, and SID/STAR/approach procedures) and finds routes between two airports. Unlike earlier versions, which computed a purely geographic shortest path, v3 is a **realistic / compliant route engine**: routes respect real-world constraints such as airway directionality, high/low airway levels, segment altitude bands, and terminal procedures.
+At its core, **BravoFinder is a library**: `libs/engine/` (namespace `bf`, CMake target `bf::bravofinder`) is a realistic / compliant flight-route engine with **no JSON or network dependency**. It parses navigation data into a directed graph and finds routes between two airports (or waypoints) that respect real-world constraints — airway directionality, high/low airway levels, segment altitude bands, and terminal procedures (SID/STAR/approach). Unlike earlier versions, which computed a purely geographic shortest path, v3 routes read like filed flight plans. The engine ships as a self-contained static library (`bf::bravofinder`) you can embed in any host application; the public entry point is `bf::NavDatabase` (`io/nav_database.h`).
 
 Navigation data is read through a **pluggable `Loader` interface** (`libs/engine/io/loaders/`) that abstracts the source format. Four loaders ship today: `xplane12` (the default — X-Plane 12 native `.dat`), `dfd1` / `dfd2` for the DFD SQLite databases shipped by RealTraffic / SimToolkitPro / PMDG MSFS and Inibuilds A350 respectively, and `fenix` for the Fenix A320 navdata SQLite database. Adding a format means adding a loader; the route engine is untouched. The selected loader is recorded as `source_loader` provenance in every `.bfdb` cache header.
 
-## Status
-
-The tool builds a directed graph honoring airway directionality and high/low levels, and finds routes between two airports (or waypoints) with A* and Yen K-shortest. Airports connect to the enroute network through their real SID/STAR procedures (parsed from ARINC 424 / CIFP), falling back to a direct link where no procedure data exists. For example, `KJFK KLAX` resolves to a filed-flight-plan-style route such as `KJFK SID TOWIN ... PGS STAR KLAX` of ~2160 NM (the literal `SID`/`STAR` connect the airports to the enroute network; the actual procedure names appear in the route's `sid`/`star` fields).
-
-A single loaded database is safe to query concurrently from multiple threads.
-
-The engine is exposed through three front-ends (see [Usage](#usage)): the `bf` CLI, an MCP server (`bf-mcp`) for LLM clients — over **stdio** (default) or **HTTP** (Streamable HTTP, `--transport http`) — and a REST+JSON server (`bf-http`) for network callers. They share one service layer (`libs/service/`, namespace `bf::service`); the two HTTP transports (`bf-http` REST and `bf-mcp` HTTP) share one transport core (`libs/http_server/`, namespace `bf::http_server`).
+Three front-ends are built on the engine and ship in this repo — the `bf` CLI, an MCP server (`bf-mcp`) for LLM clients, and a REST+JSON server (`bf-http`) — sharing one service layer (`libs/service/`); see [Usage](#usage).
 
 ## Building
 
@@ -49,7 +43,7 @@ A `tsan` preset (ThreadSanitizer) is available to verify concurrency safety:
 cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan
 ```
 
-The engine also ships as a self-contained static library `bf::bravofinder` — consume it from a release SDK archive via `find_package(bravofinder)`, or via `FetchContent`; the public entry point is `bf::NavDatabase` (`io/nav_database.h`).
+A prebuilt SDK archive is published with each release — consume the `bf::bravofinder` target via `find_package(bravofinder)` or `FetchContent`.
 
 ## Usage
 
