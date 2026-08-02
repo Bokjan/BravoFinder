@@ -61,31 +61,8 @@ class UnifiedCache {
   // rejected and the user re-runs `bf build`. Some bumps are protective (poison):
   // no layout change, but an older version produced byte-valid yet semantically
   // wrong files, so that version is retired to force a rebuild (see CLAUDE.md,
-  // "Protective (poison) format_version bump"). One line per version below.
-  //
-  // v4: unified container (graph + cifp + detail in one file) with a global string
-  //     pool, superseding the separate graph/cifp/detail caches.
-  // v5: edge 'flags' bitfield replaced by a single 'level' byte holding AirwayLevel.
-  // v6: CIFP ProcedureLeg gained rnp_centinm / turn_dir / speed_limit_kt (+5 bytes/leg).
-  // v7: vertex flags byte gained has_inbound; v6 decodes it all-false and silently
-  //     strips STAR entry gates reachable only via a forward-only airway.
-  // v8: DFD read airway direction/level/altitude off the wrong row, shifting every
-  //     restriction one leg forward -- poison (DFD only).
-  // v9: DFD chained same-route_identifier sequences across disjoint physical
-  //     airways, creating phantom cross-ocean legs -- poison after breaking the
-  //     chain at the ARINC End-of-Airway marker (DFD only).
-  // v10: DFD keyed terminal waypoints by region_code (airport id) instead of
-  //      icao_code -- poison (DFD only).
-  // v11: dfd1 procedure loader skipped the last airport of each SID/STAR/IAP table
-  //      -- poison (dfd1 only).
-  // v12: Fenix MORA loader dropped the south/west grid (wrong hemisphere remap) and
-  //      overflowed values 100x -- poison (Fenix only).
-  // v13: nav_detail hold turn_dir stored lossless full char instead of 1-bit
-  //      'L'/'R' -- consistency-only, free pre-release.
-  // v14: Fenix holding loader swapped region_code/icao_code columns -- poison
-  //      (Fenix only; DFD/X-Plane unaffected).
-  // v15: Fenix procedure loader filled runway with the Transition value instead of
-  //      gating on the RW prefix -- poison (Fenix only; DFD/X-Plane unaffected).
+  // "Protective (poison) format_version bump"). The reason for each bump lives in
+  // the commit history, not in a comment here.
   static constexpr uint32_t kFormatVersion = 15;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section

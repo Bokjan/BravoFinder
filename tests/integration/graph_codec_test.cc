@@ -92,6 +92,154 @@ void EncodeSnapshot(const bf::GraphSnapshot& s, std::vector<uint8_t>* body,
   pool_blob->assign(blob.begin(), blob.end());
 }
 
+// A snapshot that exercises every on-disk field with non-default values: an
+// airport vertex (first_airport_vertex != V), a two-way CSR edge with non-zero
+// altitude band, a non-default MSA sector, and a non-zero MORA cell. The
+// per-field assertions in "every field survives the round-trip" prove each
+// field survives with the exact value Encode wrote -- catching an Encode/Decode
+// drift that leaves sizes and byte counts unchanged (the "same-width field
+// swap" family), which the Wire static_asserts, the trailing-bytes guard, and a
+// self-comparing round-trip all miss.
+bf::GraphSnapshot MakeFullFieldSnapshot() {
+  bf::GraphSnapshot s;
+  // 3 vertices; [2, V) is the airport region, so vertex 2 is an airport.
+  s.first_airport_vertex = 2;
+  s.coords = {bf::Coordinate{40.0, -73.0}, bf::Coordinate{34.0, -118.0},
+              bf::Coordinate{51.4700, -0.4543}};
+  // CSR: v0 -> v1 (airway 1) and v0 -> v2 (DCT), v1 has none, v2 has none.
+  s.offsets = {0, 2, 2, 2};
+  bf::GraphEdge e1;
+  e1.to = 1;
+  e1.distance_nm = 10.0f;
+  e1.airway_id = 1;
+  e1.base_fl = 8000;
+  e1.top_fl = 24000;
+  e1.level = bf::AirwayLevel::kHigh;
+  bf::GraphEdge e2;
+  e2.to = 2;
+  e2.distance_nm = 250.0f;
+  e2.airway_id = 0;  // DCT
+  e2.base_fl = 0;
+  e2.top_fl = 0;
+  e2.level = bf::AirwayLevel::kLow;
+  s.edges = {e1, e2};
+  s.has_outbound = {1, 0, 0};
+  s.has_inbound = {0, 1, 1};
+  s.idents = {bf::FixedIdent::FromParts("AAAAA", "K1"), bf::FixedIdent::FromParts("BBBBB", "K2"),
+              bf::FixedIdent::FromParts("EGLL", "EG")};
+  s.kinds = {bf::WaypointKind::kFix, bf::WaypointKind::kVor, bf::WaypointKind::kDme};
+  s.airway_names = {"DCT", "J80"};
+  // One airport elevation for vertex 2.
+  s.airport_elevations_ft = {83};
+  // A non-empty MSA sector: center fix + one arc, so center/arc fields round-trip.
+  bf::MsaSector msa;
+  msa.center = bf::Ident("LON", "EG");
+  msa.airport_icao = "EGLL";
+  bf::MsaArc arc;
+  arc.bearing_from = 90;
+  arc.alt_100ft = 25;
+  arc.radius_nm = 12;
+  msa.arcs = {arc};
+  s.msa = {msa};
+  // One non-zero MORA cell at (lat=40, lon=-73): 3500 FL.
+  s.mora.SetCell(40, -73, 3500);
+  return s;
+}
+
+// Semantic round-trip: Encode a known-value snapshot, decode it, and assert
+// every field against its known value -- not just structural equality. This is
+// what catches an Encode/Decode mismatch that preserves wire sizes and byte
+// counts (a same-width field swap or a wrong-type reinterpretation), which the
+// Wire static_asserts, the trailing-bytes guard, and a self-comparing round-trip
+// all fail to detect.
+TEST_CASE("graph codec: every field survives the round-trip with its exact value", "[unit][bfdb]") {
+  std::vector<uint8_t> body, pool;
+  EncodeSnapshot(MakeFullFieldSnapshot(), &body, &pool);
+  bf::Result<bf::GraphSnapshot> r = bf::GraphCodec::Decode(body, pool);
+  REQUIRE(r);
+  const bf::GraphSnapshot& d = r.value();
+
+  // Header ints: v, e, airway_count, msa_count, first_airport_vertex.
+  REQUIRE(d.coords.size() == 3);
+  REQUIRE(d.edges.size() == 2);
+  REQUIRE(d.airway_names.size() == 2);
+  REQUIRE(d.msa.size() == 1);
+  CHECK(d.first_airport_vertex == 2);
+
+  // Vertex records: coord + ident refs + flags + kind, one per vertex.
+  REQUIRE(d.coords.size() == 3);
+  CHECK(d.coords[0].latitude == 40.0);
+  CHECK(d.coords[0].longitude == -73.0);
+  CHECK(d.coords[1].latitude == 34.0);
+  CHECK(d.coords[1].longitude == -118.0);
+  CHECK(d.coords[2].latitude == 51.47);
+  CHECK(d.coords[2].longitude == -0.4543);
+  REQUIRE(d.idents.size() == 3);
+  CHECK(d.idents[0].IdentView() == "AAAAA");
+  CHECK(d.idents[0].Arinc424IcaoCodeView() == "K1");
+  CHECK(d.idents[1].IdentView() == "BBBBB");
+  CHECK(d.idents[1].Arinc424IcaoCodeView() == "K2");
+  CHECK(d.idents[2].IdentView() == "EGLL");
+  CHECK(d.idents[2].Arinc424IcaoCodeView() == "EG");
+  REQUIRE(d.has_outbound.size() == 3);
+  CHECK(d.has_outbound[0] == 1);
+  CHECK(d.has_outbound[1] == 0);
+  CHECK(d.has_outbound[2] == 0);
+  REQUIRE(d.has_inbound.size() == 3);
+  CHECK(d.has_inbound[0] == 0);
+  CHECK(d.has_inbound[1] == 1);
+  CHECK(d.has_inbound[2] == 1);
+  REQUIRE(d.kinds.size() == 3);
+  CHECK(d.kinds[0] == bf::WaypointKind::kFix);
+  CHECK(d.kinds[1] == bf::WaypointKind::kVor);
+  CHECK(d.kinds[2] == bf::WaypointKind::kDme);
+
+  // Airport records: one elevation per airport vertex, in vertex order.
+  REQUIRE(d.airport_elevations_ft.size() == 1);
+  CHECK(d.airport_elevations_ft[0] == 83);
+
+  // CSR offsets: exact values.
+  REQUIRE(d.offsets.size() == 4);
+  CHECK(d.offsets[0] == 0);
+  CHECK(d.offsets[1] == 2);
+  CHECK(d.offsets[2] == 2);
+  CHECK(d.offsets[3] == 2);
+
+  // Edges: every field, including the float (exact -- the cache is F32, so a
+  // round-trip must be bit-identical, not approximate).
+  REQUIRE(d.edges.size() == 2);
+  CHECK(d.edges[0].to == 1);
+  CHECK(d.edges[0].distance_nm == 10.0f);
+  CHECK(d.edges[0].airway_id == 1);
+  CHECK(d.edges[0].base_fl == 8000);
+  CHECK(d.edges[0].top_fl == 24000);
+  CHECK(d.edges[0].level == bf::AirwayLevel::kHigh);
+  CHECK(d.edges[1].to == 2);
+  CHECK(d.edges[1].distance_nm == 250.0f);
+  CHECK(d.edges[1].airway_id == 0);
+  CHECK(d.edges[1].base_fl == 0);
+  CHECK(d.edges[1].top_fl == 0);
+  CHECK(d.edges[1].level == bf::AirwayLevel::kLow);
+
+  // Airways: exact names.
+  CHECK(d.airway_names[0] == "DCT");
+  CHECK(d.airway_names[1] == "J80");
+
+  // MSA sectors: center ident/region, airport ICAO, arc fields.
+  REQUIRE(d.msa.size() == 1);
+  CHECK(d.msa[0].center.ident == "LON");
+  CHECK(d.msa[0].center.arinc424_icao_code == "EG");
+  CHECK(d.msa[0].airport_icao == "EGLL");
+  REQUIRE(d.msa[0].arcs.size() == 1);
+  CHECK(d.msa[0].arcs[0].bearing_from == 90);
+  CHECK(d.msa[0].arcs[0].alt_100ft == 25);
+  CHECK(d.msa[0].arcs[0].radius_nm == 12);
+
+  // MORA: the one populated cell must round-trip; the rest stay 0.
+  CHECK(d.mora.MoraAt(bf::Coordinate{40.0, -73.0}) == 3500);
+  CHECK(d.mora.MoraAt(bf::Coordinate{41.0, -74.0}) == 0);
+}
+
 }  // namespace
 
 TEST_CASE("graph codec: a corrupt snapshot is rejected on encode, a corrupt section on decode",
