@@ -193,4 +193,4 @@ curl -s localhost:8080/v1/cycles
 
 ## Concurrency and lifetime
 
-Each `NavDatabase` is read-only after open and safe for concurrent queries (contract B); the registry that opens cycles on demand is thread-safe. The server holds one long-lived instance and serves many concurrent connections — no restart is needed to switch cycles. Route computations run on the worker threadpool, so a slow query never blocks other connections.
+Each `NavDatabase` is read-only after open and safe for concurrent queries (thread-safety contract); the registry that opens cycles on demand is thread-safe. The server holds one long-lived instance and serves many concurrent connections — no restart is needed to switch cycles. Route computations run on the worker threadpool, so a slow query never blocks other connections.

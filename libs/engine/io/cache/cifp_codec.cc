@@ -384,7 +384,7 @@ std::optional<CifpData> CifpArchive::Fetch(const std::string& icao) const {
   const uint32_t length = it->second.second;
   // Positional read on the shared handle: pread/ReadFile take an explicit offset
   // and touch no shared cursor, so concurrent fetches for different airports are
-  // race-free without a lock (contract B). Bounds were validated at OpenSection.
+  // race-free without a lock (thread-safety contract). Bounds were validated at OpenSection.
   std::vector<uint8_t> bytes(length);
   if (length > 0 && !file_.ReadAt(bytes, offset)) {
     return std::nullopt;

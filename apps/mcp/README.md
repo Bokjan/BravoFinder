@@ -156,4 +156,4 @@ Takes no arguments. Returns an array of `{cycle}` for the caches the server can 
 
 ## Concurrency and lifetime
 
-Each `NavDatabase` is read-only after `OpenCached` and safe for concurrent queries (contract B). The registry that opens cycles on demand is likewise thread-safe: a mutex guards only the cache map, never the disk open, and opened databases have stable addresses. A client holds one long-lived server instance and calls `tools/call` repeatedly; no restart is needed to switch cycles.
+Each `NavDatabase` is read-only after `OpenCached` and safe for concurrent queries (thread-safety contract). The registry that opens cycles on demand is likewise thread-safe: a mutex guards only the cache map, never the disk open, and opened databases have stable addresses. A client holds one long-lived server instance and calls `tools/call` repeatedly; no restart is needed to switch cycles.

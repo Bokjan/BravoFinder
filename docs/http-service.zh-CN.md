@@ -7,7 +7,7 @@
 `bf-http` 是一个**内网航路查询服务**：上层业务（Go 网关）通过 HTTP+JSON 调用它，而不是把 C++ 库以 cgo/pybind 方式嵌进业务进程。理由：
 
 - 一次路由查询本身是 **~10ms(k=1) ~ 13–30ms(k=10)** 的纯计算（见 [性能测试](performance.zh-CN.md)）， 相比之下 JSON 序列化（µs 级）、localhost 往返（亚 ms）都低 1–3 个数量级——「为省编组开销选 in-process」不成立。
-- 数据模型天然「加载一次、服务多次」：`OpenCached(kEager)` 常驻后无锁并发（[线程安全契约 B](thread-safety.zh-CN.md)）。
+- 数据模型天然「加载一次、服务多次」：`OpenCached(kEager)` 常驻后无锁并发（[线程安全契约](thread-safety.zh-CN.md)）。
 - 进程隔离：C++ 崩溃不连坐 Go 网关，Go 保持 `CGO_ENABLED=0`。
 - 消费侧要强类型对象时，Go 的 `encoding/json` 反序列化即得——比 cgo 手写 C-struct 镜像省事得多。
 
@@ -36,7 +36,7 @@ libuv 内置线程池  ── registry.Get(cycle) → handler (10–30ms CPU)
 loop 线程：连接仍存活则写响应，否则丢弃结果
 ```
 
-**铁律：10–30ms 的路由计算绝不在 loop 线程上跑。** 用 `uv_queue_work(work, after_work)` offload 到线程池；worker 只碰 `registry`/`handler`/`args`/`result`，**绝不碰 libuv handle**（handle 非线程 安全）。`registry` 与各 `NavDatabase` 单实例跨所有线程共享，只读、并发安全（契约 B）。起步单 loop 即可扛高连接数（重计算已 offload）。
+**铁律：10–30ms 的路由计算绝不在 loop 线程上跑。** 用 `uv_queue_work(work, after_work)` offload 到线程池；worker 只碰 `registry`/`handler`/`args`/`result`，**绝不碰 libuv handle**（handle 非线程 安全）。`registry` 与各 `NavDatabase` 单实例跨所有线程共享，只读、并发安全（线程安全契约）。起步单 loop 即可扛高连接数（重计算已 offload）。
 
 ### 连接生命周期与存活守卫（头号并发陷阱）
 
@@ -89,7 +89,7 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
   - `GET /mcp`：开一条 SSE 长连接（`text/event-stream`，close-delimited 开放流），发一个 `: keepalive` 注释即占位。当前工具无 progress、无 server-push，此流零消费者，仅为将来通知预留 + 合成测试覆盖。
   - `DELETE /mcp`：无状态 → `200` ack。
 - **Session（无状态带 id）**：`initialize`（单个请求或 batch 内含一个）响应回一个随机 `Mcp-Session-Id` 头并协商到 2025-03-26；后续请求接受任意 session id 但**不跟踪**（Dispatcher 无 per-session 状态，每个请求独立）。
-- **SSE 写出能力**（加在 `libs/http_server/conn.cc`）：`WriteResponse` 支持自定义 `content_type` + 额外 header（POST→SSE 单事件用 `Content-Length` 缓冲）；`BeginStream`/`WriteEvent` 是 close-delimited 开放流（无 `Content-Length`、`Connection: keep-alive`），靠一个 `streaming_` 标志让写完成回调既不复位下一请求也不关连接，直到客户端断开 / idle 超时。**SSE 写出全在 loop 线程**，worker 只算不写。改这块并发面必过 `ctest --preset tsan`（契约 B）。
+- **SSE 写出能力**（加在 `libs/http_server/conn.cc`）：`WriteResponse` 支持自定义 `content_type` + 额外 header（POST→SSE 单事件用 `Content-Length` 缓冲）；`BeginStream`/`WriteEvent` 是 close-delimited 开放流（无 `Content-Length`、`Connection: keep-alive`），靠一个 `streaming_` 标志让写完成回调既不复位下一请求也不关连接，直到客户端断开 / idle 超时。**SSE 写出全在 loop 线程**，worker 只算不写。改这块并发面必过 `ctest --preset tsan`（线程安全契约）。
 
 端到端覆盖在 `tests/integration/mcp_http_test.cc`（真 loopback，用最小手造缓存，不依赖真实 navdata、不 SKIP）。
 

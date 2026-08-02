@@ -25,7 +25,7 @@ class StringPool;  // io/cache/byte_io.h
 // (~5 MB).
 //
 // Thread-safety: immutable after construction; all lookup methods are const and
-// share no mutable state, satisfying NavDatabase contract B.
+// share no mutable state, satisfying NavDatabase thread-safety contract.
 class NavDetailArchive {
  public:
   NavDetailArchive() = default;

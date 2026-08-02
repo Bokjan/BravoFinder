@@ -15,7 +15,7 @@ namespace bf::mcp {
 class StdioRunner {
  public:
   // Takes the registry to serve from. The registry must outlive the runner.
-  // Each database it holds is read-only per NavDatabase contract B.
+  // Each database it holds is read-only per NavDatabase thread-safety contract.
   explicit StdioRunner(bf::service::NavDatabaseRegistry& registry) : dispatcher_(registry) {}
 
   // Run the stdio request/response loop until stdin closes. Returns the process

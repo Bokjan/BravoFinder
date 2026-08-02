@@ -68,7 +68,7 @@ std::vector<MsaSector> NavDatabase::MsaForAirport(const std::string& icao) const
 }
 ```
 
-数据量小（每机场几个扇区、总量有限），线性扫足够，不值得再建索引。`MsaForAirport` 是 `const`、 无共享可变态，满足[契约 B](thread-safety.zh-CN.md)可并发查。
+数据量小（每机场几个扇区、总量有限），线性扫足够，不值得再建索引。`MsaForAirport` 是 `const`、 无共享可变态，满足[线程安全契约](thread-safety.zh-CN.md)可并发查。
 
 ## 4. MORA 怎么参与算路：一个硬过滤约束
 

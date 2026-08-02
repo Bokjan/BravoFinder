@@ -18,7 +18,7 @@
 - **[航路串压缩](route-string.zh-CN.md)** — 输出符合 ICAO filed-flight-plan 的压缩航路串： 并线航路（`V28-Y28`）的累积交集折叠，避开会造出假转接点的字符串相等陷阱。
 - **[Yen 的 Lawler 优化](yen-lawler-optimization.zh-CN.md)** — heuristic 记忆化 + Lawler， 把 K-shortest 提速约 2.5× 且结果一字不差；含非标准多源变体的正确性论证与差分对拍验证。
 - **[跨平台二进制缓存](binary-cache.zh-CN.md)** — 统一 `.bfdb`：为何显式定宽 小端而非 mmap、全局字符串池、容器/codec 分层、on-demand / eager 加载、损坏优雅报错。
-- **[线程安全契约 B](thread-safety.zh-CN.md)** — 一个只读实例多线程并发查询：双检锁、指针 跨 rehash 稳定、eager 冻结无锁读、tsan 验证。
+- **[线程安全契约](thread-safety.zh-CN.md)** — 一个只读实例多线程并发查询：双检锁、指针 跨 rehash 稳定、eager 冻结无锁读、tsan 验证。
 - **[领域建模与内存设计](domain-design.zh-CN.md)** — 值类型、自研 `Result<T,E>`、无 static/ 无裸 new 的设计宪法、数据驱动的紧凑内存表示（`SmallVec`→`FixedIdent`）；v2→v3 重写动机的直接体现。
 - **[HTTP 查询服务](http-service.zh-CN.md)** — `bf-http` REST 与 `bf-mcp --transport http`（Streamable HTTP）：为何服务化优于 in-process binding、复用中性 `bf::service` 与共享 `libs/http_server/` 传输核心、libuv + llhttp 手搓、offload 线程模型与连接存活守卫、HTTP 安全硬化、状态码错误模型、MCP `Dispatcher` 与 batch / session 语义。
 - **[性能测试](performance.zh-CN.md)** — 测试机配置、方法、启动 ~11×、优化分解表、内存与 缓存大小、可复现步骤。

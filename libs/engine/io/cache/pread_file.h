@@ -6,7 +6,7 @@
 // to fetch on-disk segments concurrently from multiple threads: pread (POSIX)
 // and ReadFile with an OVERLAPPED offset (Windows) both leave the handle's
 // position untouched, so parallel ReadAt calls on one PreadFile share no mutable
-// state and are race-free -- satisfying NavDatabase contract B without a lock.
+// state and are race-free -- satisfying NavDatabase thread-safety contract without a lock.
 //
 // Move-only: it owns the underlying descriptor/handle and closes it on
 // destruction. A default-constructed or moved-from instance is not is_open().

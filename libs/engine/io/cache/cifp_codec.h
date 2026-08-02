@@ -28,7 +28,7 @@ class StringPool;  // io/cache/byte_io.h
 // segment via a positional read (pread / ReadFile with an explicit offset) on a
 // shared read-only handle that keeps no mutable cursor, so it is safe to call
 // concurrently from multiple threads. The owned pool blob is const after
-// construction. This preserves NavDatabase's contract B without any locking
+// construction. This preserves NavDatabase's thread-safety contract without any locking
 // here. The owned handle makes the archive move-only.
 class CifpArchive {
  public:

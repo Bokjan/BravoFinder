@@ -113,7 +113,7 @@ class NavDatabase {
   // where a miss is the empty element for that result shape: nullopt for the
   // optional-returning lookups, and an empty inner vector for LookupWaypoints
   // (which returns all region matches per ident). A single lookup is just a
-  // one-element batch. All are const and safe for concurrent use per contract B.
+  // one-element batch. All are const and safe for concurrent use per thread-safety contract.
   // Idents and ICAO codes are matched case-insensitively.
 
   // Waypoints / navaids by ident. Since an ident is reused across regions, each
@@ -171,7 +171,7 @@ class NavDatabase {
 
   // Build the airway-name -> segments index by scanning every graph edge once.
   // Called at the end of Open/OpenCached; the index is then frozen (read-only),
-  // so LookupAirways needs no lock (contract B: immutable after Open).
+  // so LookupAirways needs no lock (thread-safety contract: immutable after Open).
   void BuildAirwayIndex();
 
   // AIRAC provenance, carried into the .bfdb container header.

@@ -9,7 +9,7 @@
 // (stdio_runner) reads a line, parses it, calls Dispatch, and writes the result;
 // the HTTP transport (mcp_http) offloads Dispatch to the threadpool and writes
 // it back over a socket. Because Dispatch only reads the registry (const,
-// contract B) and the tools (const after construction), it is safe to call
+// thread-safety contract) and the tools (const after construction), it is safe to call
 // concurrently on one Dispatcher from many worker threads.
 
 #pragma once
@@ -44,7 +44,7 @@ class Dispatcher {
   };
 
   // Serve tools from `registry`, which must outlive the Dispatcher. Each opened
-  // database is read-only per NavDatabase contract B. Builds the tool list once
+  // database is read-only per NavDatabase thread-safety contract. Builds the tool list once
   // in the constructor (no function-level static mutable state).
   explicit Dispatcher(bf::service::NavDatabaseRegistry& registry)
       : registry_(registry), tools_(MakeTools()) {}
@@ -64,7 +64,7 @@ class Dispatcher {
   // a -32600 (id null) entry; an empty batch becomes a single -32600 envelope.
   Response DispatchBatch(const rapidjson::Value& batch) const;
   // The registry to serve from. Each database it holds is read-only per
-  // NavDatabase contract B.
+  // NavDatabase thread-safety contract.
   bf::service::NavDatabaseRegistry& registry_;
 
   // The tool list, built once in the constructor. Each Tool owns its

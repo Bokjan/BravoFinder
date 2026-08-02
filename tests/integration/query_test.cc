@@ -232,7 +232,7 @@ TEST_CASE("query: concurrent lookups on one database are race-free", "[integrati
   }
   // The airway index is built once at Open and then read-only; procedures use
   // the internally synchronized cache. Hammer all four lookups from several
-  // threads to exercise contract B under tsan.
+  // threads to exercise thread-safety contract under tsan.
   std::atomic<int> ok{0};
   std::vector<std::thread> threads;
   for (int t = 0; t < 8; ++t) {

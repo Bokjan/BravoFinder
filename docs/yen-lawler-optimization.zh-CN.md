@@ -55,7 +55,7 @@ k=1→3 有 **25 倍断崖**。瓶颈在 Yen 循环：k=10、路径 ~30 节点�
 - `Candidate` 加 `int deviation`；**成本可忽略**：多一个 int（4B）相对已有的 `vertices` 向量微不足道，且不参与 `operator<`（排序键仍是 cost → vertices），红黑树开销不变。
 - 单源 `FindKShortestPaths`：`last_deviation` 初值 0；内层 `for (i = last_deviation; ...)`。
 - 多源 `FindKShortestPathsMulti`：`last_deviation` 初值 -1；`add_candidate` 多带一个 `deviation` 参数。
-- **线程安全契约 B 不破**：`last_deviation` 是搜索/Yen 调用的函数局部 int，ban 集仍按值 捕获进 `std::function`（自包含、可跨线程持有）。tsan 已验。
+- **线程安全契约不破**：`last_deviation` 是搜索/Yen 调用的函数局部 int，ban 集仍按值 捕获进 `std::function`（自包含、可跨线程持有）。tsan 已验。
 
 ## 5. 验证：差分对拍（golden-reference testing）
 

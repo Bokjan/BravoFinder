@@ -17,7 +17,7 @@
 // The cache stores unique_ptr values and is append-only, so a returned
 // NavDatabase pointer stays valid for the registry's lifetime even when a
 // concurrent insert rehashes the map. Each opened NavDatabase is itself
-// read-only per contract B, so concurrent queries across cycles are safe.
+// read-only per thread-safety contract, so concurrent queries across cycles are safe.
 
 #include <cstdint>
 #include <memory>

@@ -80,7 +80,7 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLo
     if (cifp_load == CifpLoad::kEager) {
       // Deserialize every airport up front into the procedure cache, then freeze
       // it: subsequent ProceduresFor calls only read existing entries, so they
-      // need no lock (contract B holds with no shared mutable state).
+      // need no lock (thread-safety contract holds with no shared mutable state).
       std::unordered_map<std::string, CifpData> all = u.cifp->FetchAll();
       db.procedure_cache_.reserve(all.size());
       for (auto& entry : all) {
@@ -173,7 +173,7 @@ const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
   // Parse outside the lock so concurrent queries for different airports do not
   // serialize on disk I/O. Two threads racing on the same airport will both
   // parse (harmless, redundant work). Source: the CIFP cache archive if one is
-  // loaded (an independent ifstream per fetch, contract-B safe), else the loader
+  // loaded (an independent ifstream per fetch, thread-safety contract safe), else the loader
   // parsing a source .dat on demand (Open path). With neither, the airport has
   // no procedures.
   std::unique_ptr<CifpData> stored;

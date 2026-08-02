@@ -3,7 +3,7 @@
 
 // Generic SQLite plumbing shared by the DFD loaders (DFD v1.0 and DFD v2):
 // RAII handles for connections and prepared statements, a per-thread
-// connection cache (contract-B: a connection is never shared across threads),
+// connection cache (thread-safety contract: a connection is never shared across threads),
 // and null/blank-safe column accessors. The DFD loaders add only their own
 // row-to-domain mapping on top of this; nothing here is DFD-version-specific.
 

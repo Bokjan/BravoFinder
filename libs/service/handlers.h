@@ -6,7 +6,7 @@
 // NavDatabase and returns a HandlerResult: a JSON body plus an HTTP-style status
 // code. Handlers are pure with respect to server state (no globals): they only
 // read the database, so they are safe to call concurrently on one instance
-// (NavDatabase contract B). Both transports reuse them -- MCP maps
+// (NavDatabase thread-safety contract). Both transports reuse them -- MCP maps
 // is_error = (status >= 400); HTTP uses the status directly.
 
 #pragma once
