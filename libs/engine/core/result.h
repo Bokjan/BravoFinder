@@ -6,6 +6,8 @@
 #include <utility>
 #include <variant>
 
+#include "core/base/attributes.h"
+
 namespace bf {
 
 // Category of an error, used by callers to branch on failure kinds without
@@ -54,12 +56,12 @@ class [[nodiscard]] Result {
   explicit operator bool() const noexcept { return has_value(); }
 
   // Access the success value. Precondition: has_value() is true.
-  const T& value() const& { return std::get<0>(data_); }
+  const T& value() const& BF_LIFETIMEBOUND { return std::get<0>(data_); }
   T& value() & { return std::get<0>(data_); }
   T&& value() && { return std::get<0>(std::move(data_)); }
 
   // Access the error. Precondition: has_value() is false.
-  const E& error() const& { return std::get<1>(data_); }
+  const E& error() const& BF_LIFETIMEBOUND { return std::get<1>(data_); }
   E& error() & { return std::get<1>(data_); }
   // Move the error out of an rvalue Result, so `std::move(r).error()` moves
   // rather than copies -- error types can be heavy (message strings), and every
@@ -94,7 +96,7 @@ class [[nodiscard]] Result<void, E> {
   explicit operator bool() const noexcept { return has_value(); }
 
   // Access the error. Precondition: has_value() is false.
-  const E& error() const& { return std::get<1>(data_); }
+  const E& error() const& BF_LIFETIMEBOUND { return std::get<1>(data_); }
   E& error() & { return std::get<1>(data_); }
   E&& error() && { return std::get<1>(std::move(data_)); }
 

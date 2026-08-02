@@ -42,7 +42,7 @@ class GraphBuilder {
   // in the unified container header, not the snapshot.
   GraphSnapshot ToSnapshot() const;
 
-  const NavGraph& graph() const { return graph_; }
+  const NavGraph& graph() const BF_LIFETIMEBOUND { return graph_; }
 
   // Resolve every waypoint sharing `ident` across all regions. Idents are not
   // globally unique, so this returns the full set of matching vertices rather
@@ -102,7 +102,7 @@ class GraphBuilder {
   std::vector<int> NearestOnNetwork(const Coordinate& coord, int count, bool inbound) const;
 
   // The airway name for an edge's airway_id, or "DCT" for synthetic edges.
-  const std::string& AirwayName(int airway_id) const;
+  const std::string& AirwayName(int airway_id) const BF_LIFETIMEBOUND;
 
   // The full airway-name table, indexed by airway_id (entry 0 is "DCT"). A name
   // may be a concurrency ("A593-Y592") holding several designators. Callers that

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "core/base/attributes.h"
 #include "core/domain/airway.h"
 #include "core/domain/coordinate.h"
 
@@ -46,11 +47,15 @@ class NavGraph {
 
   int VertexCount() const { return static_cast<int>(coords_.size()); }
 
-  const Coordinate& CoordOf(int vertex) const { return coords_[vertex]; }
+  const Coordinate& CoordOf(int vertex) const BF_LIFETIMEBOUND { return coords_[vertex]; }
 
   // Edges leaving `vertex`, as a contiguous range [begin, end).
-  const GraphEdge* EdgesBegin(int vertex) const { return edges_.data() + offsets_[vertex]; }
-  const GraphEdge* EdgesEnd(int vertex) const { return edges_.data() + offsets_[vertex + 1]; }
+  const GraphEdge* EdgesBegin(int vertex) const BF_LIFETIMEBOUND {
+    return edges_.data() + offsets_[vertex];
+  }
+  const GraphEdge* EdgesEnd(int vertex) const BF_LIFETIMEBOUND {
+    return edges_.data() + offsets_[vertex + 1];
+  }
 
  private:
   friend class GraphBuilder;

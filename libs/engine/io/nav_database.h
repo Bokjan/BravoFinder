@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "core/base/attributes.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
 #include "core/domain/procedure.h"
@@ -167,7 +168,7 @@ class NavDatabase {
   // returned pointer stays valid for the database's lifetime: the cache is
   // append-only (no erase) and stores unique_ptr values, so a CifpData's heap
   // address is stable even when a concurrent insert rehashes the map.
-  const CifpData* ProceduresFor(const std::string& icao) const;
+  const CifpData* ProceduresFor(const std::string& icao) const BF_LIFETIMEBOUND;
 
   // Build the airway-name -> segments index by scanning every graph edge once.
   // Called at the end of Open/OpenCached; the index is then frozen (read-only),

@@ -10,6 +10,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "core/base/attributes.h"
+
 namespace bf {
 
 // A tiny vector that stores up to N elements inline and only allocates on the
@@ -123,16 +125,16 @@ class SmallVec {
   bool empty() const { return size_ == 0; }
 
   T& operator[](size_t i) { return data_[i]; }
-  const T& operator[](size_t i) const { return data_[i]; }
+  const T& operator[](size_t i) const BF_LIFETIMEBOUND { return data_[i]; }
 
   T& front() { return data_[0]; }
-  const T& front() const { return data_[0]; }
+  const T& front() const BF_LIFETIMEBOUND { return data_[0]; }
   T& back() { return data_[size_ - 1]; }
-  const T& back() const { return data_[size_ - 1]; }
+  const T& back() const BF_LIFETIMEBOUND { return data_[size_ - 1]; }
 
   // Range iteration over the live elements.
-  const T* begin() const { return data_; }
-  const T* end() const { return data_ + size_; }
+  const T* begin() const BF_LIFETIMEBOUND { return data_; }
+  const T* end() const BF_LIFETIMEBOUND { return data_ + size_; }
   T* begin() { return data_; }
   T* end() { return data_ + size_; }
 
