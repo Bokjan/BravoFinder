@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <string>
+#include <vector>
 
+#include "core/constraints/airway_rule_constraint.h"
 #include "core/constraints/altitude_constraints.h"
-#include "core/constraints/avoid_constraint.h"
+#include "core/constraints/avoid_waypoint_constraint.h"
 #include "core/constraints/mora_constraint.h"
 #include "core/constraints/randomize_constraint.h"
 #include "core/domain/mora_grid.h"
@@ -185,7 +189,7 @@ TEST_CASE("MORA grid floors negative coordinates correctly", "[unit][constraint]
 }
 
 TEST_CASE("avoid: blocks edges entering an avoided vertex", "[unit][constraint]") {
-  bf::AvoidConstraint c({7}, {});  // avoid vertex 7
+  bf::AvoidWaypointConstraint c({7});  // avoid vertex 7
   bf::RouteRequest r;
 
   bf::GraphEdge into_7 = MakeEdge(0, 0, false);
@@ -197,23 +201,8 @@ TEST_CASE("avoid: blocks edges entering an avoided vertex", "[unit][constraint]"
   CHECK(c.Evaluate(bf::EdgeContext{into_8, bf::Coordinate{}, bf::Coordinate{}}, r).allowed);
 }
 
-TEST_CASE("avoid: blocks edges on an avoided airway id", "[unit][constraint]") {
-  bf::AvoidConstraint c({}, {3});  // avoid airway_id 3
-  bf::RouteRequest r;
-
-  bf::GraphEdge on_3 = MakeEdge(0, 0, false);
-  on_3.to = 1;
-  on_3.airway_id = 3;
-  CHECK_FALSE(c.Evaluate(bf::EdgeContext{on_3, bf::Coordinate{}, bf::Coordinate{}}, r).allowed);
-
-  bf::GraphEdge on_4 = MakeEdge(0, 0, false);
-  on_4.to = 1;
-  on_4.airway_id = 4;
-  CHECK(c.Evaluate(bf::EdgeContext{on_4, bf::Coordinate{}, bf::Coordinate{}}, r).allowed);
-}
-
-TEST_CASE("avoid: empty sets allow everything", "[unit][constraint]") {
-  bf::AvoidConstraint c({}, {});
+TEST_CASE("avoid: empty set allows everything", "[unit][constraint]") {
+  bf::AvoidWaypointConstraint c({});
   bf::RouteRequest r;
   bf::GraphEdge e = MakeEdge(0, 0, false);
   e.to = 42;
@@ -250,6 +239,120 @@ TEST_CASE("randomize: different seeds generally differ; same seed matches", "[un
   const double a_again = bf::RandomizeConstraint(1).Evaluate(ctx, r).extra_cost;
   CHECK(a == a_again);  // same seed, same edge => identical
   CHECK(a != b);        // different seeds => different perturbation (for this edge)
+}
+
+// --- airway rules ----------------------------------------------------------
+// The constraint itself consumes resolved bitmask tables, so these tests build a
+// tiny two-vertex / three-airway "graph" by hand: vertex 0 matches rule 0, vertex 1
+// matches rule 1, and so on. The prefix-matching helpers are exercised directly.
+
+TEST_CASE("matches any prefix: empty list and empty entry match everything", "[unit][constraint]") {
+  CHECK(bf::MatchesAnyPrefix("ZB", {}));         // no prefixes => any region
+  CHECK(bf::MatchesAnyPrefix("ZB", {""}));       // an empty entry => any region
+  CHECK(bf::MatchesAnyPrefix("", {}));           // an empty region is fine too
+  CHECK_FALSE(bf::MatchesAnyPrefix("", {"Z"}));  // ...but matches no real prefix
+}
+
+TEST_CASE("matches any prefix: prefix semantics across regions", "[unit][constraint]") {
+  // "Z" is the whole Z-block, including ZM (Mongolia) and ZK (North Korea) -- the
+  // reason a rule can enumerate regions instead.
+  CHECK(bf::MatchesAnyPrefix("ZB", {"Z"}));
+  CHECK(bf::MatchesAnyPrefix("ZM", {"Z"}));
+  // A two-char entry is effectively exact: nothing longer extends it.
+  CHECK(bf::MatchesAnyPrefix("ZB", {"ZB"}));
+  CHECK_FALSE(bf::MatchesAnyPrefix("ZM", {"ZB"}));
+  // An enumerated set matches each member and nothing else.
+  const std::vector<std::string> china = {"ZB", "ZG", "ZS"};
+  CHECK(bf::MatchesAnyPrefix("ZB", china));
+  CHECK(bf::MatchesAnyPrefix("ZS", china));
+  CHECK_FALSE(bf::MatchesAnyPrefix("ZM", china));
+}
+
+TEST_CASE("matches any designator: exact mode does not catch extensions", "[unit][constraint]") {
+  using Match = bf::AirwayRule::Match;
+  // The whole reason exact mode exists: 1371 designators are a strict prefix of
+  // another one, so exact "J60" must not match J603.
+  CHECK(bf::MatchesAnyDesignator("J60", {"J60"}, Match::kExact));
+  CHECK_FALSE(bf::MatchesAnyDesignator("J603", {"J60"}, Match::kExact));
+  // Prefix mode is the category rule and deliberately does catch them.
+  CHECK(bf::MatchesAnyDesignator("J60", {"J"}, Match::kPrefix));
+  CHECK(bf::MatchesAnyDesignator("J603", {"J"}, Match::kPrefix));
+  CHECK_FALSE(bf::MatchesAnyDesignator("V16", {"J"}, Match::kPrefix));
+  // An empty list matches everything in either mode.
+  CHECK(bf::MatchesAnyDesignator("J60", {}, Match::kExact));
+  CHECK(bf::MatchesAnyDesignator("J60", {}, Match::kPrefix));
+  // A list shares one rule, so any member hitting is a hit.
+  CHECK(bf::MatchesAnyDesignator("A3", {"J60", "A3", "W19"}, Match::kExact));
+  CHECK_FALSE(bf::MatchesAnyDesignator("A30", {"J60", "A3", "W19"}, Match::kExact));
+}
+
+TEST_CASE("airway rules: a leg matches when either endpoint's region matches",
+          "[unit][constraint]") {
+  bf::RouteRequest r;
+  // One rule (bit 0). Vertex 1 is in a matching region, vertices 0 and 2 are not;
+  // airway 1 matches the designator side.
+  bf::AirwayRuleConstraint c(/*vertex_mask=*/{0b0, 0b1, 0b0},
+                             /*airway_mask=*/{0b0, 0b1}, /*block_bits=*/0b1,
+                             /*fractions=*/{0.0});
+
+  bf::GraphEdge e = MakeEdge(0, 0, false);
+  e.airway_id = 1;
+  // 0 -> 1: the destination is in the region.
+  e.to = 1;
+  CHECK_FALSE(c.Evaluate(bf::EdgeContext{e, bf::Coordinate{}, bf::Coordinate{}, 0}, r).allowed);
+  // 1 -> 2: the source is in the region. This is the case that needs
+  // EdgeContext::from -- GraphEdge alone only knows `to`.
+  e.to = 2;
+  CHECK_FALSE(c.Evaluate(bf::EdgeContext{e, bf::Coordinate{}, bf::Coordinate{}, 1}, r).allowed);
+  // 0 -> 2: neither endpoint is in the region, so the rule does not apply.
+  e.to = 2;
+  CHECK(c.Evaluate(bf::EdgeContext{e, bf::Coordinate{}, bf::Coordinate{}, 0}, r).allowed);
+}
+
+TEST_CASE("airway rules: DCT edges are never ruled on", "[unit][constraint]") {
+  bf::RouteRequest r;
+  // airway_mask[0] is always 0: airway id 0 is the reserved synthetic "DCT" name.
+  bf::AirwayRuleConstraint c({0b1, 0b1}, {0b0, 0b1}, 0b1, {0.0});
+  bf::GraphEdge dct = MakeEdge(0, 0, false);
+  dct.airway_id = 0;
+  dct.to = 1;
+  CHECK(c.Evaluate(bf::EdgeContext{dct, bf::Coordinate{}, bf::Coordinate{}, 0}, r).allowed);
+}
+
+TEST_CASE("airway rules: block wins over a matching penalize rule", "[unit][constraint]") {
+  bf::RouteRequest r;
+  // Two rules both matching this leg: bit 0 penalizes, bit 1 blocks.
+  bf::AirwayRuleConstraint c({0b11, 0b11}, {0b0, 0b11}, /*block_bits=*/0b10, {0.5, 0.0});
+  bf::GraphEdge e = MakeEdge(0, 0, false);
+  e.airway_id = 1;
+  e.to = 1;
+  const bf::EdgeVerdict v = c.Evaluate(bf::EdgeContext{e, {}, {}, 0}, r);
+  CHECK_FALSE(v.allowed);
+  CHECK(v.extra_cost == 0.0);  // a blocked edge carries no penalty
+}
+
+TEST_CASE("airway rules: penalties of several matching rules sum", "[unit][constraint]") {
+  bf::RouteRequest r;
+  // Both rules penalize: 0.8 ("all V airways") + 0.3 ("V airways in this region").
+  bf::AirwayRuleConstraint c({0b11, 0b11}, {0b0, 0b11}, /*block_bits=*/0, {0.8, 0.3});
+  bf::GraphEdge e = MakeEdge(0, 0, false);  // distance_nm = 100
+  e.airway_id = 1;
+  e.to = 1;
+  const bf::EdgeVerdict v = c.Evaluate(bf::EdgeContext{e, {}, {}, 0}, r);
+  CHECK(v.allowed);  // penalize keeps the leg usable
+  // Sums past 1.0 on purpose: stacking rules toward block-like strength is allowed.
+  CHECK(v.extra_cost == Catch::Approx(100.0 * 1.1));
+}
+
+TEST_CASE("airway rules: a rule matching only the designator side does not apply",
+          "[unit][constraint]") {
+  bf::RouteRequest r;
+  // The designator matches (airway 1) but no vertex is in the region.
+  bf::AirwayRuleConstraint c({0b0, 0b0}, {0b0, 0b1}, 0b1, {0.0});
+  bf::GraphEdge e = MakeEdge(0, 0, false);
+  e.airway_id = 1;
+  e.to = 1;
+  CHECK(c.Evaluate(bf::EdgeContext{e, {}, {}, 0}, r).allowed);
 }
 
 }  // namespace

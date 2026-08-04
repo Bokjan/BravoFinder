@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <queue>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "core/base/string_util.h"
+#include "core/constraints/airway_rule_constraint.h"
 #include "core/constraints/altitude_constraints.h"
-#include "core/constraints/avoid_constraint.h"
+#include "core/constraints/avoid_waypoint_constraint.h"
 #include "core/constraints/mora_constraint.h"
 #include "core/constraints/randomize_constraint.h"
 #include "core/graph/yen_kshortest.h"
@@ -244,33 +249,74 @@ std::vector<int> ResolveAvoidVertices(const GraphBuilder& builder,
   return out;
 }
 
-// Resolve the request's avoid_airways (by designator) to the set of airway_ids
-// to block. Because a stored airway name may be a concurrency ("J60-V123"), an
-// airway_id is included when any of its designators is in the avoid set -- so
-// avoiding "J60" also blocks segments recorded under "J60-V123".
-std::vector<uint16_t> ResolveAvoidAirwayIds(const GraphBuilder& builder,
-                                            const std::vector<std::string>& avoid_airways) {
-  std::unordered_set<std::string> wanted;
-  for (const std::string& a : avoid_airways) {
-    wanted.insert(ToUpper(a));
-  }
-  std::vector<uint16_t> out;
-  if (wanted.empty()) {
-    return out;
-  }
-  const std::vector<std::string>& names = builder.AirwayNames();
-  for (size_t id = 1; id < names.size(); ++id) {  // id 0 = "DCT", never avoided
-    for (const std::string& designator : SplitDesignators(names[id])) {
-      if (wanted.count(designator) != 0) {
-        out.push_back(static_cast<uint16_t>(id));
-        break;
-      }
+// Resolve the request's airway_rules into the two bitmask tables
+// AirwayRuleConstraint evaluates on the hot path. Bit i of both tables is rule
+// `rules[i]`, so a leg matches rule i iff its region bit and its designator bit
+// are both set.
+//
+// All name matching happens here, once per query, so the search itself only does
+// integer work -- the same discipline ResolveAvoidVertices follows. Both sides of
+// a rule are lists that share the rule's single bit, so enumerating ten regions or
+// two hundred designators costs nothing extra at runtime.
+//
+// Caller must have checked rules.size() <= kMaxRules.
+AirwayRuleConstraint ResolveAirwayRules(const GraphBuilder& builder,
+                                        const std::vector<AirwayRule>& rules) {
+  const size_t rule_count = rules.size();
+  uint32_t block_bits = 0;
+  std::vector<double> fractions(rule_count, 0.0);
+  for (size_t i = 0; i < rule_count; ++i) {
+    if (rules[i].action == AirwayRule::Action::kBlock) {
+      block_bits |= uint32_t{1} << i;
+    } else {
+      fractions[i] = rules[i].penalty_fraction;
     }
   }
-  // Sort + unique so the constraint's binary_search sees a sorted, deduped set.
-  std::sort(out.begin(), out.end());
-  out.erase(std::unique(out.begin(), out.end()), out.end());
-  return out;
+
+  // Per-vertex region mask. Regions are drawn from a small fixed alphabet (241
+  // distinct codes in AIRAC 2601) while V is ~275k, so match each DISTINCT region
+  // once into a small map and then fill the big array by lookup, rather than
+  // re-running the prefix comparisons per vertex.
+  const int vcount = builder.graph().VertexCount();
+  std::unordered_map<std::string_view, uint32_t> region_masks;
+  std::vector<uint32_t> vertex_mask(static_cast<size_t>(vcount), 0);
+  for (int v = 0; v < vcount; ++v) {
+    const std::string_view region = builder.RegionOf(v);
+    auto it = region_masks.find(region);
+    if (it == region_masks.end()) {
+      uint32_t mask = 0;
+      for (size_t i = 0; i < rule_count; ++i) {
+        if (MatchesAnyPrefix(region, rules[i].region_prefixes)) {
+          mask |= uint32_t{1} << i;
+        }
+      }
+      // The key is a view into the vertex's FixedIdent, which lives in the
+      // builder for the whole query, so it stays valid for this map's lifetime.
+      it = region_masks.emplace(region, mask).first;
+    }
+    vertex_mask[static_cast<size_t>(v)] = it->second;
+  }
+
+  // Per-airway-id designator mask. Entry 0 is the reserved "DCT" name and stays 0,
+  // so synthetic edges are never subject to a rule (matching how the airway avoid
+  // resolver skipped id 0). A stored name may be a concurrency ("A14-M1"), so it
+  // is split into designators first and the id matches if ANY of them does.
+  const std::vector<std::string>& names = builder.AirwayNames();
+  std::vector<uint32_t> airway_mask(names.size(), 0);
+  for (size_t id = 1; id < names.size(); ++id) {
+    uint32_t mask = 0;
+    for (const std::string& designator : SplitDesignators(names[id])) {
+      for (size_t i = 0; i < rule_count; ++i) {
+        if (MatchesAnyDesignator(designator, rules[i].designators, rules[i].match)) {
+          mask |= uint32_t{1} << i;
+        }
+      }
+    }
+    airway_mask[id] = mask;
+  }
+
+  return AirwayRuleConstraint(std::move(vertex_mask), std::move(airway_mask), block_bits,
+                              std::move(fractions));
 }
 
 // Resolve one forced ("via") point token to a graph vertex. A full
@@ -569,13 +615,27 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   AltitudeBandConstraint altitude_band;
   MoraConstraint mora(mora_);
   LevelPreferenceConstraint level_pref;
-  // Resolve avoid sets once; the constraint holds them for the whole search
-  // (and every Yen spur), so it must outlive the calls below. The vertex set is
-  // also used to prune seeded endpoints (below): AvoidConstraint only blocks
+  // Resolve the avoid set once; the constraint holds it for the whole search (and
+  // every Yen spur), so it must outlive the calls below. The vertex set is also
+  // used to prune seeded endpoints (below): AvoidWaypointConstraint only blocks
   // edges entering a vertex, but a source/goal fix is seeded, not entered, so an
   // avoided connection fix must be removed from the endpoint sets directly.
   const std::vector<int> avoid_vertices = ResolveAvoidVertices(*builder_, request.avoid_waypoints);
-  AvoidConstraint avoid(avoid_vertices, ResolveAvoidAirwayIds(*builder_, request.avoid_airways));
+  AvoidWaypointConstraint avoid(avoid_vertices);
+  // Region + designator airway rules. The resolver walks the graph once here and
+  // the constraint holds the resulting masks for the whole search. Held in an
+  // optional so the (common) no-rules case allocates nothing; airway rules need no
+  // endpoint pruning, since they match edges rather than vertices.
+  std::optional<AirwayRuleConstraint> airway_rules;
+  if (!request.airway_rules.empty()) {
+    if (request.airway_rules.size() > AirwayRuleConstraint::kMaxRules) {
+      return Result<Routes>::Err(
+          Error(ErrorCode::kRouteParseError,
+                "too many airway rules (max " + std::to_string(AirwayRuleConstraint::kMaxRules) +
+                    "); note one rule may list any number of regions and designators"));
+    }
+    airway_rules.emplace(ResolveAirwayRules(*builder_, request.airway_rules));
+  }
   RandomizeConstraint randomize(request.random_seed.value_or(0));
   SearchOptions options;
   options.request = &request;
@@ -590,8 +650,11 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   if (request.level != LevelPreference::kNone) {
     options.constraints.push_back(&level_pref);
   }
-  if (!request.avoid_waypoints.empty() || !request.avoid_airways.empty()) {
+  if (!request.avoid_waypoints.empty()) {
     options.constraints.push_back(&avoid);
+  }
+  if (airway_rules.has_value()) {
+    options.constraints.push_back(&*airway_rules);
   }
   if (request.random_seed.has_value()) {
     options.constraints.push_back(&randomize);

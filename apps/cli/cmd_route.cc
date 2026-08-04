@@ -30,7 +30,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     std::string sid;
     std::string star;
     std::vector<std::string> avoid_wpt;
-    std::vector<std::string> avoid_awy;
+    std::vector<std::string> airway_filter;
     std::optional<uint32_t> seed;
     std::vector<std::string> via;
     int k = 1;
@@ -70,15 +70,32 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
                     "Select a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN (default: auto)");
   route->add_option("--star", a->star,
                     "Select a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS (default: auto)");
-  route->add_option("--avoid-wpt", a->avoid_wpt,
-                    "Waypoint(s) to avoid; ident or IDENT/ARINC424_ICAO_CODE. Repeatable.");
-  route->add_option("--avoid-awy", a->avoid_awy,
-                    "Airway designator(s) to avoid, e.g. J60. Repeatable.");
+  // The vector options take exactly one value per occurrence and are repeated for
+  // more. Without allow_extra_args(false), CLI11 lets a vector option greedily
+  // absorb every following argument, so it swallows the positional
+  // departure/arrival and "--avoid-wpt BOTON KJFK KLAX" failed with "departure is
+  // required". Note this is NOT expected(1), which would instead cap the option at
+  // a single occurrence and break the repeatable form.
+  route
+      ->add_option("--avoid-wpt", a->avoid_wpt,
+                   "Waypoint(s) to avoid; ident or IDENT/ARINC424_ICAO_CODE. Repeatable.")
+      ->allow_extra_args(false);
+  route
+      ->add_option("--airway-filter", a->airway_filter,
+                   "Restrict airways by ICAO region and designator: "
+                   "<regions>:<designators>[=block|penalize[:<fraction>]]. A trailing '*' means "
+                   "prefix, no '*' means exact, a bare '*' means any; comma-separate to list "
+                   "several. Defaults to penalize with fraction 0.5. Repeatable (each value is one "
+                   "rule, max 32). E.g. ZB,ZG,ZH,ZJ,ZL,ZP,ZS,ZU,ZW,ZY:J*=block (all J routes in "
+                   "mainland China), *:J60=block (exactly J60, anywhere), *:V*=penalize:0.8.")
+      ->allow_extra_args(false);
   route->add_option("--seed", a->seed,
                     "Randomize routing with this seed for reproducible route diversity");
-  route->add_option("--via", a->via,
-                    "Force the route through these waypoint(s), in order; ident or "
-                    "IDENT/ARINC424_ICAO_CODE. Repeatable.");
+  route
+      ->add_option("--via", a->via,
+                   "Force the route through these waypoint(s), in order; ident or "
+                   "IDENT/ARINC424_ICAO_CODE. Repeatable.")
+      ->allow_extra_args(false);
 
   route->callback([a, &exit_code]() {
     // With --db, load the prebuilt cache (milliseconds); otherwise parse and
@@ -111,7 +128,16 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     request.departure_sid = a->sid;
     request.arrival_star = a->star;
     request.avoid_waypoints = a->avoid_wpt;
-    request.avoid_airways = a->avoid_awy;
+    for (const std::string& spec : a->airway_filter) {
+      std::string error;
+      std::optional<AirwayRule> rule = bf::cli::ParseAirwayFilter(spec, error);
+      if (!rule) {
+        std::cerr << "error: invalid --airway-filter '" << spec << "': " << error << "\n";
+        exit_code = EXIT_FAILURE;
+        return;
+      }
+      request.airway_rules.push_back(std::move(*rule));
+    }
     request.random_seed = a->seed;
     request.forced_points = a->via;
     if (a->level == "low") {

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "core/routing/route_request.h"
 #include "io/nav_database.h"
@@ -22,6 +23,32 @@ Result<NavDatabase> OpenForRead(const std::string& db_path, const std::string& d
 // level ("350" -> {350, 350}) or a hyphenated range ("300-400" -> {300, 400}).
 // Returns nullopt on malformed input or an inverted range (min > max).
 std::optional<FlRange> ParseAltSpec(const std::string& spec);
+
+// Parse one --airway-filter spec into a structured AirwayRule. The syntax is
+//
+//   <region>[,<region>...]:<designator>[,<designator>...][=<action>[:<fraction>]]
+//
+// where a trailing '*' marks a prefix match and a bare '*' on either side means
+// "everything":
+//
+//   ZB,ZG,ZH,ZJ,ZL,ZP,ZS,ZU,ZW,ZY:J*=block   all J routes in mainland China
+//   Z*:J*=block                              same, but also ZM Mongolia / ZK North Korea
+//   VI,VA,VO,VE:J*=penalize:0.3              soft penalty in Indian airspace
+//   *:V*=penalize:0.8                         every V airway, worldwide
+//   *:J60=block                              exactly J60 (no '*' => exact match)
+//   ZB,ZG:J60,A3=block                       exactly J60 and A3, only in ZB/ZG
+//   Z*:J*                                    defaults to penalize with fraction 0.5
+//
+// Regions are always prefix-matched (a code is at most two characters, so a
+// two-character entry is already exact) and therefore take no mode marker beyond
+// the optional cosmetic '*'. Designators need the distinction: 1371 designators in
+// AIRAC 2601 are a strict prefix of another one, so a prefix "J60" would also match
+// J603/J604/J605. All designators in ONE rule must agree on the marker, since the
+// match mode is per rule; mixing them ("J*,A3") is rejected so the user splits the
+// intent into two --airway-filter values rather than getting a silent guess.
+//
+// On failure, returns nullopt and sets `error` to a message naming what was wrong.
+std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string& error);
 
 // Wrap a rendered routes array (the bare transport-shape body the query layer
 // returns for find_routes) in the CLI's {"routes": <body>, "elapsed_ms": <n>}

@@ -101,7 +101,7 @@ Every per-database tool also accepts an optional **`cycle`** (integer, e.g. `260
 
 | Tool | Required | Optional | Returns |
 |------|----------|----------|---------|
-| `find_routes` | `departure`, `arrival` | `min_fl`, `max_fl`, `level`, `k`, `departure_runway`, `arrival_runway`, `departure_sid`, `arrival_star`, `avoid_waypoints`, `avoid_airways`, `random_seed`, `forced_points` | Array of candidate routes (see below) |
+| `find_routes` | `departure`, `arrival` | `min_fl`, `max_fl`, `level`, `k`, `departure_runway`, `arrival_runway`, `departure_sid`, `arrival_star`, `avoid_waypoints`, `airway_rules`, `random_seed`, `forced_points` | Array of candidate routes (see below) |
 | `parse_route` | `route` (string) | — | The validated/expanded single route object |
 | `lookup_waypoints` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of region matches (empty if none) |
 | `lookup_airports` | `ids` (string[]) | — | Array parallel to `ids`; airport object or `null` |
@@ -123,7 +123,14 @@ Parameter semantics:
 - `departure_runway` / `arrival_runway`: restrict the SID / STAR to this runway, e.g. `RW31L`; empty = any.
 - `departure_sid` / `arrival_star`: pin a SID / STAR by name (e.g. `DEEZZ5`, or `DEEZZ5.TOWIN` to pin the transition); empty = auto.
 - `avoid_waypoints`: waypoints to route around, each an ident (`BOTON`) or `IDENT/ARINC424_ICAO_CODE` (`BOTON/LF`); a bare ident avoids all its regional matches.
-- `avoid_airways`: airway designators to route around, e.g. `J60`; also blocks concurrency segments recorded as `J60-V123`.
+- `airway_rules`: array of at most 32 rule objects restricting airways by ICAO region and designator, since usage conventions are regional (a `J` route is a terminal transition in China but a legal Jet route in the US, and the source data carries no type field to tell them apart). This replaces the former `avoid_airways`: "avoid J60" is `{"designators": ["J60"], "match": "exact", "action": "block"}`. Each rule takes:
+  - `region_prefixes` (string[]): ARINC 424 ICAO region codes — **not** airport identifiers — each matched as a prefix. Omit or leave empty for any region. Listing several names a region set in **one** rule, which is free at runtime and often necessary for precision: the prefix `Z` also covers `ZM` (Mongolia) and `ZK` (North Korea), so mainland China is the ten FIRs `ZB`, `ZG`, `ZH`, `ZJ`, `ZL`, `ZP`, `ZS`, `ZU`, `ZW`, `ZY`.
+  - `designators` (string[]): airway designators, compared per `match`. Omit or leave empty for any. Concurrency names (`A14-M1`) are split first, so a rule hits when any of their designators matches.
+  - `match`: `prefix` (default) | `exact`. Use `exact` to name individual airways: 1371 designators in cycle 2601 are a strict prefix of another one, so a prefix `J60` would also match J603/J604/J605, and `A3` would match 52 names. Use `prefix` for a category rule such as "all J routes".
+  - `action`: `penalize` (default) | `block`. Prefer `penalize` for bulk region rules — `block` is an irreversible connectivity break, and an airport whose only terminal connection is a blocked airway becomes unroutable.
+  - `penalty_fraction` (number ≥ 0, default `0.5`): soft penalty as a fraction of each leg's own length, used only when `action` is `penalize`. Proportional rather than fixed so short and long legs are treated alike. The default is enough to push matched airways out of the optimal route while leaving them usable when no alternative exists; larger values steer harder, with no upper bound.
+
+  Matching is **per leg**, not per airway name: a designator is not unique to one physical airway (29.6% of names are reused by disjoint instances), so a name-level ban would forbid same-named airways worldwide. A leg matches a rule when its designator matches **and** either endpoint lies in a matching region. When several rules match one leg, any `block` rule wins; otherwise the matching `penalize` fractions sum.
 - `random_seed`: reproducible route-diversity seed; the same seed always yields the same route, different seeds explore alternative valid routes; omit for the plain optimal route.
 - `forced_points`: ordered via points, each an ident (`PSB`) or `IDENT/ARINC424_ICAO_CODE` (`PSB/K6`); the response echoes them resolved as `IDENT/ARINC424_ICAO_CODE`.
 

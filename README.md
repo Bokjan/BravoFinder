@@ -97,6 +97,11 @@ bf route KJFK KLAX --db navdata/nav_2601.bfdb   # load a prebuilt cache
 bf route KJFK KLAX --alt 300-400      # altitude band (enables MORA filtering)
 bf route KJFK KLAX --level high -k 3  # prefer Jet airways; ask for 3 candidates
 
+# Restrict airways by ICAO region + designator (repeatable; one value = one rule)
+bf route ZSSS ZGGG --airway-filter='*:J60=block'   # forbid exactly J60, anywhere
+bf route ZSSS ZGGG --airway-filter='ZB,ZG,ZH,ZJ,ZL,ZP,ZS,ZU,ZW,ZY:J*=block'
+bf route VABB VIDP --airway-filter='VI,VA,VO,VE:J*=penalize:0.3'
+
 # Validate a filed route string (reverse of route)
 bf parse-route "KJFK SID CANDR Q480 HOTEE J80 MCI ... STAR KLAX" --db navdata/nav_2601.bfdb
 
@@ -109,6 +114,10 @@ bf --version
 ```
 
 More options — runways, SID/STAR selection, via/avoid points, reproducible `--seed`, and cache load mode (`--cifp-load eager|on-demand`) — are in `bf route --help` / `bf query --help`.
+
+`--airway-filter` restricts airways by ICAO region and designator, because usage conventions are regional: a `J` route is a terminal transition in China but a legal Jet route in the US, and the source data carries no type field to tell them apart. The syntax is `<regions>:<designators>[=block|penalize[:<fraction>]]`, where a trailing `*` means prefix, no `*` means exact, a bare `*` means any, and commas list several. It replaces the old `--avoid-awy J60`, whose equivalent is `--airway-filter='*:J60=block'`.
+
+Three things are worth knowing. **Matching is per leg, not per airway name**: a designator is not unique to one physical airway (29.6% of names in cycle 2601 are reused by disjoint instances, up to 18 for one name), so a name-level ban would forbid same-named airways worldwide — a China-wide `J` rule would also kill the legal US Jet routes. **Regions are prefix-matched, so `Z` is wider than "China"**: it also covers `ZM` (Mongolia) and `ZK` (North Korea), which is why the example above enumerates the ten mainland FIRs instead. **`block` can leave you with no route at all**: it is an irreversible connectivity break, and an airport whose only terminal connection is a blocked airway becomes unroutable — prefer `penalize` for bulk region rules, which keeps the graph connected and lets a shorter alternative win on cost.
 
 Route endpoints are airport ICAO codes or waypoint idents, case-insensitive. When an airport has procedure data, the route names the SID and STAR used in its `sid`/`star` fields (and the interchangeable procedures that share the same connection fix); in the route string and the leg list they show as the literal `SID`/`STAR` connectors.
 

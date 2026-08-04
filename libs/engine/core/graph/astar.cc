@@ -28,17 +28,19 @@ UnitVec ProjectUnitSphere(const Coordinate& c) {
 // Evaluate all constraints for an edge. Returns false if any blocks it;
 // otherwise accumulates soft penalties into `extra_cost`.
 //
-// `from_coord` is the popped vertex's coordinate, hoisted out of the edge loop
-// by the caller (it is constant across a vertex's out-edges). `to_coord` is
-// fetched lazily -- only when constraints are actually present -- so the common
-// unconstrained path (EdgeAllowed returns true on the first line) pays zero
-// Coordinate fetches per edge. `graph` is taken by reference so the lazy
-// CoordOf(to) stays O(1); when constraints are present, the two endpoint
-// Coordinates are copied into EdgeContext (a register-level, sub-nanosecond
-// cost -- a reference member would trade that copy for an indirection on every
-// coordinate read, with no measured benefit).
-bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coordinate& from_coord,
-                 const NavGraph& graph, int to, double& extra_cost) {
+// `from` is the source vertex index and `from_coord` its coordinate, both
+// hoisted out of the edge loop by the caller (they are constant across a
+// vertex's out-edges). GraphEdge carries only `to`, so `from` must be threaded
+// through for constraints that need both endpoints (the airway-rule constraint
+// reads both regions). `to_coord` is fetched lazily -- only when constraints are
+// actually present -- so the common unconstrained path (EdgeAllowed returns true
+// on the first line) pays zero Coordinate fetches per edge. `graph` is taken by
+// reference so the lazy CoordOf(to) stays O(1); when constraints are present, the
+// two endpoint Coordinates are copied into EdgeContext (a register-level,
+// sub-nanosecond cost -- a reference member would trade that copy for an
+// indirection on every coordinate read, with no measured benefit).
+bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, int from,
+                 const Coordinate& from_coord, const NavGraph& graph, int to, double& extra_cost) {
   extra_cost = 0.0;
   // No constraints => nothing to evaluate (request is irrelevant). When
   // constraints ARE present the request they evaluate against must be non-null
@@ -56,7 +58,7 @@ bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, const Coor
   if (options.request == nullptr) {
     return false;
   }
-  const EdgeContext ctx{edge, from_coord, graph.CoordOf(to)};
+  const EdgeContext ctx{edge, from_coord, graph.CoordOf(to), from};
   for (const Constraint* c : options.constraints) {
     const EdgeVerdict v = c->Evaluate(ctx, *options.request);
     if (!v.allowed) {
@@ -82,7 +84,7 @@ const GraphEdge* SelectEdge(const NavGraph& graph, int from, int to, const Searc
       continue;
     }
     double extra_cost = 0.0;
-    if (!EdgeAllowed(options, *e, from_coord, graph, to, extra_cost)) {
+    if (!EdgeAllowed(options, *e, from, from_coord, graph, to, extra_cost)) {
       continue;  // blocked on this parallel edge; try the next
     }
     const double total = e->distance_nm + extra_cost;
@@ -305,7 +307,7 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
         continue;
       }
       double extra_cost = 0.0;
-      if (!EdgeAllowed(options, *e, u_coord, graph, v, extra_cost)) {
+      if (!EdgeAllowed(options, *e, u, u_coord, graph, v, extra_cost)) {
         continue;
       }
       // Turn-angle penalty for leaving u toward v: the heading the path arrived

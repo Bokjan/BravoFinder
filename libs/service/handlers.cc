@@ -9,12 +9,15 @@
 
 #include "handlers.h"
 
+#include <cmath>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "core/constraints/airway_rule_constraint.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
 #include "queries.h"
@@ -70,6 +73,105 @@ std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args
     ids.push_back(v.GetString());
   }
   return ids;
+}
+
+// Parse one string-array member of a rule object, with the same "absent or
+// malformed" collapse as ParseIdList. An absent member means "match everything"
+// for that side of the rule, which is an empty vector -- so absence and an empty
+// array are deliberately indistinguishable here. Returns false only for a member
+// that is present and genuinely malformed.
+bool ParseRuleStringList(const rapidjson::Value& rule, const char* key,
+                         std::vector<std::string>& out) {
+  if (!rule.HasMember(key)) {
+    return true;  // absent => match everything on this side
+  }
+  if (!rule[key].IsArray() || rule[key].Size() > kMaxIdListSize) {
+    return false;
+  }
+  for (const rapidjson::Value& v : rule[key].GetArray()) {
+    if (!v.IsString()) {
+      return false;
+    }
+    out.emplace_back(v.GetString());
+  }
+  return true;
+}
+
+// Parse the airway_rules array into structured AirwayRules. Returns an error
+// message on any malformed entry (the caller turns it into a 400), or nullopt on
+// success. Unlike the flat ID lists, each element is an object, so the shape is
+// validated field by field.
+//
+// The cap is kMaxRules (32), not kMaxIdListSize (256): resolving a rule costs
+// O(V + names) work at query time, so 256 rules would be tens of millions of
+// comparisons. It is not a real limit either way -- both sides of a rule are lists
+// sharing one rule slot, so "block these 200 airways" is a single rule.
+std::optional<std::string> ParseAirwayRules(const rapidjson::Value& args,
+                                            std::vector<bf::AirwayRule>& out) {
+  if (!args.HasMember("airway_rules")) {
+    return std::nullopt;
+  }
+  if (!args["airway_rules"].IsArray()) {
+    return "airway_rules must be an array of rule objects";
+  }
+  const rapidjson::Value& arr = args["airway_rules"];
+  if (arr.Size() > bf::AirwayRuleConstraint::kMaxRules) {
+    return "airway_rules must hold at most 32 rules (one rule may list any number "
+           "of regions and designators)";
+  }
+  for (const rapidjson::Value& rule : arr.GetArray()) {
+    if (!rule.IsObject()) {
+      return "each airway_rules entry must be an object";
+    }
+    bf::AirwayRule parsed;
+    if (!ParseRuleStringList(rule, "region_prefixes", parsed.region_prefixes)) {
+      return "region_prefixes must be an array of at most 256 strings";
+    }
+    if (!ParseRuleStringList(rule, "designators", parsed.designators)) {
+      return "designators must be an array of at most 256 strings";
+    }
+    if (rule.HasMember("match")) {
+      if (!rule["match"].IsString()) {
+        return "match must be \"exact\" or \"prefix\"";
+      }
+      const std::string_view match = rule["match"].GetString();
+      if (match == "exact") {
+        parsed.match = bf::AirwayRule::Match::kExact;
+      } else if (match == "prefix") {
+        parsed.match = bf::AirwayRule::Match::kPrefix;
+      } else {
+        return "match must be \"exact\" or \"prefix\"";
+      }
+    }
+    if (rule.HasMember("action")) {
+      if (!rule["action"].IsString()) {
+        return "action must be \"block\" or \"penalize\"";
+      }
+      const std::string_view action = rule["action"].GetString();
+      if (action == "block") {
+        parsed.action = bf::AirwayRule::Action::kBlock;
+      } else if (action == "penalize") {
+        parsed.action = bf::AirwayRule::Action::kPenalize;
+      } else {
+        return "action must be \"block\" or \"penalize\"";
+      }
+    }
+    if (rule.HasMember("penalty_fraction")) {
+      if (!rule["penalty_fraction"].IsNumber()) {
+        return "penalty_fraction must be a number >= 0";
+      }
+      const double fraction = rule["penalty_fraction"].GetDouble();
+      // Reject negatives and non-finite values: a negative penalty would break the
+      // search heuristic's admissibility. No upper bound -- a large fraction is a
+      // legitimate "almost block, but keep the graph connected".
+      if (!std::isfinite(fraction) || fraction < 0.0) {
+        return "penalty_fraction must be a finite number >= 0";
+      }
+      parsed.penalty_fraction = fraction;
+    }
+    out.push_back(std::move(parsed));
+  }
+  return std::nullopt;
 }
 
 // Build a batch-lookup handler from a typed LookupX entry: parse the ids array
@@ -182,12 +284,8 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     }
     request.avoid_waypoints = std::move(*v);
   }
-  if (args.HasMember("avoid_airways")) {
-    auto v = ParseIdList(args, "avoid_airways");
-    if (!v) {
-      return {JsonError("avoid_airways must be an array of at most 256 strings"), kBadRequest};
-    }
-    request.avoid_airways = std::move(*v);
+  if (std::optional<std::string> err = ParseAirwayRules(args, request.airway_rules)) {
+    return {JsonError(*err), kBadRequest};
   }
   if (args.HasMember("random_seed") && args["random_seed"].IsUint()) {
     request.random_seed = args["random_seed"].GetUint();

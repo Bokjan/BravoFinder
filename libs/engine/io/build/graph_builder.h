@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -115,6 +116,15 @@ class GraphBuilder {
   // no heap allocation). This is a cold path (route-result assembly and point
   // queries, not the A* hot loop), so the copy is immaterial.
   Ident IdentOf(int vertex) const { return idents_[vertex].ToIdent(); }
+
+  // The ARINC 424 ICAO region code of `vertex`, as a view into the compact
+  // per-vertex FixedIdent (no materialization). Exists for resolvers that scan
+  // every vertex -- the airway-rule constraint builds a per-vertex region mask
+  // over all V -- where IdentOf() would construct an owned Ident per vertex just
+  // to read one field. NOT the airport ICAO identifier; see FixedIdent.
+  std::string_view RegionOf(int vertex) const BF_LIFETIMEBOUND {
+    return idents_[vertex].Arinc424IcaoCodeView();
+  }
 
   // The point kind (fix/VOR/NDB/DME) of `vertex`. Airport vertices report kFix.
   WaypointKind KindOf(int vertex) const { return kinds_[vertex]; }

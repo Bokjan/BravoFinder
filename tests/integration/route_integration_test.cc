@@ -6,9 +6,11 @@
 #include <fstream>
 #include <set>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
+#include "core/constraints/airway_rule_constraint.h"
 #include "core/graph/astar.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
@@ -324,8 +326,14 @@ TEST_CASE("real data: avoiding an airway keeps it out of the route", "[integrati
     SKIP("baseline route uses no named enroute airway to avoid");
   }
 
+  // An exact-match block rule with no region restriction is the replacement for the
+  // former avoid_airways field: same intent, one code path.
   bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
-  req.avoid_airways = {victim_awy};
+  bf::AirwayRule rule;
+  rule.designators = {victim_awy};
+  rule.match = bf::AirwayRule::Match::kExact;
+  rule.action = bf::AirwayRule::Action::kBlock;
+  req.airway_rules = {rule};
   bf::Result<std::vector<bf::Route>> avoided = db->FindRoutes(req);
   REQUIRE(avoided);
   REQUIRE_FALSE(avoided.value().empty());
@@ -1017,6 +1025,231 @@ TEST_CASE("real data: ZBSJ->ZGGG SID exit is not a near-reversal", "[integration
   const double outbound = exit_fix.BearingTo(next_fix);
   const double turn = bf::TurnAngleDeg(inbound, outbound);
   CHECK(turn < 90.0);  // was 157 deg before the penalty; a reversal is now excluded
+}
+
+// --- airway rules (#22) -----------------------------------------------------
+// ZSSS->ZGGG is the reference query: its baseline route runs on W131 / W134 / W19
+// plus A470 / A599, so W-prefixed rules bite and the effects are observable.
+
+// Collect the distinct `via` designators of a route's enroute legs, skipping the
+// leading/trailing procedure legs (whose `via` is the SID/STAR keyword).
+std::set<std::string> EnrouteVias(const bf::Route& route) {
+  std::set<std::string> vias;
+  for (size_t i = 1; i + 1 < route.legs.size(); ++i) {
+    if (route.legs[i].via != "DCT" && !route.legs[i].via.empty()) {
+      vias.insert(route.legs[i].via);
+    }
+  }
+  return vias;
+}
+
+// One rule, spelled out field by field (the CLI string syntax is tested separately
+// in the unit suite).
+bf::AirwayRule MakeRule(std::vector<std::string> regions, std::vector<std::string> designators,
+                        bf::AirwayRule::Match match, bf::AirwayRule::Action action,
+                        double fraction = 0.5) {
+  bf::AirwayRule rule;
+  rule.region_prefixes = std::move(regions);
+  rule.designators = std::move(designators);
+  rule.match = match;
+  rule.action = action;
+  rule.penalty_fraction = fraction;
+  return rule;
+}
+
+TEST_CASE("real data: empty airway rules reproduce the baseline route exactly", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // The zero-regression hard line: adding the field must not perturb any route that
+  // does not use it.
+  bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("ZSSS", "ZGGG"));
+  REQUIRE(baseline);
+  REQUIRE_FALSE(baseline.value().empty());
+
+  bf::RouteRequest req = MakeRequest("ZSSS", "ZGGG");
+  req.airway_rules = {};  // explicitly empty
+  bf::Result<std::vector<bf::Route>> same = db->FindRoutes(req);
+  REQUIRE(same);
+  REQUIRE_FALSE(same.value().empty());
+  CHECK(same.value().front().route_string == baseline.value().front().route_string);
+  CHECK(same.value().front().total_distance_nm == baseline.value().front().total_distance_nm);
+}
+
+TEST_CASE("real data: a prefix block rule removes the whole designator family", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("ZSSS", "ZGGG"));
+  REQUIRE(baseline);
+  REQUIRE_FALSE(baseline.value().empty());
+  // The baseline is expected to use at least one W airway for this rule to bite.
+  const std::set<std::string> base_vias = EnrouteVias(baseline.value().front());
+  bool baseline_has_w = false;
+  for (const std::string& via : base_vias) {
+    if (via.starts_with("W")) {
+      baseline_has_w = true;
+      break;
+    }
+  }
+  if (!baseline_has_w) {
+    SKIP("baseline ZSSS->ZGGG route uses no W airway to block");
+  }
+
+  bf::RouteRequest req = MakeRequest("ZSSS", "ZGGG");
+  req.airway_rules = {
+      MakeRule({}, {"W"}, bf::AirwayRule::Match::kPrefix, bf::AirwayRule::Action::kBlock)};
+  bf::Result<std::vector<bf::Route>> blocked = db->FindRoutes(req);
+  REQUIRE(blocked);  // penalize is the safe default, but blocking W still leaves a route
+  REQUIRE_FALSE(blocked.value().empty());
+  for (const std::string& via : EnrouteVias(blocked.value().front())) {
+    CHECK_FALSE(via.starts_with("W"));
+  }
+}
+
+TEST_CASE("real data: exact matching does not catch prefix-extended designators", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // The core of #22's exact/prefix split: 1371 designators in cycle 2601 are a
+  // strict prefix of another one. Blocking "W1" exactly must leave W131/W134 alone,
+  // while blocking it as a prefix must remove them.
+  bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("ZSSS", "ZGGG"));
+  REQUIRE(baseline);
+  REQUIRE_FALSE(baseline.value().empty());
+  const std::set<std::string> base_vias = EnrouteVias(baseline.value().front());
+  // Pick a baseline W airway with digits after the first one (W131, W134, ...) so an
+  // exact rule on its 2-char stem is a no-op while a prefix rule bites.
+  std::string victim;
+  for (const std::string& via : base_vias) {
+    if (via.size() > 2 && via.starts_with("W")) {
+      victim = via;
+      break;
+    }
+  }
+  if (victim.empty()) {
+    SKIP("baseline route uses no multi-digit W airway");
+  }
+  const std::string stem = victim.substr(0, 2);  // e.g. "W1" from "W131"
+
+  bf::RouteRequest exact = MakeRequest("ZSSS", "ZGGG");
+  exact.airway_rules = {
+      MakeRule({}, {stem}, bf::AirwayRule::Match::kExact, bf::AirwayRule::Action::kBlock)};
+  bf::Result<std::vector<bf::Route>> exact_result = db->FindRoutes(exact);
+  REQUIRE(exact_result);
+  REQUIRE_FALSE(exact_result.value().empty());
+  // The stem names no real airway (or at least not the victim), so the route stands.
+  CHECK(exact_result.value().front().route_string == baseline.value().front().route_string);
+
+  bf::RouteRequest prefix = MakeRequest("ZSSS", "ZGGG");
+  prefix.airway_rules = {
+      MakeRule({}, {stem}, bf::AirwayRule::Match::kPrefix, bf::AirwayRule::Action::kBlock)};
+  bf::Result<std::vector<bf::Route>> prefix_result = db->FindRoutes(prefix);
+  REQUIRE(prefix_result);
+  REQUIRE_FALSE(prefix_result.value().empty());
+  CHECK(EnrouteVias(prefix_result.value().front()).count(victim) == 0);
+  CHECK(prefix_result.value().front().route_string != baseline.value().front().route_string);
+}
+
+TEST_CASE("real data: a region-restricted rule is narrower than an unrestricted one",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // Blocking W airways only inside ZS leaves W airways elsewhere usable, so the
+  // route may still ride a W leg outside that region -- the per-leg granularity #22
+  // settled on. An all-regions rule cannot.
+  bf::RouteRequest region = MakeRequest("ZSSS", "ZGGG");
+  region.airway_rules = {
+      MakeRule({"ZS"}, {"W"}, bf::AirwayRule::Match::kPrefix, bf::AirwayRule::Action::kBlock)};
+  bf::Result<std::vector<bf::Route>> region_result = db->FindRoutes(region);
+  REQUIRE(region_result);
+  REQUIRE_FALSE(region_result.value().empty());
+
+  bf::RouteRequest global = MakeRequest("ZSSS", "ZGGG");
+  global.airway_rules = {
+      MakeRule({}, {"W"}, bf::AirwayRule::Match::kPrefix, bf::AirwayRule::Action::kBlock)};
+  bf::Result<std::vector<bf::Route>> global_result = db->FindRoutes(global);
+  REQUIRE(global_result);
+  REQUIRE_FALSE(global_result.value().empty());
+
+  // The narrower rule forbids a subset of what the global one does, so its optimum
+  // can never be worse (longer) than the global rule's.
+  CHECK(region_result.value().front().total_distance_nm <=
+        global_result.value().front().total_distance_nm + 1e-6);
+}
+
+TEST_CASE("real data: penalize keeps a route where block would remove it", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // The reason region-level rules default to penalize (#22 D6): blocking every
+  // airway severs the graph and yields no route, while penalizing every airway
+  // leaves the graph connected and simply re-prices it -- the same route comes back.
+  bf::Result<std::vector<bf::Route>> baseline = db->FindRoutes(MakeRequest("ZSSS", "ZGGG"));
+  REQUIRE(baseline);
+  REQUIRE_FALSE(baseline.value().empty());
+
+  bf::RouteRequest blocked = MakeRequest("ZSSS", "ZGGG");
+  blocked.airway_rules = {
+      MakeRule({}, {}, bf::AirwayRule::Match::kPrefix, bf::AirwayRule::Action::kBlock)};
+  CHECK_FALSE(db->FindRoutes(blocked));  // every airway forbidden => no route at all
+
+  bf::RouteRequest penalized = MakeRequest("ZSSS", "ZGGG");
+  penalized.airway_rules = {
+      MakeRule({}, {}, bf::AirwayRule::Match::kPrefix, bf::AirwayRule::Action::kPenalize, 0.5)};
+  bf::Result<std::vector<bf::Route>> penalized_result = db->FindRoutes(penalized);
+  REQUIRE(penalized_result);
+  REQUIRE_FALSE(penalized_result.value().empty());
+  // A uniform penalty scales every airway leg alike, so the optimum is unchanged.
+  CHECK(penalized_result.value().front().route_string == baseline.value().front().route_string);
+}
+
+TEST_CASE("real data: too many airway rules is an error, not a silent truncation",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  bf::RouteRequest req = MakeRequest("ZSSS", "ZGGG");
+  // kMaxRules rules is fine; one more must be refused rather than dropped, since a
+  // dropped rule would silently let a forbidden airway back into the route.
+  const bf::AirwayRule rule =
+      MakeRule({"XX"}, {"ZZZ"}, bf::AirwayRule::Match::kExact, bf::AirwayRule::Action::kBlock);
+  req.airway_rules.assign(bf::AirwayRuleConstraint::kMaxRules, rule);
+  CHECK(db->FindRoutes(req));
+
+  req.airway_rules.push_back(rule);
+  bf::Result<std::vector<bf::Route>> over = db->FindRoutes(req);
+  REQUIRE_FALSE(over);
+  CHECK(over.error().message.find("too many airway rules") != std::string::npos);
+}
+
+TEST_CASE("real data: one rule may enumerate many regions and designators", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // Both sides of a rule share its single bit, so a long list is still ONE rule and
+  // does not eat into the kMaxRules budget. Mainland China is ten FIRs; note the
+  // prefix "Z" would additionally cover ZM (Mongolia) and ZK (North Korea).
+  bf::RouteRequest req = MakeRequest("ZSSS", "ZGGG");
+  req.airway_rules = {MakeRule({"ZB", "ZG", "ZH", "ZJ", "ZL", "ZP", "ZS", "ZU", "ZW", "ZY"},
+                               {"W131", "W134", "W19", "A470", "A599"},
+                               bf::AirwayRule::Match::kExact, bf::AirwayRule::Action::kBlock)};
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  // Every enumerated designator is gone from the result.
+  const std::set<std::string> vias = EnrouteVias(routes.value().front());
+  for (const std::string_view blocked : {"W131", "W134", "W19", "A470", "A599"}) {
+    CHECK(vias.count(std::string(blocked)) == 0);
+  }
 }
 
 }  // namespace

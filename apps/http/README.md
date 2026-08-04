@@ -58,7 +58,7 @@ Request body (`departure` and `arrival` required, the rest optional):
   "departure_runway": "RW31L", "arrival_runway": "RW25L",
   "departure_sid": "DEEZZ5", "arrival_star": "LENDY6",
   "avoid_waypoints": ["BOTON", "PSB/K6"],
-  "avoid_airways": ["J60"],
+  "airway_rules": [{"region_prefixes": ["ZB", "ZG"], "designators": ["J"], "match": "prefix", "action": "block"}],
   "random_seed": 42,
   "forced_points": ["PSB"]
 }
@@ -71,7 +71,7 @@ Request body (`departure` and `arrival` required, the rest optional):
 - `departure_runway` / `arrival_runway`: restrict the SID / STAR to this runway (e.g. `RW31L`); empty = any.
 - `departure_sid` / `arrival_star`: pin a SID / STAR by name (e.g. `DEEZZ5`, or `DEEZZ5.TOWIN` to pin the transition); empty = auto.
 - `avoid_waypoints`: idents (`BOTON`) or `IDENT/ARINC424_ICAO_CODE` (`BOTON/LF`) to route around; a bare ident avoids all its regional matches.
-- `avoid_airways`: designators (e.g. `J60`) to route around; also blocks concurrency segments recorded as `J60-V123`.
+- `airway_rules`: array of at most 32 rule objects restricting airways by ICAO region and designator, since usage conventions are regional (a `J` route is a terminal transition in China but a legal Jet route in the US, and the source data carries no type field to tell them apart). Replaces the former `avoid_airways`: "avoid J60" is `{"designators": ["J60"], "match": "exact", "action": "block"}`. Fields: `region_prefixes` (string[], ARINC 424 region codes — **not** airport identifiers — each prefix-matched; omit for any), `designators` (string[], compared per `match`; omit for any), `match` (`prefix` default | `exact`), `action` (`penalize` default | `block`), `penalty_fraction` (number ≥ 0, default `0.5`, a fraction of each leg's own length, used only when penalizing). Matching is per leg — a leg matches when its designator matches **and** either endpoint lies in a matching region — because a designator is not unique to one physical airway (29.6% of names in cycle 2601 are reused by disjoint instances), so a name-level ban would forbid same-named airways worldwide. Any matching `block` rule wins; otherwise matching `penalize` fractions sum. Two traps: `region_prefixes: ["Z"]` also covers `ZM` (Mongolia) and `ZK` (North Korea), so enumerate the ten mainland-China FIRs when you mean China; and `block` can yield **no route at all**, since an airport whose only terminal connection is a blocked airway becomes unroutable — prefer `penalize` for bulk region rules.
 - `random_seed`: reproducible route-diversity seed; omit for the plain optimum.
 - `forced_points`: ordered via points, idents or `IDENT/ARINC424_ICAO_CODE`; echoed resolved.
 
