@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-latest]
+        os: [ubuntu-24.04, macos-26, windows-latest]
         preset: [debug, release, tsan]
         exclude:
           # MSVC does not support -fsanitize or the GCC/Clang flags in the

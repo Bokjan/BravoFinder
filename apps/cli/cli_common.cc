@@ -6,7 +6,6 @@
 
 #include <charconv>
 #include <cmath>
-#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -109,45 +108,6 @@ bool StripStarMarkers(std::vector<std::string>& items, size_t& starred, std::str
   return true;
 }
 
-// Parse a floating-point fraction the way from_chars would, but without the
-// floating-point from_chars overload. That overload is not implemented on Apple
-// libc++ (it is declared deleted there, and only landed upstream in LLVM 16), so
-// a from_chars double parse would compile on libstdc++/MSVC and fail the macOS
-// CI legs. strtod is C99, available everywhere; the explicit grammar checks below
-// (no leading whitespace, no leading '+', no 0x/0X hex) restore from_chars's
-// stricter pattern, and rejecting endptr == begin (nothing consumed) and endptr
-// != end (trailing garbage) restores its whole-string, no-partial-parse
-// semantics. It is deliberately stricter than raw strtod: "0.5abc" is rejected
-// rather than silently parsed as 0.5.
-bool ParseDoubleStrict(std::string_view text, double& out) {
-  // strtod needs a NUL-terminated C string, so copy into an owned buffer first.
-  // `end` then points into THIS buffer, and the length checks below compare
-  // against it -- never against text.data(), which is a different allocation.
-  const std::string owned(text);
-  if (owned.empty()) {
-    return false;
-  }
-  // from_chars rejects a leading '+' and leading whitespace; strtod would accept
-  // both. Reject them up front so the two agree.
-  const char first = owned.front();
-  if (first == '+' || first == ' ' || first == '\t' || first == '\n' || first == '\r') {
-    return false;
-  }
-  // from_chars parses no hexadecimal floats; strtod would accept "0x1p3" as 8.
-  // Reject the 0x/0X prefix so a stray hex literal is an error, not a surprise.
-  if (owned.size() >= 2 && owned[0] == '0' && (owned[1] == 'x' || owned[1] == 'X')) {
-    return false;
-  }
-  char* end = nullptr;
-  const double value = std::strtod(owned.c_str(), &end);
-  const char* const begin = owned.c_str();
-  if (end == begin || end != begin + owned.size()) {
-    return false;
-  }
-  out = value;
-  return true;
-}
-
 }  // namespace
 
 std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string& error) {
@@ -235,7 +195,10 @@ std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string
     return rule;  // penalize at the default fraction
   }
   double fraction = 0.0;
-  if (!ParseDoubleStrict(value, fraction)) {
+  const char* fbegin = value.data();
+  const char* fend = fbegin + value.size();
+  auto [fptr, fec] = std::from_chars(fbegin, fend, fraction);
+  if (fec != std::errc{} || fptr != fend) {
     error = "penalty fraction '" + std::string(value) + "' must be a number >= 0";
     return std::nullopt;
   }

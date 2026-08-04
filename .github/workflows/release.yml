@@ -27,7 +27,7 @@ jobs:
             preset: release
             arch: arm64
             archive: tar.gz
-          - os: macos-15          # Apple Silicon runner -> arm64 only (see plan §3.4)
+          - os: macos-26          # Apple Silicon runner -> arm64 only (see plan §3.4)
             preset: release
             arch: arm64
             archive: tar.gz

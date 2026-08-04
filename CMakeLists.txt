@@ -1,7 +1,20 @@
 cmake_minimum_required(VERSION 3.21)
 
+# Apple deployment target — MUST precede project(): project() bakes
+# -mmacosx-version-min into CMAKE_CXX_FLAGS from this variable, so setting it
+# afterwards (as this block once did) is silently ineffective — the flag never
+# reaches the compiler and availability-gated APIs like floating-point
+# std::from_chars stay "unavailable". Floating-point std::from_chars is gated
+# behind availability(macos, introduced: 26.0) in Xcode 26's libc++, so
+# targeting 26.0 makes the symbol visible at compile time and the distributed
+# binaries run where the system libc++ provides it.
+if(APPLE)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "26.0" CACHE STRING
+      "Minimum macOS version (requires libc++ with floating-point std::from_chars)")
+endif()
+
 project(BravoFinder
-        VERSION 3.23.1
+        VERSION 3.23.2
         DESCRIPTION "A realistic and compliant flight routing engine and its query tools"
         LANGUAGES C CXX)
 
@@ -64,6 +77,40 @@ if(MSVC)
   endif()
 else()
   add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=")
+endif()
+
+# ---------------------------------------------------------------------------
+# Probe: floating-point std::from_chars availability on Apple
+# ---------------------------------------------------------------------------
+# The floating-point from_chars overload is availability-gated to macOS 26.0 in
+# Xcode 26's libc++; a too-old toolchain yields a cryptic "call to deleted
+# function". This probe fails loudly instead, naming the fix (Xcode 26 +
+# CMAKE_OSX_DEPLOYMENT_TARGET >= 26.0). libstdc++/MSVC always have the overload,
+# so the probe is Apple-only. CMAKE_REQUIRED_FLAGS passes -std=c++20 so try_compile
+# compiles the probe under the same standard as the project (from_chars is C++17+).
+if(APPLE)
+  include(CheckCXXSourceCompiles)
+  set(_bf_saved_req_flags "${CMAKE_REQUIRED_FLAGS}")
+  set(CMAKE_REQUIRED_FLAGS "-std=c++20")
+  check_cxx_source_compiles([[
+#include <charconv>
+int main() {
+  double d;
+  const char* s = "0.5";
+  auto r = std::from_chars(s, s + 3, d);
+  return r.ec == std::errc{} ? 0 : 1;
+}
+  ]] BF_HAVE_FROM_CHARS_DOUBLE)
+  set(CMAKE_REQUIRED_FLAGS "${_bf_saved_req_flags}")
+  if(NOT BF_HAVE_FROM_CHARS_DOUBLE)
+    message(FATAL_ERROR
+      "std::from_chars(double) is unavailable on this Apple toolchain. The "
+      "airway-filter fraction parser needs the floating-point overload, which "
+      "ships in Xcode 26's libc++ and requires CMAKE_OSX_DEPLOYMENT_TARGET >= "
+      "26.0 (current: ${CMAKE_OSX_DEPLOYMENT_TARGET}). Install Xcode 26 (or "
+      "newer), make sure CMAKE_OSX_DEPLOYMENT_TARGET is set before project(), "
+      "and rebuild.")
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
