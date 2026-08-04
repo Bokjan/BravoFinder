@@ -197,7 +197,7 @@ AltitudeConstraint ParseFenixAlt(const std::string& alt_text) {
 // ---- cycle extraction ---------------------------------------------------
 
 uint32_t ParseFenixCycle(sqlite3* conn) {
-  Result<SqliteStmt> stmt = Prepare(conn, "SELECT val FROM config WHERE key='Cycle'");
+  Result<SqliteStmt> stmt = Prepare(conn, "SELECT val FROM config WHERE key='CycleName'");
   if (!stmt) {
     return 0;
   }
