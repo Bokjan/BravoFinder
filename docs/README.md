@@ -13,6 +13,7 @@
 按「是什么 → 怎么建模 → 怎么快 → 怎么并发 → 实测多快」的顺序：
 
 - **[合规航路引擎](compliant-routing.zh-CN.md)** — 为什么不是地理最短：航路方向性、高低空 分层、高度带、MORA、可插拔约束框架、Yen 多候选择优。
+- **[可插拔约束层](constraint-layer.zh-CN.md)** — 约束框架的接口与纪律：三态裁决（Allow/Block/Penalize）、软惩罚为何不破坏 A\* 可采纳性、热路径只做整数运算（排序 vector / 位掩码）、解析器与约束的分层；以及扩展时真正难的部分——「匹配粒度」（同一条国别规则的名字级/实例级/逐段级三种读法，误伤差 7.5 倍）与「匹配语义看数据形态」。
 - **[地形安全：MORA 网格与 MSA 扇区](terrain-safety.zh-CN.md)** — 两种最低安全高度的建模： MORA 1° 全球稠密网格 vs MSA 按机场的稀疏扇区，为何用两套结构、怎么参与算路。
 - **[程序建模与航路网衔接](procedure-modeling.zh-CN.md)** — ARINC 424 / CIFP 全 23 种 path terminator、机场靠真实 SID/STAR 接入、衔接 fix 选点、多源 K-shortest、雷达引导的语义诚实。
 - **[航路串压缩](route-string.zh-CN.md)** — 输出符合 ICAO filed-flight-plan 的压缩航路串： 并线航路（`V28-Y28`）的累积交集折叠，避开会造出假转接点的字符串相等陷阱。

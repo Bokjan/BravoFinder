@@ -44,21 +44,26 @@ struct EdgeVerdict {
 
 搜索在松弛每条边时，对所有激活的约束求值：**任一约束 block 则边不可用；软代价累加** （`libs/engine/core/graph/astar.cc` 的 `EdgeAllowed`）。约束彼此独立、无状态，组合方式由搜索统一处理。 这是 §4.5 设计里「可插拔」的落点：以后要加欧控 RAD/CDR 之类的限制航路约束，只需新增一个 `Constraint` 子类，**不动图与算法**。
 
-## 4. 三个内置约束
+## 4. 内置约束
 
-`libs/engine/io/nav_database.cc` 的 `FindRoutes` 按查询请求组装激活哪些约束：
+`libs/engine/io/nav_database_routing.cc` 的 `FindRoutes` 按查询请求组装激活哪些约束——请求里没设的字段，对应约束不进链、零成本：
 
 | 约束 | 类型 | 作用 |
 |---|---|---|
 | `AltitudeBandConstraint` | 硬 | 巡航高度（FL）必须落在航段的 `[base_fl, top_fl]` 内，否则禁用该段 |
 | `MoraConstraint` | 硬 | 巡航高度不得低于该位置的 MORA（最低离地安全高度），否则禁用 |
 | `LevelPreferenceConstraint` | 软 | 高空(Jet)/低空(Victor)偏好：不匹配的航路加代价而非禁止 |
+| `AvoidWaypointConstraint` | 硬 | 禁用所有进入指定航路点的边（用户显式避让） |
+| `AirwayRuleConstraint` | 硬+软 | 按 ICAO 区域 × 航路 designator 封锁或惩罚（国别惯例，如「中国的 J 航路」） |
+| `RandomizeConstraint` | 软 | 由 seed 派生的确定性抖动，产出可复现的航路多样性 |
 
 几个实现要点：
 
 - **高度统一用 FL（百英尺）**。DCT 合成边（`base=top=0`）视为无高度限制，不被高度带约束拦。
 - **MORA 是安全下限的合理近似**：MORA 是 MSL 高度、巡航是气压高度 FL，直接比较作为安全下限 是可接受的近似。缺 MORA 数据时网格为空，不施加下限。
-- **高低空是软偏好不是硬约束**：给你想要的那层更低代价，但不彻底禁止另一层——因为现实里 跨层衔接是常见的。
+- **高低空是软偏好不是硬约束**：给你想要的那层更低代价，但不彻底禁止另一层——因为现实里 跨层衔接是常见的。同理，区域级的航路规则默认也走软惩罚：硬封锁是不可逆的连通性断裂，可能让唯一接入某机场的航路消失、查询直接无解。
+
+> 约束层的接口设计、可采纳性论证、热路径纪律，以及扩展一个新约束时会踩到的坑（尤其是「匹配粒度」——同一条国别规则有名字级/实例级/逐段级三种读法，误伤差 7.5 倍），见 [constraint-layer.zh-CN.md](constraint-layer.zh-CN.md)。
 
 ## 5. Yen K-shortest：为「择优合规」留出候选
 
