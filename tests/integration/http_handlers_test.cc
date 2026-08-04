@@ -168,3 +168,50 @@ TEST_CASE("http handlers: procedure-legs status mapping", "[integration][http]")
   CHECK(Run("lookup_procedure_legs", R"({"airport":"KIKR","procedure":"NOPE"})", *db).status ==
         404);
 }
+
+TEST_CASE("http handlers: airway_rules normalize lowercase regions and designators",
+          "[integration][http]") {
+  // Regression guard for the case-sensitivity gap: the navigation data stores
+  // region codes and designators upper-case, so a lowercase user input must be
+  // normalized before matching (see ParseRuleStringList's ToUpper) -- otherwise
+  // a lowercase "w" silently matches nothing and the route keeps its W legs.
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  // ZSSS->ZGGG is the reference query whose baseline runs on W131 / W134 / W19.
+  // Use NO region restriction (region_prefixes omitted = any region) and a
+  // lowercase designator "w" with match:"prefix": the rule must block the whole
+  // W family anywhere. (A region-limited rule would legitimately keep W legs
+  // outside that region -- e.g. W45 near ZGGG -- so an unrestricted rule is the
+  // clean assertion that normalization happened.)
+  const bf::service::HandlerResult blocked = Run(
+      "find_routes",
+      R"({"departure":"ZSSS","arrival":"ZGGG","k":1,"airway_rules":[{"designators":["w"],"match":"prefix","action":"block"}]})",
+      *db);
+  REQUIRE(blocked.status == 200);
+  rapidjson::Document doc;
+  doc.Parse(blocked.body.c_str());
+  REQUIRE_FALSE(doc.HasParseError());
+  REQUIRE(doc.IsArray());
+  REQUIRE(doc.Size() > 0);
+  // Walk the enroute legs (skip the leading SID and trailing STAR legs, whose
+  // `via` is the procedure keyword) and require no "W" designator survives.
+  const rapidjson::Value& legs = doc[0]["legs"];
+  bool has_w = false;
+  for (rapidjson::SizeType i = 1; i + 1 < legs.Size(); ++i) {
+    const std::string via = legs[i]["via"].GetString();
+    if (via != "DCT" && !via.empty() && via[0] == 'W') {
+      has_w = true;
+      break;
+    }
+  }
+  CHECK_FALSE(has_w);
+  // Sanity: the lowercase rule genuinely changed the route (the W legs are gone),
+  // proving the lowercase "w" input was normalized rather than silently ignored.
+  const bf::service::HandlerResult baseline =
+      Run("find_routes", R"({"departure":"ZSSS","arrival":"ZGGG","k":1})", *db);
+  REQUIRE(baseline.status == 200);
+  const std::string base_string = baseline.body;
+  CHECK(blocked.body != base_string);
+}

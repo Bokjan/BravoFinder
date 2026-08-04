@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/base/string_util.h"
 #include "core/constraints/airway_rule_constraint.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
@@ -79,7 +80,9 @@ std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args
 // malformed" collapse as ParseIdList. An absent member means "match everything"
 // for that side of the rule, which is an empty vector -- so absence and an empty
 // array are deliberately indistinguishable here. Returns false only for a member
-// that is present and genuinely malformed.
+// that is present and genuinely malformed. Both region and designator entries
+// are upper-cased, since the navigation data stores them upper-case and the rest
+// of the query layer already normalizes user input (see ToUpper).
 bool ParseRuleStringList(const rapidjson::Value& rule, const char* key,
                          std::vector<std::string>& out) {
   if (!rule.HasMember(key)) {
@@ -92,7 +95,7 @@ bool ParseRuleStringList(const rapidjson::Value& rule, const char* key,
     if (!v.IsString()) {
       return false;
     }
-    out.emplace_back(v.GetString());
+    out.emplace_back(ToUpper(v.GetString()));
   }
   return true;
 }
