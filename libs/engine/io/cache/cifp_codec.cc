@@ -45,6 +45,7 @@ struct WireProcedureLeg {
   uint16_t rnp_centinm;
   uint8_t turn_dir;
   uint16_t speed_limit_kt;
+  uint8_t is_mapt;  // 0/1; format_version >= 17
 };
 struct WireRunway {
   uint32_t ident_io, ident_il;
@@ -63,11 +64,11 @@ struct WireDirEntry {
 // leg_count * kProcedureLegSize bytes); the leg tail is fused per-procedure in
 // the read loop below against the then-remaining bytes.
 constexpr size_t kProcedureHeaderSize = sizeof(WireProcedureHeader);  // 33
-constexpr size_t kProcedureLegSize = sizeof(WireProcedureLeg);        // 47
+constexpr size_t kProcedureLegSize = sizeof(WireProcedureLeg);        // 48
 constexpr size_t kRunwaySize = sizeof(WireRunway);                    // 28
 constexpr size_t kDirEntrySize = sizeof(WireDirEntry);                // 24
 static_assert(kProcedureHeaderSize == 33, "procedure-header wire layout drifted");
-static_assert(kProcedureLegSize == 47, "procedure-leg wire layout drifted");
+static_assert(kProcedureLegSize == 48, "procedure-leg wire layout drifted");
 static_assert(kRunwaySize == 28, "runway wire layout drifted");
 static_assert(kDirEntrySize == 24, "directory-entry wire layout drifted");
 
@@ -111,6 +112,7 @@ std::vector<uint8_t> SerializeSegment(const CifpData& data, StringPool& pool) {
       w.U16(leg.rnp_centinm);
       w.U8(static_cast<uint8_t>(leg.turn_dir));
       w.U16(leg.speed_limit_kt);
+      w.U8(leg.is_mapt ? 1 : 0);
     }
   }
   w.U32(static_cast<uint32_t>(data.runways.size()));
@@ -202,6 +204,7 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
       leg.rnp_centinm = br.U16();
       leg.turn_dir = static_cast<char>(br.U8());
       leg.speed_limit_kt = br.U16();
+      leg.is_mapt = br.U8() != 0;
     }
   }
   const uint32_t rwy_count = br.U32();

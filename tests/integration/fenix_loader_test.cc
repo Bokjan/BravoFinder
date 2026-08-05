@@ -268,13 +268,27 @@ TEST_CASE("fenix: Procedure::runway is RW-prefixed only", "[integration][fenix]"
   REQUIRE(sid_enr != nullptr);
   CHECK(sid_enr->runway.empty());
 
-  // (c) An approach IAF transition (fix name) carries no runway -- approaches
-  // never have an RW-prefixed transition in Fenix, so their runway is always
-  // empty, matching DFD1/DFD2/X-Plane.
+  // (c) An approach IAF transition carries the structured Terminals.Rwy
+  // (normalized to RW-prefix), not the IAF name — so --rwy-arr can filter it.
   const bf::Procedure* apch_iaf = find("I13L", "COVIR");
   REQUIRE(apch_iaf != nullptr);
   CHECK(apch_iaf->type == bf::ProcedureType::kApproach);
-  CHECK(apch_iaf->runway.empty());
+  CHECK(apch_iaf->runway == "RW13L");
+  CHECK(apch_iaf->route_type == static_cast<int>('A'));
+
+  // (d) Approach final (empty transition) also carries the same runway, and at
+  // least one MAPT-marked leg (WD char4 == 'M').
+  const bf::Procedure* apch_final = find("I13L", "");
+  REQUIRE(apch_final != nullptr);
+  CHECK(apch_final->runway == "RW13L");
+  bool saw_mapt = false;
+  for (const bf::ProcedureLeg& leg : apch_final->legs) {
+    if (leg.is_mapt) {
+      saw_mapt = true;
+      break;
+    }
+  }
+  CHECK(saw_mapt);
 
   // Global invariant: runway is either empty or an RW-prefixed ident. The
   // pre-fix loader populated ~120k records with a bogus fix-name runway.

@@ -43,17 +43,25 @@ ProcedureRef MakeRef(const Procedure& p) {
   return ref;
 }
 
+ProcedureRef MakeApproachRef(const Procedure& p, std::string_view iaf) {
+  ProcedureRef ref = MakeRef(p);
+  ref.iaf = std::string(iaf);
+  return ref;
+}
+
 // Merge a (fix_vertex, seed, bearing, ref) finding into the connection map,
 // keeping the smallest seed distance per fix (and its matching bearing) and
-// collecting every procedure ref.
+// collecting every procedure ref. When the seed wins, the winning ref is moved
+// to procedures.front() so SelectProcedures / metadata pick the priced option.
 void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, double seed,
-                double bearing, const ProcedureRef& ref) {
+                double bearing, const ProcedureRef& ref, double approach_bearing = -1.0) {
   auto it = by_fix.find(fix_vertex);
   if (it == by_fix.end()) {
     Connection c;
     c.fix_vertex = fix_vertex;
     c.seed_distance_nm = seed;
     c.bearing = bearing;
+    c.approach_bearing = approach_bearing;
     c.procedures.push_back(ref);
     by_fix.emplace(fix_vertex, std::move(c));
     return;
@@ -62,6 +70,8 @@ void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, dou
   if (seed < it->second.seed_distance_nm) {
     it->second.seed_distance_nm = seed;
     it->second.bearing = bearing;
+    it->second.approach_bearing = approach_bearing;
+    std::swap(it->second.procedures.front(), it->second.procedures.back());
   }
 }
 
@@ -266,6 +276,177 @@ std::vector<Connection> BuildSide(const CifpData& cifp, ProcedureType want, Walk
   return Finalize(by_fix);
 }
 
+// Polyline distance along a procedure's definite fixes, optionally starting at
+// a given vertex and stopping at (and including) the MAPT leg. No-fix legs
+// contribute their published distance_nm when present (same pending rule as
+// WalkOnNetworkFixes). Returns false when `start_vertex` is set but never found.
+struct ApproachWalk {
+  double nm = 0.0;
+  Coordinate end_coord{};
+  bool have_end = false;
+  // First definite fix after the start (for outbound bearing at an IAF).
+  Coordinate next_coord{};
+  bool have_next = false;
+};
+
+bool WalkApproachSegment(const Procedure& p, const GraphBuilder& builder, int start_vertex,
+                         bool stop_at_mapt, ApproachWalk& out) {
+  double cumulative = 0.0;
+  bool measuring = (start_vertex < 0);
+  bool have_prev = false;
+  Coordinate prev_coord{};
+  double pending_nm = 0.0;
+  bool found_start = (start_vertex < 0);
+
+  for (const ProcedureLeg& leg : p.legs) {
+    const int v = leg.fix_is_definite() ? ResolveFix(leg, builder) : -1;
+    if (v < 0) {
+      if (measuring && leg.distance_nm > 0.0) {
+        pending_nm += leg.distance_nm;
+      }
+      continue;
+    }
+    const Coordinate this_coord = builder.graph().CoordOf(v);
+    if (!measuring) {
+      if (v == start_vertex) {
+        measuring = true;
+        found_start = true;
+        prev_coord = this_coord;
+        have_prev = true;
+        pending_nm = 0.0;
+        // Starting at this fix: do not count a span yet; look ahead for bearing.
+        if (leg.is_mapt && stop_at_mapt) {
+          out.nm = 0.0;
+          out.end_coord = this_coord;
+          out.have_end = true;
+          return true;
+        }
+        continue;
+      }
+      continue;
+    }
+    if (have_prev) {
+      cumulative += pending_nm > 0.0 ? pending_nm : prev_coord.DistanceTo(this_coord);
+      if (!out.have_next) {
+        out.next_coord = this_coord;
+        out.have_next = true;
+      }
+    }
+    pending_nm = 0.0;
+    prev_coord = this_coord;
+    have_prev = true;
+    out.end_coord = this_coord;
+    out.have_end = true;
+    out.nm = cumulative;
+    if (leg.is_mapt && stop_at_mapt) {
+      return found_start;
+    }
+  }
+  return found_start;
+}
+
+// Empty-transition approach record with the same name (final + missed segment).
+const Procedure* FindApproachFinal(const CifpData& cifp, const std::string& name) {
+  for (const Procedure& p : cifp.procedures) {
+    if (p.type == ProcedureType::kApproach && p.name == name && p.transition_ident.empty()) {
+      return &p;
+    }
+  }
+  return nullptr;
+}
+
+// Seed body from an IAF gate through MAPT (splicing transition ∥ final) plus
+// the MAPT→airport stub. `gate_proc` is the record that owns the IF; `gate_v`
+// is the IAF vertex (on- or off-network). Does not include any |F→I| proxy leg.
+double ApproachBodyAndStubNm(const Procedure& gate_proc, int gate_v, const CifpData& cifp,
+                             const Coordinate& airport_coord, const GraphBuilder& builder,
+                             double& bearing_from_iaf_out) {
+  ApproachWalk from_gate;
+  // Transition record: IAF → end of transition (usually the final IF).
+  // Final record: start → MAPT. When gate_proc itself is the final (empty
+  // transition), a single walk IAF→MAPT covers the body.
+  const bool gate_is_final = gate_proc.transition_ident.empty();
+  if (!WalkApproachSegment(gate_proc, builder, gate_v, /*stop_at_mapt=*/gate_is_final, from_gate)) {
+    return airport_coord.DistanceTo(builder.graph().CoordOf(gate_v));  // degenerate
+  }
+
+  double body = from_gate.nm;
+  Coordinate end = from_gate.have_end ? from_gate.end_coord : builder.graph().CoordOf(gate_v);
+  if (from_gate.have_next) {
+    bearing_from_iaf_out = builder.graph().CoordOf(gate_v).BearingTo(from_gate.next_coord);
+  } else {
+    bearing_from_iaf_out = builder.graph().CoordOf(gate_v).BearingTo(airport_coord);
+  }
+
+  if (!gate_is_final) {
+    const Procedure* final_proc = FindApproachFinal(cifp, gate_proc.name);
+    if (final_proc != nullptr) {
+      ApproachWalk final_walk;
+      // Start from the beginning of the final record (start_vertex < 0) and
+      // stop at MAPT. The transition already flew to the final IF; do not
+      // double-count that fix — WalkApproachSegment from start measures the
+      // final IF→MAPT polyline (cumulative from first fix).
+      if (WalkApproachSegment(*final_proc, builder, /*start_vertex=*/-1, /*stop_at_mapt=*/true,
+                              final_walk) &&
+          final_walk.have_end) {
+        body += final_walk.nm;
+        end = final_walk.end_coord;
+      }
+    }
+  }
+
+  return body + end.DistanceTo(airport_coord);
+}
+
+constexpr int kApproachProxyK = 5;
+
+// Approach IAF connections for airports with no STAR: gate-only (path_term IF).
+// On-network inbound IAFs become search goals directly; off-network IAFs that
+// still resolve to a vertex are represented by K nearest inbound on-network
+// proxies F with seed |F→I| + (I→MAPT…) + stub (no graph mutation).
+std::unordered_map<int, Connection> CollectApproachArrivals(const CifpData& cifp,
+                                                            const Coordinate& airport_coord,
+                                                            const GraphBuilder& builder,
+                                                            const std::string& runway_filter) {
+  std::unordered_map<int, Connection> by_fix;
+  for (const Procedure& p : cifp.procedures) {
+    if (p.type != ProcedureType::kApproach || !RunwayMatches(p, runway_filter)) {
+      continue;
+    }
+    for (const ProcedureLeg& leg : p.legs) {
+      if (leg.path_term != PathTerminator::kIF || !leg.fix_is_definite()) {
+        continue;
+      }
+      const int iaf = ResolveFix(leg, builder);
+      if (iaf < 0) {
+        continue;  // no vertex — cannot price or proxy
+      }
+      double bearing_from_iaf = -1.0;
+      const double body_stub =
+          ApproachBodyAndStubNm(p, iaf, cifp, airport_coord, builder, bearing_from_iaf);
+      const std::string iaf_ident(leg.fix.IdentView());
+      const ProcedureRef pref = MakeApproachRef(p, iaf_ident);
+      if (builder.HasInbound(iaf)) {
+        Accumulate(by_fix, iaf, body_stub, bearing_from_iaf, pref, bearing_from_iaf);
+        continue;
+      }
+      // Proxy goals: nearest on-network inbound fixes around the off-net IAF.
+      const Coordinate iaf_coord = builder.graph().CoordOf(iaf);
+      for (int f : builder.NearestOnNetwork(iaf_coord, kApproachProxyK, /*inbound=*/true)) {
+        if (f == iaf) {
+          continue;
+        }
+        const Coordinate f_coord = builder.graph().CoordOf(f);
+        const double seed = f_coord.DistanceTo(iaf_coord) + body_stub;
+        // Turn at F is priced as leaving F toward the IAF (the virtual first leg).
+        const double bearing = f_coord.BearingTo(iaf_coord);
+        Accumulate(by_fix, f, seed, bearing, pref, bearing_from_iaf);
+      }
+    }
+  }
+  return by_fix;
+}
+
 }  // namespace
 
 std::vector<Connection> ProcedureConnector::BuildDeparture(const CifpData& cifp,
@@ -294,6 +475,18 @@ std::vector<Connection> ProcedureConnector::BuildArrival(const CifpData& cifp,
   // search prefers the latter.
   return BuildSide(cifp, ProcedureType::kStar, WalkDir::kInbound, airport_coord, builder,
                    runway_filter);
+}
+
+std::vector<Connection> ProcedureConnector::BuildApproachArrival(const CifpData& cifp,
+                                                                 const Coordinate& airport_coord,
+                                                                 const GraphBuilder& builder,
+                                                                 const std::string& runway_filter) {
+  // No STAR: connect via approach IAFs (IF legs). On-network inbound IAFs are
+  // ordinary goals; off-network IAFs contribute proxy goals at nearby inbound
+  // fixes (seed folds |F→I| into the cost — no virtual edges on the CSR).
+  std::unordered_map<int, Connection> by_fix =
+      CollectApproachArrivals(cifp, airport_coord, builder, runway_filter);
+  return Finalize(by_fix);
 }
 
 std::vector<Connection> ProcedureConnector::BuildDctFallback(const Coordinate& airport_coord,

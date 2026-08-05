@@ -466,6 +466,7 @@ struct ProcCols {
   int rnp = 15;          // rnp (REAL, nautical miles)
   int turn_dir = 16;     // turn_direction ('L'/'R')
   int speed_limit = 17;  // speed_limit (knots)
+  int wpt_desc = 18;     // waypoint_description_code (ARINC 424, 4 chars)
 };
 
 // SQL for one procedure table, in ProcCols column order.
@@ -475,7 +476,8 @@ std::string ProcSql(std::string_view table, bool single_airport) {
                         "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
                         "path_termination, course, course_flag, distance_time, "
                         "route_distance_holding_distance_time, altitude_description, altitude1, "
-                        "altitude2, rnp, turn_direction, speed_limit FROM ") +
+                        "altitude2, rnp, turn_direction, speed_limit, "
+                        "waypoint_description_code FROM ") +
                     std::string(table);
   if (single_airport) {
     sql += " WHERE airport_identifier = ?";
@@ -516,6 +518,7 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   const std::string turn = ColumnText(stmt, c.turn_dir);
   leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
   leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(ColumnInt(stmt, c.speed_limit), 0, 65535));
+  leg.is_mapt = IsMaptDesc(ColumnText(stmt, c.wpt_desc));
   proc.legs.push_back(std::move(leg));
   // Consume the seqno column (previously relied on only by ORDER BY) to validate
   // that legs arrive non-decreasing within a procedure -- the order the
@@ -593,10 +596,10 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
       current.transition_ident = trans;
       if (trans.rfind("RW", 0) == 0) {
         current.runway = trans;
+      } else if (type == ProcedureType::kApproach) {
+        current.runway = ApproachRunwayFromName(name);
       }
-      int rt = 0;
-      std::from_chars(route.data(), route.data() + route.size(), rt);
-      current.route_type = rt;
+      current.route_type = ParseRouteTypeToken(route);
       have_current = true;
     }
     AppendLeg(stmt, c, magvar, current, prev_seqno);
@@ -705,10 +708,10 @@ std::optional<CifpData> LoadAirportProcedures(
         current.transition_ident = trans;
         if (trans.rfind("RW", 0) == 0) {
           current.runway = trans;
+        } else if (type == ProcedureType::kApproach) {
+          current.runway = ApproachRunwayFromName(name);
         }
-        int rt = 0;
-        std::from_chars(route.data(), route.data() + route.size(), rt);
-        current.route_type = rt;
+        current.route_type = ParseRouteTypeToken(route);
         have_current = true;
       }
       AppendLeg(stmt, c, magvar, current, prev_seqno);

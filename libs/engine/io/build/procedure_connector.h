@@ -18,6 +18,10 @@ struct ProcedureRef {
   std::string name;        // e.g. "DEEZZ5"
   std::string transition;  // enroute transition ident, runway, or "ALL"
   std::string runway;      // runway ident if known, else empty
+  // For kApproach: the IAF ident this ref connects through (may differ from the
+  // Connection's fix_vertex when a proxy on-network fix stands in for an
+  // off-network IAF). Empty for SID/STAR.
+  std::string iaf;
 };
 
 // A point where procedures hand off to / pick up from the enroute network: the
@@ -34,8 +38,12 @@ struct Connection {
   // For a SID this is the INBOUND heading (direction the procedure arrives at
   // the fix from the runway side); for a STAR the OUTBOUND heading (direction
   // it leaves the fix toward the runway). Drives the turn-angle penalty at the
-  // SID-exit / STAR-entry handoff.
+  // SID-exit / STAR-entry handoff. For an approach proxy goal this is the
+  // outbound heading leaving the proxy toward the off-network IAF.
   double bearing = -1.0;
+  // Approach IAF outbound heading [0, 360), or -1. Set for approach connections
+  // (on-network or proxy); used for route metadata, not the turn penalty.
+  double approach_bearing = -1.0;
   std::vector<ProcedureRef> procedures;
 };
 
@@ -75,6 +83,16 @@ class ProcedureConnector {
   static std::vector<Connection> BuildArrival(const CifpData& cifp, const Coordinate& airport_coord,
                                               const GraphBuilder& builder,
                                               const std::string& runway_filter);
+
+  // Arrival connections from approach IAFs when the airport has no STAR.
+  // Gate-only (path_term IF). On-network inbound IAFs are ordinary goals;
+  // off-network IAFs contribute K nearest inbound proxy goals (seed folds
+  // |F→I| into the cost — no CSR mutation). Seed body is IAF→MAPT
+  // (transition∥final splice) plus the MAPT→airport stub.
+  static std::vector<Connection> BuildApproachArrival(const CifpData& cifp,
+                                                      const Coordinate& airport_coord,
+                                                      const GraphBuilder& builder,
+                                                      const std::string& runway_filter);
 
   // DCT fallback: connect to the nearest on-network waypoints by great-circle
   // distance. Used when no procedure connections are available. `arrival` picks

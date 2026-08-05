@@ -10,6 +10,7 @@ add_executable(bf_tests
                unit/yen_test.cc
                unit/search_workspace_test.cc
                unit/cifp_parser_test.cc
+               unit/procedure_helpers_test.cc
                unit/loader_registry_test.cc
                unit/route_string_test.cc
                unit/route_parser_test.cc

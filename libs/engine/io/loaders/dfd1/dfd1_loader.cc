@@ -530,6 +530,7 @@ struct ProcCols {
   int rnp = 14;          // rnp (DOUBLE, nautical miles)
   int turn_dir = 15;     // turn_direction ('L'/'R')
   int speed_limit = 16;  // speed_limit (knots)
+  int wpt_desc = 17;     // waypoint_description_code (ARINC 424, 4 chars)
 };
 
 // Fill the leg-level RNP/turn/speed fields shared by both v1 procedure paths
@@ -547,6 +548,7 @@ void FillProcExtras(sqlite3_stmt* stmt, const ProcCols& c, ProcedureLeg& leg) {
   leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
   const int speed = ColumnInt(stmt, c.speed_limit);
   leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(speed, 0, 65535));
+  leg.is_mapt = IsMaptDesc(ColumnText(stmt, c.wpt_desc));
 }
 
 // Append legs/runways from one procedure table into `out` (per-airport). `type`
@@ -567,7 +569,7 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
           "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
           "path_termination, magnetic_course, route_distance_holding_distance_time, "
           "distance_time, altitude_description, altitude1, altitude2, rnp, turn_direction, "
-          "speed_limit FROM ") +
+          "speed_limit, waypoint_description_code FROM ") +
       table +
       " ORDER BY airport_identifier, procedure_identifier, "
       "transition_identifier, route_type, seqno";
@@ -621,15 +623,14 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
       current.transition_ident = trans;
       if (trans.rfind("RW", 0) == 0) {
         current.runway = trans;  // runway transition
+      } else if (type == ProcedureType::kApproach) {
+        // Approach final segments leave transition_identifier empty; derive the
+        // runway filter key from the procedure name (no structured runway col).
+        current.runway = ApproachRunwayFromName(name);
       }
-      // route_type is numeric for SID/STAR, alpha for IAP; keep numeric value as
-      // provenance, 0 when not a number. Pure provenance -- never affects routing.
-      // from_chars (no exceptions) since IAP route_type is non-numeric.
-      int rt = 0;
-      const char* d = route.data();
-      const char* e = d + route.size();
-      std::from_chars(d, e, rt);
-      current.route_type = rt;
+      // route_type is numeric for SID/STAR, alpha for IAP; alpha chars are
+      // stored as their character value (provenance for transition vs final).
+      current.route_type = ParseRouteTypeToken(route);
       have_current = true;
     }
     ProcedureLeg leg;
@@ -737,7 +738,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
             "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
             "path_termination, magnetic_course, route_distance_holding_distance_time, "
             "distance_time, altitude_description, altitude1, altitude2, rnp, turn_direction, "
-            "speed_limit FROM ") +
+            "speed_limit, waypoint_description_code FROM ") +
         table +
         " WHERE airport_identifier = ? ORDER BY procedure_identifier, "
         "transition_identifier, route_type, seqno";
@@ -775,10 +776,10 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
         current.transition_ident = trans;
         if (trans.rfind("RW", 0) == 0) {
           current.runway = trans;
+        } else if (type == ProcedureType::kApproach) {
+          current.runway = ApproachRunwayFromName(name);
         }
-        int rt = 0;
-        std::from_chars(route.data(), route.data() + route.size(), rt);
-        current.route_type = rt;
+        current.route_type = ParseRouteTypeToken(route);
         have_current = true;
       }
       ProcedureLeg leg;

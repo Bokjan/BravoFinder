@@ -64,27 +64,43 @@ DESIGN §4.4 最初设想：非定点 leg 会挡住程序接入，需要用航�
 
 > 这里的 Yen 在大图上的性能优化（Lawler + heuristic memoization）单独成文： [yen-lawler-optimization.zh-CN.md](yen-lawler-optimization.zh-CN.md)。
 
-## 6. 语义诚实：区分三种「回退直飞」
+## 6. 无 STAR 机场：DCT-to-IAF（终端过渡）
 
-当程序无法把机场接入航路网时会回退到 DCT（直飞），但**回退的原因不同**，混为一谈会误导。 引擎用一个对称的 `ConnectionKind` 区分（Route 的 `dep_connection`/`arr_connection`）：
+不少小机场**没有公布 STAR**，但有进近（approach）。原先到达侧在 STAR 候选为空后直接走 DCT fallback——按大圆取最近 on-network fix，**对 IAF 无感知**（例如 KTVL 曾出现 `… MARRI DCT KTVL`，绕过在网的 HETRY）。
 
-- `kProcedure`——真的用了程序接入；
-- `kRadarVectors`——机场**发布了** SID/STAR，但没有一个能到达在网 fix（雷达引导离场）；
-- `kDirect`——机场**根本没有**程序数据，纯 DCT 回退。
+从 v3.24.0 起，到达侧在「无 STAR（或 STAR 候选全空）且未指定命名 `--star`」时，会尝试把 **approach 的 IAF** 接进到达候选（`BuildApproachArrival`）：
 
-CLI/JSON 会显式标注 「RADAR VECTORS」，把「雷达引导」和「缺数据」两种情况区分开——这是「语义 诚实」而非假装有一条程序。判断依据是 `has_procedures`（该侧是否发布了 SID/STAR）与 `used_procedures`（是否真的接上了）两个标志。
+- **只接 gate**：approach 的 gate 是 `path_term == IF`（=IAF）；不要把 FAF / MAPT / 复飞点当成连接点。
+- **filed string 诚实**：`star` 字段留空；航路串止于最后一个**在网** fix，形如 `… <fix> DCT ARR`。进近名、IAF、磁航向等只进 detail 元数据（`approach` / `approach_iaf` / `approach_bearing` / `approach_options`），**不**把进近标识塞进 ATS Field 15 风格的 string（那不是「合成 STAR」）。
+- **off-net IAF 用代理 goal**：IAF 若无入边，不能当 search goal。引擎不为它们加虚拟边；改为在 IAF 附近取若干在网代理点，seed 含 `|代理→IAF| + IAF→MAPT 程序体`，与在网 IAF 同池比价。
+- **seed 止于 MAPT**：长度按 IAF→MAPT（Waypoint Description Code 的 MAPT 位），不含复飞段。
+- **命名 `--star` 不匹配仍报错**，不静默落到 IAF。
 
-## 7. 单文件部署：CIFP 分段缓存
+有 STAR 的机场行为不变。若某机场**有** STAR 但其入口 fix **全部**脱网，那是另一条「STAR splice」路径（另开跟踪），不在本节。
+
+## 7. 语义诚实：区分四种到达/离场连接
+
+当程序无法（或不该）把机场写成 SID/STAR 接入时，回退原因不同，混为一谈会误导。引擎用 `ConnectionKind` 区分（Route 的 `dep_connection`/`arr_connection`）：
+
+- `kProcedure`——真的用了 SID/STAR 接入（`sid`/`star` 有名）；
+- `kTerminalTransition`——**无 STAR**、用了进近 IAF 的 DCT-to-IAF（见 §6）；`star` 空，元数据带 approach；
+- `kRadarVectors`——机场**发布了** SID/STAR，但没有一个能到达在网 fix（雷达引导）；
+- `kDirect`——该侧**没有**可用的 SID/STAR/approach 衔接，纯 DCT 回退。
+
+CLI/JSON 会显式标注「RADAR VECTORS」或「APCH PROC」等，把「雷达引导 / 终端过渡 / 缺数据」分开——这是语义诚实，而非假装有一条 STAR。判断依据是该侧是否发布了程序、以及本次是否真的用了 STAR 或 approach。
+
+## 8. 单文件部署：CIFP 分段缓存
 
 14838 个 CIFP 散文件不便部署。引擎把它们打包成统一 `.bfdb` 里的一个**分段 CIFP 段**（与 graph、 detail 同处一个文件、共用全局字符串池），按需加载单机场程序段，启动仍是毫秒级。这属于缓存 工程，单独成文见 [binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
 
-## 8. 小结
+## 9. 小结
 
 机场接入航路网这条链，环环相扣：
 
 1. 机场附近全是终端死点 → **必须靠程序接入**（不能直连最近航点）；
 2. 解析 ARINC 424 全 23 种 path terminator，保留完整结构；
 3. 全量复核证明非定点 leg 几乎不挡接入，**不伪造等效边**；
-4. 暴露程序经过的**每个**在网 fix 作候选，沿航迹 seed 引导择近；
+4. 到达/离场只在**发布衔接点**交接（STAR 的 IF、SID 的末 fix），机场级回退兜底；
 5. 多源 K-shortest 让候选走不同程序；
-6. 无法接入时**如实区分**雷达引导 vs 缺数据。
+6. 无 STAR 时用 **DCT-to-IAF** 接进近，filed 仍写 DCT、进近只进元数据；
+7. 无法接入时**如实区分**程序 / 终端过渡 / 雷达引导 / 缺数据。

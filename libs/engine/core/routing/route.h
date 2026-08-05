@@ -10,11 +10,13 @@ namespace bf {
 
 // How one endpoint of a route attaches to the enroute network.
 enum class ConnectionKind {
-  kProcedure,     // via a named SID/STAR (the sid/star field holds its name)
-  kDirect,        // DCT fallback: the airport has no procedure data for this side
-  kRadarVectors,  // procedures exist but none reach an on-network fix (a radar-
-                  // vectored departure/arrival); the search fell back to a DCT
-                  // link, but this is a real procedure situation, not missing data
+  kProcedure,           // via a named SID/STAR (the sid/star field holds its name)
+  kDirect,              // DCT fallback: the airport has no procedure data for this side
+  kRadarVectors,        // procedures exist but none reach an on-network fix (a radar-
+                        // vectored departure/arrival); the search fell back to a DCT
+                        // link, but this is a real procedure situation, not missing data
+  kTerminalTransition,  // no STAR; connected via an approach IAF (on-network or proxy);
+                        // star is empty; approach_* fields describe the transition
 };
 
 // The stable token form of a connection kind, as used in JSON output and any
@@ -27,6 +29,8 @@ inline const char* ToString(ConnectionKind k) {
       return "direct";
     case ConnectionKind::kRadarVectors:
       return "radar_vectors";
+    case ConnectionKind::kTerminalTransition:
+      return "terminal_transition";
   }
   return "direct";
 }
@@ -78,10 +82,10 @@ struct Route {
   std::string arr_runway;  // arrival runway if known
 
   // How each endpoint attaches to the network. kProcedure when a SID/STAR was
-  // selected (sid/star names it); kRadarVectors when procedures exist but none
-  // reach an on-network fix (radar vectors, fell back to DCT); kDirect when the
-  // airport has no procedure data. Symmetric across departure/arrival even
-  // though today only departures see kRadarVectors in practice.
+  // selected (sid/star names it); kTerminalTransition when an approach IAF was
+  // used (star empty; see approach_*); kRadarVectors when procedures exist but
+  // none reach an on-network fix (radar vectors, fell back to DCT); kDirect when
+  // the airport has no procedure data.
   ConnectionKind dep_connection = ConnectionKind::kDirect;
   ConnectionKind arr_connection = ConnectionKind::kDirect;
 
@@ -90,6 +94,19 @@ struct Route {
   // The route was computed once for the shared fix rather than per procedure.
   std::vector<std::string> sid_options;
   std::vector<std::string> star_options;
+
+  // Set when arr_connection == kTerminalTransition: the arrival joined via an
+  // approach IAF rather than a published STAR. `approach` is FormatRef of the
+  // winning procedure -- the bare approach name ("X18") when the IAF's IF leg
+  // sits in an empty-transition (final) record, or "NAME.TRANSITION" when it
+  // comes from a named transition record ("R18.HETRY"); `approach_iaf` is the
+  // IAF ident (never a proxy fix); `approach_bearing` is the IAF outbound
+  // heading or -1.
+  bool terminal_transition = false;
+  std::string approach;
+  std::string approach_iaf;
+  double approach_bearing = -1.0;
+  std::vector<std::string> approach_options;
 
   // The forced ("via") points the route was routed through, in order, echoed as
   // resolved "IDENT/REGION" keys. This makes the disambiguation visible when a

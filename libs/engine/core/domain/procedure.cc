@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "core/domain/procedure.h"
 
+#include <cctype>
+#include <charconv>
+#include <string>
+
 namespace bf {
 
 bool TerminatesAtFix(PathTerminator t) {
@@ -163,6 +167,77 @@ std::string PathTerminatorName(PathTerminator t) {
       return "??";
   }
   return "??";
+}
+
+bool IsMaptDesc(std::string_view desc) {
+  // Right-pad to 4 characters with spaces; character 4 (1-based) == 'M'.
+  char pad[4] = {' ', ' ', ' ', ' '};
+  const size_t n = desc.size() < 4 ? desc.size() : 4;
+  for (size_t i = 0; i < n; ++i) {
+    pad[i] = desc[i];
+  }
+  return pad[3] == 'M';
+}
+
+std::string NormalizeRunwayIdent(std::string_view rwy) {
+  if (rwy.empty()) {
+    return {};
+  }
+  if (rwy.size() >= 2 && rwy[0] == 'R' && rwy[1] == 'W') {
+    return std::string(rwy);
+  }
+  std::string out = "RW";
+  out.append(rwy);
+  return out;
+}
+
+std::string ApproachRunwayFromName(std::string_view name) {
+  // ^[A-Z](\d{1,2})([LRC]?) — skip the ARINC approach-type prefix, take runway
+  // digits + optional parallel suffix; trailing variant letters (Y/Z/-M/…) are
+  // ignored. Circling names (second character not a digit) return empty.
+  if (name.size() < 2 || !std::isupper(static_cast<unsigned char>(name[0]))) {
+    return {};
+  }
+  if (!std::isdigit(static_cast<unsigned char>(name[1]))) {
+    return {};
+  }
+  size_t i = 1;
+  while (i < name.size() && std::isdigit(static_cast<unsigned char>(name[i])) && i < 3) {
+    ++i;
+  }
+  // At most two digits (runway 01–36); a third digit is not runway numbering.
+  const size_t dig_end = i;
+  char suffix = '\0';
+  if (dig_end < name.size()) {
+    const char c = name[dig_end];
+    if (c == 'L' || c == 'R' || c == 'C') {
+      suffix = c;
+    }
+  }
+  std::string out = "RW";
+  out.append(name.substr(1, dig_end - 1));
+  if (suffix != '\0') {
+    out.push_back(suffix);
+  }
+  return out;
+}
+
+int ParseRouteTypeToken(std::string_view token) {
+  if (token.empty()) {
+    return 0;
+  }
+  int rt = 0;
+  const char* begin = token.data();
+  const char* end = begin + token.size();
+  const auto [ptr, ec] = std::from_chars(begin, end, rt);
+  if (ec == std::errc{} && ptr == end) {
+    return rt;
+  }
+  // IAP route types are a single alpha character ('A', 'R', 'I', …).
+  if (token.size() == 1) {
+    return static_cast<unsigned char>(token[0]);
+  }
+  return 0;
 }
 
 }  // namespace bf

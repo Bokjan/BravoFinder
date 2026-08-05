@@ -51,6 +51,7 @@ constexpr int kProcName = 2;
 constexpr int kTransition = 3;
 constexpr int kFixIdent = 4;
 constexpr int kFixRegion = 5;
+constexpr int kWptDesc = 8;  // ARINC 424 Waypoint Description Code (4 chars)
 constexpr int kTurnDir = 9;  // turn direction: 'L'/'R' (or blank)
 constexpr int kRnp = 10;     // required navigation performance, ARINC-encoded
 constexpr int kPathTerm = 11;
@@ -244,7 +245,8 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
     }
 
     const ProcedureType type = TypeFromTag(tag);
-    const int route_type = FieldInt(f, kRouteType);
+    const std::string route_token = FieldStr(f, kRouteType);
+    const int route_type = ParseRouteTypeToken(route_token);
     const std::string name = FieldStr(f, kProcName);
     const std::string trans = FieldStr(f, kTransition);
 
@@ -258,8 +260,11 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
       current.route_type = route_type;
       // A runway transition's identifier is the runway name prefixed with "RW"
       // (e.g. "RW04L"); record it as the procedure's runway filter key.
+      // Approach finals leave transition empty — derive runway from the name.
       if (trans.rfind("RW", 0) == 0) {
         current.runway = trans;
+      } else if (type == ProcedureType::kApproach) {
+        current.runway = ApproachRunwayFromName(name);
       }
       cur_type = type;
       cur_name = name;
@@ -277,6 +282,7 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
     leg.rnp_centinm = RnpCentinm(FieldStr(f, kRnp));
     leg.speed_limit_kt = static_cast<uint16_t>(FieldInt(f, kSpeedLimit));
     leg.turn_dir = TurnDir(FieldStr(f, kTurnDir));
+    leg.is_mapt = IsMaptDesc(FieldStr(f, kWptDesc));
     current.legs.push_back(std::move(leg));
   }
   flush(current);

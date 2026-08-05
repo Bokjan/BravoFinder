@@ -94,6 +94,7 @@ TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integ
       CHECK(la.rnp_centinm == lb.rnp_centinm);
       CHECK(la.turn_dir == lb.turn_dir);
       CHECK(la.speed_limit_kt == lb.speed_limit_kt);
+      CHECK(la.is_mapt == lb.is_mapt);
     }
   }
   std::remove(path.c_str());

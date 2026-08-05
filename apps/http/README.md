@@ -96,8 +96,8 @@ Response `200`: an **array** of route objects, each:
 }
 ```
 
-- `route` / `legs[].via`: the airport↔network procedure legs use the literal connector keyword `SID`/`STAR` (or `DCT` for a direct link); the procedure names themselves are in the `sid` / `star` fields.
-- `dep_connection` / `arr_connection`: `procedure` | `direct` | `radar_vectors`.
+- `route` / `legs[].via`: the airport↔network procedure legs use the literal connector keyword `SID`/`STAR` (or `DCT` for a direct link); the procedure names themselves are in the `sid` / `star` fields. Airports with no published STAR may arrive via DCT-to-IAF: the string still ends `… <fix> DCT ARR`, `star` stays empty, and `arr_connection` is `terminal_transition` with optional `approach` / `approach_iaf` / `approach_bearing` / `approach_options` metadata (the approach identifier is never folded into the filed string as if it were a STAR).
+- `dep_connection` / `arr_connection`: `procedure` | `terminal_transition` | `direct` | `radar_vectors`.
 - `points` has N entries, `legs` has N−1; the destination of `legs[i]` is `points[i+1]`, and the last `cumulative_nm` equals `total_distance_nm`.
 - `forced_points` is present only when via points were given; `concurrent_airways` is present only on a concurrency leg.
 
