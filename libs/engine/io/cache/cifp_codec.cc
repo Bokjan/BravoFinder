@@ -105,9 +105,9 @@ std::vector<uint8_t> SerializeSegment(const CifpData& data, StringPool& pool) {
       w.U8(static_cast<uint8_t>(leg.path_term));
       w.F64(leg.course_deg);
       w.F64(leg.distance_nm);
-      w.U8(static_cast<uint8_t>(leg.alt.kind));
-      w.I32(leg.alt.alt1_ft);
-      w.I32(leg.alt.alt2_ft);
+      w.U8(static_cast<uint8_t>(leg.alt_kind));
+      w.I32(leg.alt1_ft);
+      w.I32(leg.alt2_ft);
       w.U16(leg.rnp_centinm);
       w.U8(static_cast<uint8_t>(leg.turn_dir));
       w.U16(leg.speed_limit_kt);
@@ -196,9 +196,9 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
       if (alt_byte > static_cast<uint8_t>(AltConstraintKind::kBetween)) {
         return std::nullopt;
       }
-      leg.alt.kind = static_cast<AltConstraintKind>(alt_byte);
-      leg.alt.alt1_ft = br.I32();
-      leg.alt.alt2_ft = br.I32();
+      leg.alt_kind = static_cast<AltConstraintKind>(alt_byte);
+      leg.alt1_ft = br.I32();
+      leg.alt2_ft = br.I32();
       leg.rnp_centinm = br.U16();
       leg.turn_dir = static_cast<char>(br.U8());
       leg.speed_limit_kt = br.U16();

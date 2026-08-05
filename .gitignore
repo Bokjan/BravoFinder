@@ -1,6 +1,7 @@
 # Local working documents (not committed)
 .notes/
 .claude/
+.cursor/
 
 # Navigraph FMS Data Manager downloads (copyright, machine-local)
 .navigraph/

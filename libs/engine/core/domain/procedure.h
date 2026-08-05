@@ -18,7 +18,9 @@ namespace bf {
 // (the large majority of legs), while the rest fly a heading/course/arc/distance/
 // altitude/hold and have no fixed end point, so they are collapsed to an
 // equivalent edge when wiring the graph.
-enum class PathTerminator {
+// Underlying uint8_t: ~765k ProcedureLeg entries; default int would waste 3B each
+// and inflate padding. Wire (cifp_codec) already stores path_term as U8.
+enum class PathTerminator : uint8_t {
   kTF,       // Track to Fix
   kIF,       // Initial Fix
   kDF,       // Direct to Fix
@@ -60,7 +62,9 @@ std::string PathTerminatorName(PathTerminator t);
 
 // The kind of altitude restriction a leg carries, from the CIFP altitude
 // descriptor column ('+', '-', '@'/blank, 'B').
-enum class AltConstraintKind {
+// Underlying uint8_t: packed into ProcedureLeg's trailing byte cluster (see
+// ProcedureLeg layout). Wire already stores alt kind as U8.
+enum class AltConstraintKind : uint8_t {
   kNone,       // no altitude restriction on this leg
   kAt,         // cross at altitude one ('@' or blank with an altitude present)
   kAtOrAbove,  // cross at or above altitude one ('+')
@@ -70,6 +74,8 @@ enum class AltConstraintKind {
 
 // An altitude restriction on a leg. Altitudes are in feet MSL as stored in the
 // CIFP. For kBetween, alt1_ft is the upper bound and alt2_ft the lower.
+// Standalone helper / parse result; ProcedureLeg stores the same fields flat so
+// the leg array stays 36B (a nested AltitudeConstraint would pad to 40B).
 struct AltitudeConstraint {
   AltConstraintKind kind = AltConstraintKind::kNone;
   int alt1_ft = 0;
@@ -86,29 +92,47 @@ AltitudeConstraint ParseAltConstraint(std::string_view desc, int alt1, int alt2)
 // One leg of a procedure: the path terminator, its (possibly empty) fix, and
 // the course/distance/altitude data parsed from the CIFP row. Legs that do not
 // terminate at a fix leave `fix` empty and rely on course/distance.
+//
+// Layout is pinned at 36 bytes (align 4) for the ~765k-leg eager array:
+//   FixedIdent(12) + 2×float(8) + 2×int(8) + 2×u16(4) + 3×u8-ish(3) + 1 pad.
+// course/distance are float: CIFP source quantum is 0.1, and seed/route A/B
+// confirmed no fingerprint drift (see research/2026-08-05_struct_layout_audit).
+// Wire (cifp_codec) still stores F64 — memory-only change, no format_version bump.
 struct ProcedureLeg {
   // Compact 12-byte fixed ident (vs 64B Ident): the leg array is by far the
   // largest CIFP structure (~765k legs), so this cuts eager-mode resident memory
   // by ~40 MB. Empty ident for heading/altitude/manual-termination legs.
   FixedIdent fix;
-  PathTerminator path_term = PathTerminator::kUnknown;
-  double course_deg = 0.0;   // magnetic course (CIFP column, 0 if absent)
-  double distance_nm = 0.0;  // route/leg distance (CIFP column, 0 if absent)
-  AltitudeConstraint alt;
+  float course_deg = 0.0f;   // magnetic course (CIFP column, 0 if absent)
+  float distance_nm = 0.0f;  // route/leg distance (CIFP column, 0 if absent)
+  int alt1_ft = 0;           // altitude constraint feet (see AltitudeConstraint)
+  int alt2_ft = 0;
 
   // Compact encodings kept small because the leg array is ~765k entries (see the
   // FixedIdent note above): a double/string per field would cost megabytes.
   uint16_t rnp_centinm = 0;     // required navigation performance, hundredths of a
                                 // nautical mile (0.30 NM -> 30); 0 means absent.
   uint16_t speed_limit_kt = 0;  // published speed limit in knots; 0 means none.
-  char turn_dir = '\0';         // 'L'/'R' turn direction, or '\0' when unspecified.
+  PathTerminator path_term = PathTerminator::kUnknown;
+  AltConstraintKind alt_kind = AltConstraintKind::kNone;
+  char turn_dir = '\0';  // 'L'/'R' turn direction, or '\0' when unspecified.
+
+  void set_alt(const AltitudeConstraint& a) {
+    alt_kind = a.kind;
+    alt1_ft = a.alt1_ft;
+    alt2_ft = a.alt2_ft;
+  }
+  AltitudeConstraint alt() const { return AltitudeConstraint{alt_kind, alt1_ft, alt2_ft}; }
 
   // Whether this leg ends at a resolvable navigation fix.
   bool fix_is_definite() const { return TerminatesAtFix(path_term) && !fix.IdentView().empty(); }
 };
+static_assert(sizeof(ProcedureLeg) == 36, "ProcedureLeg layout drifted (eager CIFP density)");
+static_assert(alignof(ProcedureLeg) == 4, "ProcedureLeg align drifted");
 
-// Which kind of terminal procedure this is.
-enum class ProcedureType {
+// Which kind of terminal procedure this is. U8 matches cifp wire and keeps the
+// Procedure header compact (N is small vs legs, but shares the same discipline).
+enum class ProcedureType : uint8_t {
   kSid,       // Standard Instrument Departure
   kStar,      // Standard Terminal Arrival Route
   kApproach,  // instrument approach (APPCH)

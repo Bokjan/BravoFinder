@@ -233,7 +233,7 @@ TEST_CASE("fenix: LoadProcedure KJFK", "[integration][fenix]") {
         ++tf;
       else if (leg.path_term == bf::PathTerminator::kUnknown)
         ++unk;
-      if (leg.alt.kind != bf::AltConstraintKind::kNone) ++alt;
+      if (leg.alt_kind != bf::AltConstraintKind::kNone) ++alt;
     }
   CHECK(tf > 50);
   CHECK(unk == 0);

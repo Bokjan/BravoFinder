@@ -9,7 +9,7 @@ namespace bf {
 
 // Direction in which an airway segment may be flown, as encoded in
 // earth_awy.dat column 7 (or DFD `direction_restriction`).
-enum class AirwayDirection {
+enum class AirwayDirection : uint8_t {
   kBoth,     // 'N' - no restriction, usable in either direction
   kForward,  // 'F' - usable only from -> to
   kBackward  // 'B' - usable only to -> from

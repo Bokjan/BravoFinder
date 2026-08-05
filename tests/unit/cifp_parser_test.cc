@@ -81,11 +81,11 @@ TEST_CASE("CIFP parser: course, distance, and altitude columns", "[unit][cifp]")
   CHECK_THAT(p.legs[1].distance_nm, WithinAbs(4.0, 1e-6));
 
   // TF leg to CESID carries "+02500": cross at or above 2500 ft.
-  CHECK(p.legs[2].alt.kind == bf::AltConstraintKind::kAtOrAbove);
-  CHECK(p.legs[2].alt.alt1_ft == 2500);
+  CHECK(p.legs[2].alt_kind == bf::AltConstraintKind::kAtOrAbove);
+  CHECK(p.legs[2].alt1_ft == 2500);
 
   // The first VI leg has no altitude restriction of its own.
-  CHECK(p.legs[0].alt.kind == bf::AltConstraintKind::kNone);
+  CHECK(p.legs[0].alt_kind == bf::AltConstraintKind::kNone);
 }
 
 TEST_CASE("CIFP parser: RNP, turn direction, and speed limit columns", "[unit][cifp]") {

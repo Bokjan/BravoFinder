@@ -129,7 +129,7 @@ std::optional<AirportProcedureDetail> NavDatabase::LookupProcedureDetail(
       info.path_term = PathTerminatorName(leg.path_term);
       info.course_deg = leg.course_deg;
       info.distance_nm = leg.distance_nm;
-      info.alt = FormatAltToken(leg.alt);
+      info.alt = FormatAltToken(leg.alt());
       info.rnp_nm = leg.rnp_centinm / 100.0;
       info.turn_dir = leg.turn_dir;
       info.speed_limit_kt = leg.speed_limit_kt;

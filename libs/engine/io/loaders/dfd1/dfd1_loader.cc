@@ -648,8 +648,8 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     if (flag == "D") {
       leg.distance_nm = ColumnDouble(stmt, c.dist_value);
     }
-    leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
-                                 ColumnInt(stmt, c.alt2));
+    leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
+                                   ColumnInt(stmt, c.alt2)));
     FillProcExtras(stmt, c, leg);
     current.legs.push_back(std::move(leg));
     // Consume the seqno column (previously relied on only by ORDER BY) to validate
@@ -796,8 +796,8 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
       if (flag == "D") {
         leg.distance_nm = ColumnDouble(stmt, c.dist_value);
       }
-      leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
-                                   ColumnInt(stmt, c.alt2));
+      leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
+                                     ColumnInt(stmt, c.alt2)));
       FillProcExtras(stmt, c, leg);
       current.legs.push_back(std::move(leg));
     });

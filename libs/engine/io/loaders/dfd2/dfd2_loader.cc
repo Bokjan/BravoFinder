@@ -505,8 +505,8 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   if (dflag == "D") {
     leg.distance_nm = ColumnDouble(stmt, c.dist_value);
   }
-  leg.alt = ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
-                               ColumnInt(stmt, c.alt2));
+  leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
+                                 ColumnInt(stmt, c.alt2)));
   const double rnp = ColumnDouble(stmt, c.rnp);
   // rnp_centinm and speed_limit_kt are uint16_t; clamp the narrowing so an
   // out-of-range source value (negative, or beyond 65535) stays in range

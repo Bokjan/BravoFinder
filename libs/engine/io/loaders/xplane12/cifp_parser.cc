@@ -273,7 +273,7 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
     leg.path_term = ParsePathTerminator(FieldStr(f, kPathTerm));
     leg.course_deg = FieldInt(f, kCourse) / 10.0;
     leg.distance_nm = FieldInt(f, kDistance) / 10.0;
-    leg.alt = ParseAltConstraint(FieldStr(f, kAltDesc), FieldInt(f, kAlt1), FieldInt(f, kAlt2));
+    leg.set_alt(ParseAltConstraint(FieldStr(f, kAltDesc), FieldInt(f, kAlt1), FieldInt(f, kAlt2)));
     leg.rnp_centinm = RnpCentinm(FieldStr(f, kRnp));
     leg.speed_limit_kt = static_cast<uint16_t>(FieldInt(f, kSpeedLimit));
     leg.turn_dir = TurnDir(FieldStr(f, kTurnDir));
