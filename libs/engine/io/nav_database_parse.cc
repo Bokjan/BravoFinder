@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/base/string_util.h"
+#include "core/domain/nav_tokens.h"
 #include "core/routing/route_parser.h"
 #include "core/routing/route_string.h"
 #include "io/build/graph_builder.h"
@@ -34,9 +35,9 @@ void FinalizePhaseSplit(Route& route, bool dep_via_sid, bool arr_via_star) {
   double dep = 0.0;
   double arr = 0.0;
   for (const RouteLeg& leg : route.legs) {
-    if (leg.via == "SID") {
+    if (leg.via == kSidToken) {
       dep += leg.distance_nm;
-    } else if (leg.via == "STAR") {
+    } else if (leg.via == kStarToken) {
       arr += leg.distance_nm;
     }
   }
@@ -207,7 +208,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     // The airport-append step below emits the final leg, so a trailing "DCT
     // AIRPORT" is redundant -- consume it. Guard end > i + 1 leaves the "DEP
     // DCT ARR" pure-direct shortcut its DCT.
-    if (end > i + 1 && tokens[end - 1] == "DCT") {
+    if (end > i + 1 && tokens[end - 1] == kDctToken) {
       --end;
       arr_explicit = true;
     }
@@ -249,8 +250,9 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   std::string sid_name;
   bool dep_via_sid = false;
   if (i < end && !dep_airport.empty() &&
-      (tokens[i] == "SID" || airport_has_procedure(dep_airport, tokens[i], ProcedureType::kSid))) {
-    if (tokens[i] != "SID") {
+      (tokens[i] == kSidToken ||
+       airport_has_procedure(dep_airport, tokens[i], ProcedureType::kSid))) {
+    if (tokens[i] != kSidToken) {
       sid_name = tokens[i];
     }
     dep_via_sid = true;
@@ -261,16 +263,16 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // connects the airport to the first fix. Guard i + 1 < end leaves the "DEP
   // DCT ARR" pure-direct shortcut its DCT.
   bool dep_explicit = dep_via_sid;
-  if (!dep_airport.empty() && !dep_via_sid && i < end && tokens[i] == "DCT" && i + 1 < end) {
+  if (!dep_airport.empty() && !dep_via_sid && i < end && tokens[i] == kDctToken && i + 1 < end) {
     ++i;
     dep_explicit = true;
   }
   std::string star_name;
   bool arr_via_star = false;
   if (end > i && !arr_airport.empty() &&
-      (tokens[end - 1] == "STAR" ||
+      (tokens[end - 1] == kStarToken ||
        airport_has_procedure(arr_airport, tokens[end - 1], ProcedureType::kStar))) {
-    if (tokens[end - 1] != "STAR") {
+    if (tokens[end - 1] != kStarToken) {
       star_name = tokens[end - 1];
     }
     arr_via_star = true;
@@ -292,14 +294,14 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // route.sid/star empty, silently dropping the procedure that was just parsed.
   // Guard against that by requiring no procedure connector was recognized; such
   // shapes then fall through and fail cleanly in the enroute loop.
-  if (!dep_airport.empty() && !arr_airport.empty() && end - i == 1 && tokens[i] == "DCT" &&
+  if (!dep_airport.empty() && !arr_airport.empty() && end - i == 1 && tokens[i] == kDctToken &&
       !dep_via_sid && !arr_via_star) {
     const int dep_v = builder_->VertexByAirport(dep_airport);
     const int arr_v = builder_->VertexByAirport(arr_airport);
     const double d = graph.CoordOf(dep_v).DistanceTo(graph.CoordOf(arr_v));
     route.points.push_back(RoutePoint{dep_airport, graph.CoordOf(dep_v)});
     route.points.push_back(RoutePoint{arr_airport, graph.CoordOf(arr_v)});
-    route.legs.push_back(RouteLeg{dep_airport, arr_airport, "DCT", d, {}});
+    route.legs.push_back(RouteLeg{dep_airport, arr_airport, std::string(kDctToken), d, {}});
     route.total_distance_nm += d;
     route.route_string = BuildRouteString(route.points.front().ident, route.legs);
     FinalizePhaseSplit(route, dep_via_sid, arr_via_star);
@@ -335,12 +337,12 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
       if (prev_vertex < 0) {
         // First fix: just record it.
         add_point(rf.vertex);
-      } else if (pending_connector == "DCT" || pending_connector.empty()) {
+      } else if (pending_connector == kDctToken || pending_connector.empty()) {
         // Direct leg from the previous fix.
         const double d = graph.CoordOf(prev_vertex).DistanceTo(rf.coord);
         route.legs.push_back(RouteLeg{builder_->IdentOf(prev_vertex).ident,
                                       builder_->IdentOf(rf.vertex).ident,
-                                      "DCT",
+                                      std::string(kDctToken),
                                       d,
                                       {}});
         route.total_distance_nm += d;
@@ -370,8 +372,8 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
       expect_fix = false;
     } else {
       // Expecting a connector: an airway name or DCT.
-      if (tok == "DCT") {
-        pending_connector = "DCT";
+      if (tok == kDctToken) {
+        pending_connector = std::string(kDctToken);
       } else if (is_airway) {
         pending_connector = tok;
       } else {
@@ -419,11 +421,12 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     const int apt = builder_->VertexByAirport(dep_airport);
     const double d = graph.CoordOf(apt).DistanceTo(graph.CoordOf(point_vertices.front()));
     route.points.insert(route.points.begin(), RoutePoint{dep_airport, graph.CoordOf(apt)});
-    route.legs.insert(route.legs.begin(), RouteLeg{dep_airport,
-                                                   builder_->IdentOf(point_vertices.front()).ident,
-                                                   dep_via_sid ? "SID" : "DCT",
-                                                   d,
-                                                   {}});
+    route.legs.insert(route.legs.begin(),
+                      RouteLeg{dep_airport,
+                               builder_->IdentOf(point_vertices.front()).ident,
+                               dep_via_sid ? std::string(kSidToken) : std::string(kDctToken),
+                               d,
+                               {}});
     route.total_distance_nm += d;
     route.sid = sid_name;
   }
@@ -433,7 +436,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     route.points.push_back(RoutePoint{arr_airport, graph.CoordOf(apt)});
     route.legs.push_back(RouteLeg{builder_->IdentOf(point_vertices.back()).ident,
                                   arr_airport,
-                                  arr_via_star ? "STAR" : "DCT",
+                                  arr_via_star ? std::string(kStarToken) : std::string(kDctToken),
                                   d,
                                   {}});
     route.total_distance_nm += d;

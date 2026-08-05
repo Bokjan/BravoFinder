@@ -5,13 +5,14 @@
 #include <cmath>
 
 #include "core/constraints/constraint.h"
+#include "core/domain/coordinate.h"
 #include "core/domain/mora_grid.h"
 
 namespace bf {
 
-// Degrees in a full circle; used to wrap longitude deltas into the shorter
-// arc around the antimeridian.
-inline constexpr double kDegreesFullCircle = 360.0;
+// Track sampling step for MaxMoraAlongLeg, in degrees. Finer than the 1-degree
+// MORA grid so a high cell between endpoints is not skipped.
+inline constexpr double kMoraSampleStepDeg = 0.5;
 
 // Hard filter: when a cruise altitude range is given, an edge is usable only if
 // some level in that range is at or above the grid minimum off-route altitude
@@ -47,7 +48,7 @@ class MoraConstraint : public Constraint {
   }
 
  private:
-  // The highest known MORA on the leg, sampling the track at ~0.5-degree
+  // The highest known MORA on the leg, sampling the track at kMoraSampleStepDeg
   // spacing (finer than the 1-degree grid, so no cell is skipped) and including
   // both endpoints. Returns 0 when every sampled cell is unknown.
   int16_t MaxMoraAlongLeg(const Coordinate& from, const Coordinate& to) const {
@@ -70,9 +71,9 @@ class MoraConstraint : public Constraint {
     // march the long way around and read an entirely wrong strip of cells,
     // potentially blocking a legitimate trans-Pacific leg.
     const double dlon = std::remainder(to.longitude - from.longitude, kDegreesFullCircle);
-    // Degrees of track spanned; sample roughly every 0.5 degrees.
+    // Degrees of track spanned; sample at kMoraSampleStepDeg.
     const double span = std::max(std::abs(dlat), std::abs(dlon));
-    const int steps = std::max(1, static_cast<int>(std::ceil(span / 0.5)));
+    const int steps = std::max(1, static_cast<int>(std::ceil(span / kMoraSampleStepDeg)));
     for (int i = 1; i < steps; ++i) {
       const double t = static_cast<double>(i) / steps;
       // Wrap the interpolated longitude back into [-180, 180] so a sample that

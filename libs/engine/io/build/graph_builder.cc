@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/domain/nav_tokens.h"
+
 namespace bf {
 
 // A coarse spatial index that buckets waypoints by integer (lat, lon) degree.
@@ -126,7 +128,7 @@ GraphBuilder::GraphBuilder(const NavData& data) {
   RebuildIndices();
 
   // --- Airway-name table; "DCT" reserved at index 0 for synthetic edges. ---
-  airway_names_.push_back("DCT");
+  airway_names_.push_back(std::string(kDctToken));
   std::unordered_map<std::string, int> name_to_id;
   auto airway_id_for = [&](const std::string& name) -> int {
     auto it = name_to_id.find(name);

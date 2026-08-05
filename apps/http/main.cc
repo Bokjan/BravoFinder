@@ -40,12 +40,12 @@ int main(int argc, char** argv) {
   const char* env_dir = bf::GetEnv("BRAVOFINDER_NAVDATA");
   std::string db_dir = env_dir != nullptr ? env_dir : "navdata";
   std::string host = "0.0.0.0";
-  int port = 8080;
+  int port = bf::http_server::kDefaultPort;
   int worker_threads = static_cast<int>(std::thread::hardware_concurrency());
   if (worker_threads <= 0) {
     worker_threads = 4;
   }
-  uint64_t max_body = 1u << 20;  // 1 MiB
+  uint64_t max_body = bf::http_server::kDefaultMaxBodyBytes;
   int io_timeout_sec = bf::http_server::kDefaultIoTimeoutSec;
   std::string cifp_load = "on-demand";
 
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
 
   bf::http_server::Limits limits;
   limits.max_body_bytes = static_cast<size_t>(max_body);
-  limits.io_timeout_ms = static_cast<uint64_t>(io_timeout_sec) * 1000;
+  limits.io_timeout_ms = static_cast<uint64_t>(io_timeout_sec) * bf::http_server::kMsPerSec;
 
   bf::http_server::Server server(&loop, router, limits);
   const int rc = server.Listen(host, port);

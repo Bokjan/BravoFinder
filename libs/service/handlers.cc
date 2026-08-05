@@ -10,6 +10,7 @@
 #include "handlers.h"
 
 #include <cmath>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -40,18 +41,6 @@ namespace {
 // HandlerResult in the header for the 400/404/422 semantics; 404/422 are
 // produced inside the typed entries).
 constexpr int kBadRequest = 400;
-
-// Max entries allowed in any request ID array (forced_points, avoid_waypoints,
-// avoid_airways, lookup ids). The only other size bound is the 1 MiB body cap,
-// under which a single request could still ship tens of thousands of short
-// idents; each drives graph lookups / per-edge ban checks, an asymmetric-cost
-// vector. 256 far exceeds any real "force via / avoid these" list.
-constexpr size_t kMaxIdListSize = 256;
-
-// Max accepted flight level (hundreds of feet). GetInt() otherwise accepts values
-// up to ~2.1e9, which are physically meaningless; FL600 (60,000 ft) is already
-// above any civil cruise altitude.
-constexpr int kMaxFl = 600;
 
 // Parse a string-array argument. Returns nullopt if the member is absent OR
 // malformed (not an array, a non-string element, or more than kMaxIdListSize
@@ -119,8 +108,10 @@ std::optional<std::string> ParseAirwayRules(const rapidjson::Value& args,
   }
   const rapidjson::Value& arr = args["airway_rules"];
   if (arr.Size() > bf::AirwayRuleConstraint::kMaxRules) {
-    return "airway_rules must hold at most 32 rules (one rule may list any number "
-           "of regions and designators)";
+    return std::format(
+        "airway_rules must hold at most {} rules (one rule may list any number "
+        "of regions and designators)",
+        bf::AirwayRuleConstraint::kMaxRules);
   }
   for (const rapidjson::Value& rule : arr.GetArray()) {
     if (!rule.IsObject()) {
@@ -128,10 +119,10 @@ std::optional<std::string> ParseAirwayRules(const rapidjson::Value& args,
     }
     bf::AirwayRule parsed;
     if (!ParseRuleStringList(rule, "region_prefixes", parsed.region_prefixes)) {
-      return "region_prefixes must be an array of at most 256 strings";
+      return std::format("region_prefixes must be an array of at most {} strings", kMaxIdListSize);
     }
     if (!ParseRuleStringList(rule, "designators", parsed.designators)) {
-      return "designators must be an array of at most 256 strings";
+      return std::format("designators must be an array of at most {} strings", kMaxIdListSize);
     }
     if (rule.HasMember("match")) {
       if (!rule["match"].IsString()) {
@@ -184,7 +175,9 @@ QueryHandler MakeLookupAdapter(Fn fn) {
   return [fn](const rapidjson::Value& args, const NavDatabase& db) -> HandlerResult {
     auto ids = ParseIdList(args, "ids");
     if (!ids) {
-      return {JsonError("ids (array of at most 256 strings) is required"), kBadRequest};
+      return {
+          JsonError(std::format("ids (array of at most {} strings) is required", kMaxIdListSize)),
+          kBadRequest};
     }
     return fn(db, *ids, OutputFormat::kJson);
   };
@@ -224,7 +217,8 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
       // meaningless and only invites overflow-adjacent inputs. min_fl <= max_fl
       // is already enforced, so capping max_fl bounds both.
       if (max_fl > kMaxFl) {
-        return {JsonError("min_fl and max_fl must not exceed 600"), kBadRequest};
+        return {JsonError(std::format("min_fl and max_fl must not exceed {}", kMaxFl)),
+                kBadRequest};
       }
       request.altitude = bf::FlRange{min_fl, max_fl};
     }
@@ -258,12 +252,11 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   }
   // Cap k as well: each extra path costs a full spur A* search, so an unbounded k
   // (e.g. 2e9) would pin a worker for a long time and let a few requests exhaust
-  // the threadpool. 15 far exceeds any real "give me alternatives" use. (The CLI
-  // does not enforce this cap -- it is a server-protection concern -- so the cap
-  // lives here in the adapter, not in the typed entry.)
-  constexpr int kMaxK = 15;
+  // the threadpool. kMaxK far exceeds any real "give me alternatives" use. (The
+  // CLI does not enforce this cap -- it is a server-protection concern -- so the
+  // cap lives here in the adapter, not in the typed entry.)
   if (request.k > kMaxK) {
-    return {JsonError("k must not exceed 15"), kBadRequest};
+    return {JsonError(std::format("k must not exceed {}", kMaxK)), kBadRequest};
   }
   if (args.HasMember("departure_runway") && args["departure_runway"].IsString()) {
     request.departure_runway = args["departure_runway"].GetString();
@@ -278,12 +271,14 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     request.arrival_star = args["arrival_star"].GetString();
   }
   // For the optional ID lists, tell "absent" (skip) from "present but bad"
-  // (reject): a present list that is malformed or over the 256 cap is a 400, not
-  // a silent no-op that would drop a user's avoid/force intent.
+  // (reject): a present list that is malformed or over the kMaxIdListSize cap is
+  // a 400, not a silent no-op that would drop a user's avoid/force intent.
   if (args.HasMember("avoid_waypoints")) {
     auto v = ParseIdList(args, "avoid_waypoints");
     if (!v) {
-      return {JsonError("avoid_waypoints must be an array of at most 256 strings"), kBadRequest};
+      return {JsonError(std::format("avoid_waypoints must be an array of at most {} strings",
+                                    kMaxIdListSize)),
+              kBadRequest};
     }
     request.avoid_waypoints = std::move(*v);
   }
@@ -296,7 +291,9 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   if (args.HasMember("forced_points")) {
     auto v = ParseIdList(args, "forced_points");
     if (!v) {
-      return {JsonError("forced_points must be an array of at most 256 strings"), kBadRequest};
+      return {JsonError(std::format("forced_points must be an array of at most {} strings",
+                                    kMaxIdListSize)),
+              kBadRequest};
     }
     request.forced_points = std::move(*v);
   }

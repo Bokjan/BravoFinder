@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -21,10 +22,12 @@
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
+#include "core/domain/nav_tokens.h"
 #include "core/domain/navaid_detail.h"
 #include "core/domain/procedure.h"
 #include "core/domain/waypoint.h"
 #include "core/result.h"
+#include "io/loaders/loader_constants.h"
 #include "io/loaders/sqlite_util.h"
 #include "io/nav_data.h"
 
@@ -32,7 +35,6 @@ namespace bf {
 namespace {
 
 constexpr std::string_view kLoaderName = "fenix";
-constexpr int kUnknownAltitudeFt = 99999;
 
 // ---- db discovery -------------------------------------------------------
 
@@ -317,7 +319,7 @@ Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
     } else if (detail.kind == WaypointKind::kNdb) {
       detail.freq_raw = static_cast<int>(std::lround(freq_value));
     } else {
-      detail.freq_raw = static_cast<int>(std::lround(freq_value * 100.0));
+      detail.freq_raw = static_cast<int>(std::lround(freq_value * kCentiScale));
     }
     detail.range_nm = ColumnDouble(stmt, 4);
     data.navaid_details.push_back(detail);
@@ -656,8 +658,8 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
       double spd = ColumnOptDouble(stmt, 8);
       // uint16_t: clamp to [0, 65535] so a corrupt out-of-range speed does not
       // wrap (matches dfd1/dfd2). Real speeds are well below this.
-      leg.speed_limit_kt =
-          static_cast<uint16_t>(std::clamp<double>(spd > 0.0 ? spd : 0.0, 0.0, 65535.0));
+      leg.speed_limit_kt = static_cast<uint16_t>(std::clamp<double>(
+          spd > 0.0 ? spd : 0.0, 0.0, static_cast<double>(std::numeric_limits<uint16_t>::max())));
       // NOTE: Fenix schema has no RNP column in TerminalLegs/TerminalLegsEx,
       // so ProcedureLeg.rnp_centinm stays 0 (dfd1/dfd2/xplane12 load it).
       leg.is_mapt = IsMaptDesc(ColumnText(stmt, 9));
@@ -670,7 +672,8 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
         // fix name, not a runway, so they leave `runway` empty. Mirrors the
         // dfd1/dfd2/cifp loaders' RW-prefix guard. Approach runway comes from
         // Terminals.Rwy at emit time (not from Transition).
-        groups.push_back(LegGroup{{}, trans, trans.rfind("RW", 0) == 0 ? trans : "", route_type});
+        groups.push_back(
+            LegGroup{{}, trans, trans.rfind(kRunwayPrefix, 0) == 0 ? trans : "", route_type});
       }
       groups.back().legs.push_back(std::move(leg));
     });
@@ -849,7 +852,7 @@ Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
         return;
       }
       runways_by_airport[aid].push_back(
-          Runway{"RW" + ColumnText(stmt, 1),
+          Runway{std::string(kRunwayPrefix) + ColumnText(stmt, 1),
                  Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)}, ColumnInt(stmt, 4)});
     });
     if (!rows) {

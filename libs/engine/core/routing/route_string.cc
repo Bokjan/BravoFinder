@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "core/domain/nav_tokens.h"
+
 namespace bf {
 
 namespace {
@@ -65,7 +67,7 @@ std::string BuildRouteString(const std::string& first_point, std::vector<RouteLe
   size_t i = 0;
   while (i < legs.size()) {
     // A DCT leg never folds: it is a hard boundary emitted on its own.
-    if (legs[i].via == "DCT") {
+    if (legs[i].via == kDctToken) {
       legs[i].concurrent_airways.clear();
       rs += " DCT " + legs[i].to;
       ++i;
@@ -83,7 +85,7 @@ std::string BuildRouteString(const std::string& first_point, std::vector<RouteLe
       continue;
     }
     size_t j = i;
-    while (j + 1 < legs.size() && legs[j + 1].via != "DCT") {
+    while (j + 1 < legs.size() && legs[j + 1].via != kDctToken) {
       std::vector<std::string> inter = Intersect(running, split[j + 1]);
       if (inter.empty()) {
         break;

@@ -41,7 +41,7 @@ class AltitudeBandConstraint : public Constraint {
 // when no preferred alternative exists.
 class LevelPreferenceConstraint : public Constraint {
  public:
-  explicit LevelPreferenceConstraint(double penalty_fraction = 0.5)
+  explicit LevelPreferenceConstraint(double penalty_fraction = kDefaultPenaltyFraction)
       : penalty_fraction_(penalty_fraction) {}
 
   EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest& request) const override {

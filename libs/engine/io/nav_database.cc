@@ -2,6 +2,8 @@
 #include "io/nav_database.h"
 
 #include <filesystem>
+#include <format>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -51,7 +53,8 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   if (db.builder_->airway_overflow()) {
     return Result<NavDatabase>::Err(
         Error(ErrorCode::kSerializationError,
-              "too many distinct airway names (>65535) for the uint16 airway_id space"));
+              std::format("too many distinct airway names (> {}) for the uint16 airway_id space",
+                          std::numeric_limits<uint16_t>::max())));
   }
   // Build the detail archive from the same parse (navaid_details/hold_fixes are
   // still in `data`; mora/msa were moved out above but those two were not).

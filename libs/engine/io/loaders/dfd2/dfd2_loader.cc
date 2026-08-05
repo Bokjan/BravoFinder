@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -17,14 +18,17 @@
 #include "core/base/log.h"
 #include "core/domain/airport.h"
 #include "core/domain/airway.h"
+#include "core/domain/coordinate.h"
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
+#include "core/domain/nav_tokens.h"
 #include "core/domain/navaid_detail.h"
 #include "core/domain/procedure.h"
 #include "core/domain/waypoint.h"
 #include "core/result.h"
+#include "io/loaders/loader_constants.h"
 #include "io/loaders/sqlite_util.h"
 #include "io/nav_data.h"
 
@@ -36,12 +40,6 @@ namespace {
 // MORA quadrant) are isolated here. See the loader plan for the full diff.
 
 constexpr std::string_view kLoaderName = "dfd2";
-
-// Feet per flight level (100 ft per FL); DFD stores altitudes in feet, the
-// graph works in flight levels.
-constexpr int kFeetPerFlightLevel = 100;
-// DFD encodes "no ceiling" as maximum_altitude = 99999; treated as unset.
-constexpr int kUnknownAltitudeFt = 99999;
 
 // v2 table names -- prefixes are NOT a fixed pattern (tbl_d_vhfnavaids is a
 // single letter), so they are listed explicitly.
@@ -213,7 +211,7 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ide
     }
     data.waypoints.push_back(
         Waypoint{key, Coordinate{ColumnDouble(stmt, 7), ColumnDouble(stmt, 8)}, kind});
-    const int freq_raw = static_cast<int>(std::lround(ColumnDouble(stmt, 2) * 100.0));
+    const int freq_raw = static_cast<int>(std::lround(ColumnDouble(stmt, 2) * kCentiScale));
     data.navaid_details.push_back(NavaidDetail{key, kind, ColumnInt(stmt, 6), freq_raw,
                                                ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)});
   });
@@ -513,11 +511,13 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   // rnp_centinm and speed_limit_kt are uint16_t; clamp the narrowing so an
   // out-of-range source value (negative, or beyond 65535) stays in range
   // instead of silently wrapping. Matches dfd1's FillProcExtras.
-  const long rnp_centi = rnp > 0.0 ? std::lround(rnp * 100.0) : 0;
-  leg.rnp_centinm = static_cast<uint16_t>(std::clamp<long>(rnp_centi, 0, 65535));
+  const long rnp_centi = rnp > 0.0 ? std::lround(rnp * kCentiScale) : 0;
+  leg.rnp_centinm = static_cast<uint16_t>(
+      std::clamp<long>(rnp_centi, 0, static_cast<long>(std::numeric_limits<uint16_t>::max())));
   const std::string turn = ColumnText(stmt, c.turn_dir);
   leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
-  leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(ColumnInt(stmt, c.speed_limit), 0, 65535));
+  leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(
+      ColumnInt(stmt, c.speed_limit), 0, static_cast<int>(std::numeric_limits<uint16_t>::max())));
   leg.is_mapt = IsMaptDesc(ColumnText(stmt, c.wpt_desc));
   proc.legs.push_back(std::move(leg));
   // Consume the seqno column (previously relied on only by ORDER BY) to validate
@@ -594,7 +594,7 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
       cur_route = route;
       current.name = name;
       current.transition_ident = trans;
-      if (trans.rfind("RW", 0) == 0) {
+      if (trans.rfind(kRunwayPrefix, 0) == 0) {
         current.runway = trans;
       } else if (type == ProcedureType::kApproach) {
         current.runway = ApproachRunwayFromName(name);
@@ -706,7 +706,7 @@ std::optional<CifpData> LoadAirportProcedures(
         cur_route = route;
         current.name = name;
         current.transition_ident = trans;
-        if (trans.rfind("RW", 0) == 0) {
+        if (trans.rfind(kRunwayPrefix, 0) == 0) {
           current.runway = trans;
         } else if (type == ProcedureType::kApproach) {
           current.runway = ApproachRunwayFromName(name);
@@ -752,7 +752,6 @@ std::optional<CifpData> LoadAirportProcedures(
 // Defined at namespace scope (declared in the header) so the sign convention can
 // be locked by a unit test.
 // Degrees in a full circle; used to wrap magnetic variation into [0, 360).
-constexpr double kDegreesFullCircle = 360.0;
 
 double ToMagnetic(double true_course, double magvar) {
   double mag = true_course - magvar;

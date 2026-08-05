@@ -12,11 +12,15 @@
 #include "tools.h"
 
 #include <cassert>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "core/constraints/airway_rule_constraint.h"
+#include "core/routing/route_request.h"
 #include "handlers.h"
 #include "rapidjson/document.h"
 
@@ -38,8 +42,41 @@ rapidjson::Document ParseSchema(const char* json) {
 struct ToolMeta {
   const char* name;
   const char* description;
-  const char* schema;
+  const char* schema;  // nullptr => FindRoutesSchema() for find_routes
 };
+
+// JSON-Schema for find_routes, built at runtime so maximum/maxItems track the
+// shared server caps (kMaxK / kMaxRules / kDefaultPenaltyFraction) instead of
+// duplicating those numbers in a string literal.
+std::string FindRoutesSchema() {
+  using bf::service::kMaxK;
+  const auto max_rules = bf::AirwayRuleConstraint::kMaxRules;
+  const auto max_u32 = std::numeric_limits<uint32_t>::max();
+  return std::string(R"({"type":"object","properties":{)") +
+         R"("departure":{"type":"string","description":"Departure airport ICAO or waypoint ident."},)" +
+         R"("arrival":{"type":"string","description":"Arrival airport ICAO or waypoint ident."},)" +
+         R"("min_fl":{"type":"integer","description":"Lower bound of the cruise flight-level range, in hundreds of feet (e.g. 300 for FL300). May be given alone for a single level. Setting min_fl and/or max_fl enables altitude/MORA constraint filtering."},)" +
+         R"("max_fl":{"type":"integer","description":"Upper bound of the cruise flight-level range, in hundreds of feet (e.g. 400 for FL400). May be given alone for a single level."},)" +
+         R"("level":{"type":"string","enum":["none","low","high"],"description":"Preferred airway level: none=no preference (default), low=prefer Victor low airways, high=prefer Jet high airways."},)" +
+         R"("k":{"type":"integer","minimum":1,"maximum":)" + std::to_string(kMaxK) +
+         R"(,"description":"Number of candidate routes to return (Yen K-shortest). Defaults to 1; capped at )" +
+         std::to_string(kMaxK) + R"(."},)" +
+         R"("departure_runway":{"type":"string","description":"Restrict the SID to this departure runway, e.g. RW31L. Empty=any."},)" +
+         R"("arrival_runway":{"type":"string","description":"Restrict the STAR to this arrival runway, e.g. RW25L. Empty=any."},)" +
+         R"("departure_sid":{"type":"string","description":"Pin a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN. Empty=auto."},)" +
+         R"("arrival_star":{"type":"string","description":"Pin a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS. Empty=auto."},)" +
+         R"("avoid_waypoints":{"type":"array","items":{"type":"string"},"description":"Waypoints to route around, each an ident (BOTON) or IDENT/ARINC424_ICAO_CODE (BOTON/LF). A bare ident avoids all regions' matches."},)" +
+         R"("airway_rules":{"type":"array","maxItems":)" + std::to_string(max_rules) +
+         R"(,"description":"Restrict airways by ICAO region and designator. Each rule blocks or penalizes every airway LEG whose designator matches and whose either endpoint lies in a matching region. Matching is per-leg, not per-airway-name, because a designator is not unique to one physical airway (29.6% of names are reused by disjoint instances) -- a name-level ban would forbid same-named airways worldwide. Several rules may match one leg: any block rule wins, otherwise the penalize fractions sum. Replaces the former avoid_airways: 'avoid J60' is {\"designators\":[\"J60\"],\"match\":\"exact\",\"action\":\"block\"}.","items":{"type":"object","properties":{)" + R"("region_prefixes":{"type":"array","items":{"type":"string"},"description":"ARINC 424 ICAO region codes (NOT airport identifiers), each matched as a prefix. Omit or leave empty for any region. Listing several names a region set in ONE rule, which is free at runtime and often necessary for precision: prefix \"Z\" covers ZM (Mongolia) and ZK (North Korea) besides China, so mainland China is the ten FIRs ZB,ZG,ZH,ZJ,ZL,ZP,ZS,ZU,ZW,ZY."},)" + R"("designators":{"type":"array","items":{"type":"string"},"description":"Airway designators, compared per the match field. Omit or leave empty for any designator. Concurrency names (A14-M1) are split first, so a rule hits when any of their designators matches."},)" + R"("match":{"type":"string","enum":["exact","prefix"],"description":"How designators are compared; defaults to prefix. Use exact to name individual airways: 1371 designators are a strict prefix of another one, so prefix \"J60\" would also match J603/J604/J605, and \"A3\" would match 52 names. Use prefix for a category rule such as all J routes."},)" +
+         R"("action":{"type":"string","enum":["block","penalize"],"description":"block excludes matching legs outright; penalize (the default) adds a soft cost, keeping them usable. Prefer penalize for bulk region rules: block is an irreversible connectivity break and can leave an airport that depends on a single airway with no route at all."},)" +
+         R"("penalty_fraction":{"type":"number","minimum":0,"description":"Soft penalty as a fraction of each leg's own length, used only when action is penalize. Defaults to )" +
+         std::to_string(bf::kDefaultPenaltyFraction) +
+         R"(, which pushes matched airways out of the optimal route while leaving them usable when no alternative exists. Larger values steer harder; there is no upper bound."}}}},)" +
+         R"("random_seed":{"type":"integer","minimum":0,"maximum":)" + std::to_string(max_u32) +
+         R"(,"description":"Seed for reproducible route diversity. The same seed always yields the same route; different seeds explore alternatives. Omit for the plain optimal route."},)" +
+         R"("forced_points":{"type":"array","items":{"type":"string"},"description":"Ordered waypoints the route must pass through (via points), each an ident (PSB) or IDENT/ARINC424_ICAO_CODE (PSB/K6). The response echoes them resolved as IDENT/ARINC424_ICAO_CODE."}},)" +
+         R"("required":["departure","arrival"]})";
+}
 
 // The nine tools' descriptions and schemas, in MCP display order. `name` must
 // match a bf::service handler name; MakeTools() pairs them up.
@@ -48,27 +85,7 @@ const ToolMeta kToolMeta[] = {
      "Find up to k candidate routes between two endpoints (airport ICAO or "
      "waypoint ident), honoring airway level and cruise-altitude constraints. "
      "Returns an ICAO filed-flight-plan style route string plus per-leg detail.",
-     R"({"type":"object","properties":{)"
-     R"("departure":{"type":"string","description":"Departure airport ICAO or waypoint ident."},)"
-     R"("arrival":{"type":"string","description":"Arrival airport ICAO or waypoint ident."},)"
-     R"("min_fl":{"type":"integer","description":"Lower bound of the cruise flight-level range, in hundreds of feet (e.g. 300 for FL300). May be given alone for a single level. Setting min_fl and/or max_fl enables altitude/MORA constraint filtering."},)"
-     R"("max_fl":{"type":"integer","description":"Upper bound of the cruise flight-level range, in hundreds of feet (e.g. 400 for FL400). May be given alone for a single level."},)"
-     R"("level":{"type":"string","enum":["none","low","high"],"description":"Preferred airway level: none=no preference (default), low=prefer Victor low airways, high=prefer Jet high airways."},)"
-     R"("k":{"type":"integer","minimum":1,"maximum":15,"description":"Number of candidate routes to return (Yen K-shortest). Defaults to 1; capped at 15."},)"
-     R"("departure_runway":{"type":"string","description":"Restrict the SID to this departure runway, e.g. RW31L. Empty=any."},)"
-     R"("arrival_runway":{"type":"string","description":"Restrict the STAR to this arrival runway, e.g. RW25L. Empty=any."},)"
-     R"("departure_sid":{"type":"string","description":"Pin a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN. Empty=auto."},)"
-     R"("arrival_star":{"type":"string","description":"Pin a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS. Empty=auto."},)"
-     R"("avoid_waypoints":{"type":"array","items":{"type":"string"},"description":"Waypoints to route around, each an ident (BOTON) or IDENT/ARINC424_ICAO_CODE (BOTON/LF). A bare ident avoids all regions' matches."},)"
-     R"("airway_rules":{"type":"array","maxItems":32,"description":"Restrict airways by ICAO region and designator. Each rule blocks or penalizes every airway LEG whose designator matches and whose either endpoint lies in a matching region. Matching is per-leg, not per-airway-name, because a designator is not unique to one physical airway (29.6% of names are reused by disjoint instances) -- a name-level ban would forbid same-named airways worldwide. Several rules may match one leg: any block rule wins, otherwise the penalize fractions sum. Replaces the former avoid_airways: 'avoid J60' is {\"designators\":[\"J60\"],\"match\":\"exact\",\"action\":\"block\"}.","items":{"type":"object","properties":{)"
-     R"("region_prefixes":{"type":"array","items":{"type":"string"},"description":"ARINC 424 ICAO region codes (NOT airport identifiers), each matched as a prefix. Omit or leave empty for any region. Listing several names a region set in ONE rule, which is free at runtime and often necessary for precision: prefix \"Z\" covers ZM (Mongolia) and ZK (North Korea) besides China, so mainland China is the ten FIRs ZB,ZG,ZH,ZJ,ZL,ZP,ZS,ZU,ZW,ZY."},)"
-     R"("designators":{"type":"array","items":{"type":"string"},"description":"Airway designators, compared per the match field. Omit or leave empty for any designator. Concurrency names (A14-M1) are split first, so a rule hits when any of their designators matches."},)"
-     R"("match":{"type":"string","enum":["exact","prefix"],"description":"How designators are compared; defaults to prefix. Use exact to name individual airways: 1371 designators are a strict prefix of another one, so prefix \"J60\" would also match J603/J604/J605, and \"A3\" would match 52 names. Use prefix for a category rule such as all J routes."},)"
-     R"("action":{"type":"string","enum":["block","penalize"],"description":"block excludes matching legs outright; penalize (the default) adds a soft cost, keeping them usable. Prefer penalize for bulk region rules: block is an irreversible connectivity break and can leave an airport that depends on a single airway with no route at all."},)"
-     R"("penalty_fraction":{"type":"number","minimum":0,"description":"Soft penalty as a fraction of each leg's own length, used only when action is penalize. Defaults to 0.5, which pushes matched airways out of the optimal route while leaving them usable when no alternative exists. Larger values steer harder; there is no upper bound."}}}},)"
-     R"("random_seed":{"type":"integer","minimum":0,"maximum":4294967295,"description":"Seed for reproducible route diversity. The same seed always yields the same route; different seeds explore alternatives. Omit for the plain optimal route."},)"
-     R"("forced_points":{"type":"array","items":{"type":"string"},"description":"Ordered waypoints the route must pass through (via points), each an ident (PSB) or IDENT/ARINC424_ICAO_CODE (PSB/K6). The response echoes them resolved as IDENT/ARINC424_ICAO_CODE."}},)"
-     R"("required":["departure","arrival"]})"},
+     nullptr},  // schema built by FindRoutesSchema()
     {"parse_route",
      "Validate and expand a filed-flight-plan route string (the reverse of "
      "find_routes). Given \"[DEP] [SID] FIX (AWY FIX | DCT FIX)* [STAR] [ARR]\", "
@@ -180,7 +197,9 @@ std::vector<Tool> MakeTools() {
     if (it == by_name.end()) {
       continue;
     }
-    tools.emplace_back(meta.name, meta.description, ParseSchema(meta.schema),
+    const std::string schema_owned =
+        meta.schema != nullptr ? std::string(meta.schema) : FindRoutesSchema();
+    tools.emplace_back(meta.name, meta.description, ParseSchema(schema_owned.c_str()),
                        AdaptHandler(std::move(it->second)));
   }
   return tools;

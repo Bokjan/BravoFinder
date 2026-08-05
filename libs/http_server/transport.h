@@ -34,6 +34,15 @@ class Connection;
 // --io-timeout). The Limits struct stores it as milliseconds.
 inline constexpr int kDefaultIoTimeoutSec = 30;
 
+// Default bind port for bf-http / bf-mcp --transport http (--port).
+inline constexpr int kDefaultPort = 8080;
+
+// Default request body cap, in bytes (--max-body). 1 MiB.
+inline constexpr size_t kDefaultMaxBodyBytes = 1u << 20;
+
+// Seconds-to-milliseconds scale for Limits::io_timeout_ms.
+inline constexpr uint64_t kMsPerSec = 1000;
+
 // A list of extra response headers (name, value), beyond the framing headers
 // (Content-Type / Content-Length / Connection / Date) the core always writes.
 using Headers = std::vector<std::pair<std::string, std::string>>;
@@ -41,9 +50,9 @@ using Headers = std::vector<std::pair<std::string, std::string>>;
 // Transport limits/timeouts. Body size and the idle timeout are CLI-tunable;
 // the header caps are fixed hardening constants (see conn.cc).
 struct Limits {
-  size_t max_body_bytes = 1u << 20;  // 1 MiB request body cap (--max-body)
+  size_t max_body_bytes = kDefaultMaxBodyBytes;  // 1 MiB request body cap (--max-body)
   uint64_t io_timeout_ms = static_cast<uint64_t>(kDefaultIoTimeoutSec) *
-                           1000;  // header/body read + idle keep-alive (--io-timeout)
+                           kMsPerSec;  // header/body read + idle keep-alive (--io-timeout)
 };
 
 // A fully-parsed HTTP request handed to the RequestHandler. method/path are what

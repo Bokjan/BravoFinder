@@ -31,4 +31,10 @@ struct Coordinate {
 // the true arc use the same radius and stay consistent.
 inline constexpr double kEarthRadiusNm = 6371.0088 / 1.852;
 
+// Angle conversion constants shared by haversine, bearing, MORA sampling, and
+// the turn-angle penalty (degree/radian and full/half-circle wraps).
+inline constexpr double kPi = 3.14159265358979323846;
+inline constexpr double kDegreesFullCircle = 360.0;
+inline constexpr double kDegreesHalfCircle = 180.0;
+
 }  // namespace bf

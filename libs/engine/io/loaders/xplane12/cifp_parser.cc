@@ -6,9 +6,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "core/domain/nav_tokens.h"
 
 namespace bf {
 
@@ -116,7 +119,7 @@ uint16_t RnpCentinm(const std::string& field) {
     }
     centinm = (centinm + div / 2) / div;
   }
-  if (centinm < 0 || centinm > 65535) {
+  if (centinm < 0 || centinm > static_cast<long>(std::numeric_limits<uint16_t>::max())) {
     return 0;
   }
   return static_cast<uint16_t>(centinm);
@@ -134,10 +137,10 @@ char TurnDir(const std::string& field) {
 }
 
 ProcedureType TypeFromTag(std::string_view tag) {
-  if (tag == "STAR") {
+  if (tag == kStarToken) {
     return ProcedureType::kStar;
   }
-  if (tag == "APPCH") {
+  if (tag == kAppchToken) {
     return ProcedureType::kApproach;
   }
   return ProcedureType::kSid;
@@ -229,7 +232,7 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
       }
       continue;
     }
-    if (tag != "SID" && tag != "STAR" && tag != "APPCH") {
+    if (tag != kSidToken && tag != kStarToken && tag != kAppchToken) {
       continue;  // PRDAT and anything else
     }
 
@@ -261,7 +264,7 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
       // A runway transition's identifier is the runway name prefixed with "RW"
       // (e.g. "RW04L"); record it as the procedure's runway filter key.
       // Approach finals leave transition empty — derive runway from the name.
-      if (trans.rfind("RW", 0) == 0) {
+      if (trans.rfind(kRunwayPrefix, 0) == 0) {
         current.runway = trans;
       } else if (type == ProcedureType::kApproach) {
         current.runway = ApproachRunwayFromName(name);

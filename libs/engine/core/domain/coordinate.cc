@@ -8,9 +8,7 @@ namespace bf {
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
-
-double ToRadians(double degrees) { return degrees * kPi / 180.0; }
+double ToRadians(double degrees) { return degrees * kPi / kDegreesHalfCircle; }
 
 }  // namespace
 
@@ -38,9 +36,9 @@ double Coordinate::BearingTo(const Coordinate& other) const noexcept {
   const double y = std::sin(d_lon) * std::cos(lat2);
   const double x =
       std::cos(lat1) * std::sin(lat2) - std::sin(lat1) * std::cos(lat2) * std::cos(d_lon);
-  double deg = std::atan2(y, x) * 180.0 / kPi;
+  double deg = std::atan2(y, x) * kDegreesHalfCircle / kPi;
   if (deg < 0.0) {
-    deg += 360.0;
+    deg += kDegreesFullCircle;
   }
   return deg;
 }

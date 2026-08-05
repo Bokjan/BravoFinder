@@ -2,6 +2,8 @@
 #include "io/cache/graph_codec.h"
 
 #include <cstdint>
+#include <format>
+#include <limits>
 
 #include "io/cache/byte_io.h"
 #include "io/cache/graph_snapshot.h"
@@ -81,9 +83,10 @@ static_assert(kMsaArcSize == 12, "msa-arc wire layout drifted");
 Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, StringPool& pool) {
   const size_t v = snapshot.coords.size();
   const size_t e = snapshot.edges.size();
-  if (snapshot.airway_names.size() > 0xFFFF) {
-    return Result<void>::Err(
-        Error(ErrorCode::kSerializationError, "too many airway names to serialize (> 65535)"));
+  if (snapshot.airway_names.size() > std::numeric_limits<uint16_t>::max()) {
+    return Result<void>::Err(Error(ErrorCode::kSerializationError,
+                                   std::format("too many airway names to serialize (> {})",
+                                               std::numeric_limits<uint16_t>::max())));
   }
   if (snapshot.offsets.size() != v + 1 || snapshot.idents.size() != v ||
       snapshot.has_outbound.size() != v || snapshot.has_inbound.size() != v ||

@@ -39,6 +39,18 @@ struct HandlerResult {
 // maps it to a non-zero exit code; HTTP passes the code through directly.
 inline constexpr int kErrorStatusThreshold = 400;
 
+// Server-side request caps shared with the MCP JSON-Schema (tools.cc) so the
+// schema maximum/maxItems and the adapter's 400 messages cannot drift.
+//
+// Max entries in any request ID array (forced_points, avoid_waypoints, lookup
+// ids, and each airway_rule's region_prefixes/designators lists).
+inline constexpr size_t kMaxIdListSize = 256;
+// Max accepted flight level (hundreds of feet). FL600 is above any civil cruise.
+inline constexpr int kMaxFl = 600;
+// Cap on Yen K-shortest alternatives per find_routes call (server protection;
+// the CLI does not enforce this).
+inline constexpr int kMaxK = 15;
+
 using QueryHandler =
     std::function<HandlerResult(const rapidjson::Value& args, const bf::NavDatabase& db)>;
 

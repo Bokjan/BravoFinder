@@ -8,6 +8,12 @@
 
 namespace bf {
 
+// Soft penalty fraction (of an edge's own length) used as the default for
+// LevelPreferenceConstraint and AirwayRule::penalty_fraction. Enough to push
+// matched / non-preferred edges out of the optimal route while leaving them
+// usable when no alternative exists.
+inline constexpr double kDefaultPenaltyFraction = 0.5;
+
 // Preferred airway level when both high and low options exist.
 enum class LevelPreference {
   kNone,  // no preference (default)
@@ -80,11 +86,10 @@ struct AirwayRule {
   // Soft penalty as a fraction of the leg's own length, used only when action is
   // kPenalize. Proportional rather than a fixed amount so short and long legs are
   // treated alike (a fixed 10 NM is punitive on a 30 NM leg and negligible on a
-  // 300 NM one). The 0.5 default matches LevelPreferenceConstraint, which is
-  // enough to push the matched airways out of the optimal route while leaving
-  // them usable when no alternative exists. Must be >= 0: a negative penalty
-  // would break the heuristic's admissibility.
-  double penalty_fraction = 0.5;
+  // 300 NM one). Defaults to kDefaultPenaltyFraction (shared with
+  // LevelPreferenceConstraint). Must be >= 0: a negative penalty would break the
+  // heuristic's admissibility.
+  double penalty_fraction = kDefaultPenaltyFraction;
 };
 
 // A route query: departure and arrival endpoints, each an airport ICAO code or

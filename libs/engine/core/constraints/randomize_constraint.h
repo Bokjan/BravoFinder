@@ -24,7 +24,10 @@ namespace bf {
 // terms while the relative jitter stays bounded by eps.
 class RandomizeConstraint : public Constraint {
  public:
-  explicit RandomizeConstraint(uint32_t seed, double eps = 0.05) : seed_(seed), eps_(eps) {}
+  // Default relative jitter: 5% of each edge's length times a hash in [0, 1).
+  static constexpr double kDefaultEps = 0.05;
+
+  explicit RandomizeConstraint(uint32_t seed, double eps = kDefaultEps) : seed_(seed), eps_(eps) {}
 
   EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest&) const override {
     const double jitter = Hash01(seed_, ctx.edge.to, ctx.edge.airway_id);

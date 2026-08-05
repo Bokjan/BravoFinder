@@ -5,6 +5,8 @@
 #include <charconv>
 #include <string>
 
+#include "core/domain/nav_tokens.h"
+
 namespace bf {
 
 bool TerminatesAtFix(PathTerminator t) {
@@ -183,10 +185,10 @@ std::string NormalizeRunwayIdent(std::string_view rwy) {
   if (rwy.empty()) {
     return {};
   }
-  if (rwy.size() >= 2 && rwy[0] == 'R' && rwy[1] == 'W') {
+  if (rwy.starts_with(kRunwayPrefix)) {
     return std::string(rwy);
   }
-  std::string out = "RW";
+  std::string out(kRunwayPrefix);
   out.append(rwy);
   return out;
 }
@@ -214,7 +216,7 @@ std::string ApproachRunwayFromName(std::string_view name) {
       suffix = c;
     }
   }
-  std::string out = "RW";
+  std::string out(kRunwayPrefix);
   out.append(name.substr(1, dig_end - 1));
   if (suffix != '\0') {
     out.push_back(suffix);

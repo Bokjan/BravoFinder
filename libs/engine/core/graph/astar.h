@@ -78,8 +78,8 @@ struct EdgeFilter {
 // outbound heading (the edge leaving it).
 inline double TurnAngleDeg(double inbound_deg, double outbound_deg) {
   double delta = std::abs(inbound_deg - outbound_deg);
-  if (delta > 180.0) {
-    delta = 360.0 - delta;
+  if (delta > kDegreesHalfCircle) {
+    delta = kDegreesFullCircle - delta;
   }
   return delta;
 }
@@ -138,11 +138,11 @@ struct TurnPenalty {
       // Linear ramp 0 -> kPenaltyAtKneeNm over [kThresholdDeg, kKneeDeg].
       return kPenaltyAtKneeNm * (angle_deg - kThresholdDeg) / (kKneeDeg - kThresholdDeg);
     }
-    if (angle_deg >= 180.0) {
+    if (angle_deg >= kDegreesHalfCircle) {
       return kMaxPenaltyNm;
     }
     // Quadratic ramp kPenaltyAtKneeNm -> kMaxPenaltyNm over [kKneeDeg, 180].
-    const double t = (angle_deg - kKneeDeg) / (180.0 - kKneeDeg);
+    const double t = (angle_deg - kKneeDeg) / (kDegreesHalfCircle - kKneeDeg);
     return kPenaltyAtKneeNm + (kMaxPenaltyNm - kPenaltyAtKneeNm) * t * t;
   }
 };

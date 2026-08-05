@@ -18,6 +18,7 @@
 #include "core/constraints/avoid_waypoint_constraint.h"
 #include "core/constraints/mora_constraint.h"
 #include "core/constraints/randomize_constraint.h"
+#include "core/domain/nav_tokens.h"
 #include "core/graph/yen_kshortest.h"
 #include "core/routing/route_string.h"
 #include "io/build/graph_builder.h"
@@ -152,8 +153,11 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   // back to a direct link), not the procedure name -- the name lives in
   // route.sid, so the compact route string stays airline/ICAO style.
   if (!dep_label.empty()) {
-    route.legs.push_back(
-        RouteLeg{dep_label, dep_fix_id, sid.empty() ? "DCT" : "SID", dep_seed, {}});
+    route.legs.push_back(RouteLeg{dep_label,
+                                  dep_fix_id,
+                                  sid.empty() ? std::string(kDctToken) : std::string(kSidToken),
+                                  dep_seed,
+                                  {}});
   }
   // Enroute legs between consecutive on-network fixes.
   for (size_t i = 0; i + 1 < path.vertices.size(); ++i) {
@@ -167,7 +171,7 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
     // behavior) could show a via/distance the cost model did not choose when a
     // constraint (level preference, randomization) made a longer edge cheaper.
     const GraphEdge* e = SelectEdge(graph, u, w, options);
-    std::string via = "DCT";
+    std::string via(kDctToken);
     double dist = 0.0;
     if (e != nullptr) {
       via = builder.AirwayName(e->airway_id);
@@ -179,8 +183,11 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   // Trailing procedure leg: last connection fix -> airport. `via` carries the
   // literal "STAR" (or "DCT"); the STAR name lives in route.star.
   if (!arr_label.empty()) {
-    route.legs.push_back(
-        RouteLeg{arr_fix_id, arr_label, star.empty() ? "DCT" : "STAR", arr_seed, {}});
+    route.legs.push_back(RouteLeg{arr_fix_id,
+                                  arr_label,
+                                  star.empty() ? std::string(kDctToken) : std::string(kStarToken),
+                                  arr_seed,
+                                  {}});
   }
 
   // Phase split, computed here from the leg positions (not re-derived at print

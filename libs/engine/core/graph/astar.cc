@@ -12,15 +12,13 @@ namespace {
 
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
 
-constexpr double kPi = 3.14159265358979323846;
-
 // Project a Coordinate onto the unit sphere as a Cartesian (x, y, z). Used by
 // MultiGoalHeuristic for chord-length distances; the trig here is the only trig
 // the heuristic pays per vertex (computed once on the cache miss, then reused
 // across every goal).
 UnitVec ProjectUnitSphere(const Coordinate& c) {
-  const double lat_r = c.latitude * kPi / 180.0;
-  const double lon_r = c.longitude * kPi / 180.0;
+  const double lat_r = c.latitude * kPi / kDegreesHalfCircle;
+  const double lon_r = c.longitude * kPi / kDegreesHalfCircle;
   const double cos_lat = std::cos(lat_r);
   return UnitVec{cos_lat * std::cos(lon_r), cos_lat * std::sin(lon_r), std::sin(lat_r)};
 }

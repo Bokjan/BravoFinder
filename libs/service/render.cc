@@ -19,6 +19,7 @@
 
 #include "core/routing/route.h"
 #include "core/routing/route_metrics.h"
+#include "io/loaders/loader_constants.h"
 #include "query_json.h"
 #include "route_json.h"
 
@@ -333,7 +334,7 @@ std::string RenderNavaidDetails(OutputFormat fmt, const std::vector<std::string>
       if (d.kind == bf::WaypointKind::kNdb) {
         os << d.freq_raw << " kHz";
       } else {
-        os << (d.freq_raw / 100.0) << " MHz";
+        os << (d.freq_raw / kCentiScale) << " MHz";
       }
       os << "  range " << d.range_nm << " NM\n";
     }

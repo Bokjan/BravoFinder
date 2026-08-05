@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -21,10 +22,12 @@
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
+#include "core/domain/nav_tokens.h"
 #include "core/domain/navaid_detail.h"
 #include "core/domain/procedure.h"
 #include "core/domain/waypoint.h"
 #include "core/result.h"
+#include "io/loaders/loader_constants.h"
 #include "io/loaders/sqlite_util.h"
 #include "io/nav_data.h"
 
@@ -37,12 +40,6 @@ namespace {
 // loader) are called out inline.
 
 constexpr std::string_view kLoaderName = "dfd1";
-
-// Feet per flight level (100 ft per FL); DFD stores altitudes in feet, the
-// graph works in flight levels.
-constexpr int kFeetPerFlightLevel = 100;
-// DFD encodes "no ceiling" as maximum_altitude = 99999; treated as unset.
-constexpr int kUnknownAltitudeFt = 99999;
 
 // Search source_dir for the v1 database (byte-identical copies under several
 // names), in priority order, falling back to the first *.s3db found.
@@ -199,7 +196,7 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ide
     data.waypoints.push_back(
         Waypoint{key, Coordinate{ColumnDouble(stmt, 7), ColumnDouble(stmt, 8)}, kind});
     // DFD vor_frequency is MHz (e.g. 115.9); NavaidDetail.freq_raw is MHz*100.
-    const int freq_raw = static_cast<int>(std::lround(ColumnDouble(stmt, 2) * 100.0));
+    const int freq_raw = static_cast<int>(std::lround(ColumnDouble(stmt, 2) * kCentiScale));
     data.navaid_details.push_back(NavaidDetail{key, kind, ColumnInt(stmt, 6), freq_raw,
                                                ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)});
   });
@@ -542,12 +539,14 @@ void FillProcExtras(sqlite3_stmt* stmt, const ProcCols& c, ProcedureLeg& leg) {
   // out-of-range DFD value (negative, or beyond 65535) clamps to the field range
   // instead of silently wrapping. Real data is well within bounds (RNP <= ~15 nm,
   // speeds <= ~350 kt); this only hardens against a corrupt/unexpected source row.
-  const long rnp_centi = rnp > 0.0 ? std::lround(rnp * 100.0) : 0;
-  leg.rnp_centinm = static_cast<uint16_t>(std::clamp<long>(rnp_centi, 0, 65535));
+  const long rnp_centi = rnp > 0.0 ? std::lround(rnp * kCentiScale) : 0;
+  leg.rnp_centinm = static_cast<uint16_t>(
+      std::clamp<long>(rnp_centi, 0, static_cast<long>(std::numeric_limits<uint16_t>::max())));
   const std::string turn = ColumnText(stmt, c.turn_dir);
   leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
   const int speed = ColumnInt(stmt, c.speed_limit);
-  leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(speed, 0, 65535));
+  leg.speed_limit_kt = static_cast<uint16_t>(
+      std::clamp(speed, 0, static_cast<int>(std::numeric_limits<uint16_t>::max())));
   leg.is_mapt = IsMaptDesc(ColumnText(stmt, c.wpt_desc));
 }
 
@@ -621,7 +620,7 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
       cur_route = route;
       current.name = name;
       current.transition_ident = trans;
-      if (trans.rfind("RW", 0) == 0) {
+      if (trans.rfind(kRunwayPrefix, 0) == 0) {
         current.runway = trans;  // runway transition
       } else if (type == ProcedureType::kApproach) {
         // Approach final segments leave transition_identifier empty; derive the
@@ -774,7 +773,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
         cur_route = route;
         current.name = name;
         current.transition_ident = trans;
-        if (trans.rfind("RW", 0) == 0) {
+        if (trans.rfind(kRunwayPrefix, 0) == 0) {
           current.runway = trans;
         } else if (type == ProcedureType::kApproach) {
           current.runway = ApproachRunwayFromName(name);
