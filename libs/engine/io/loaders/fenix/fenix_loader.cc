@@ -572,11 +572,13 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
 // One procedure's legs grouped by transition.  `runway` holds the runway ident
 // only when `transition` is a runway transition (RW-prefixed, e.g. "RW18L");
 // otherwise it is empty (enroute/IAF transitions name a fix, not a runway).
-// "ALL" legs are split out into common_legs below.
+// "ALL" legs are split out into common_legs below. `route_type` is taken from
+// TerminalLegs.Type (ARINC route type for approaches; numeric for SID/STAR).
 struct LegGroup {
   std::vector<ProcedureLeg> legs;
   std::string transition;
   std::string runway;
+  int route_type = 0;
 };
 
 // One TerminalLegs scan → leg_groups (keyed by TerminalID) + common_legs
@@ -608,7 +610,8 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
   {
     Result<SqliteStmt> ls = Prepare(conn,
                                     "SELECT tl.TerminalID, tl.Transition, tl.TrackCode, tl.Course, "
-                                    "tl.Distance, tl.Alt, tl.TurnDir, tl.WptID, ex.SpeedLimit "
+                                    "tl.Distance, tl.Alt, tl.TurnDir, tl.WptID, ex.SpeedLimit, "
+                                    "tl.WptDescCode, tl.Type "
                                     "FROM TerminalLegs tl "
                                     "LEFT JOIN TerminalLegsEx ex ON tl.ID = ex.ID "
                                     "ORDER BY tl.TerminalID, tl.ID");
@@ -657,16 +660,17 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
           static_cast<uint16_t>(std::clamp<double>(spd > 0.0 ? spd : 0.0, 0.0, 65535.0));
       // NOTE: Fenix schema has no RNP column in TerminalLegs/TerminalLegsEx,
       // so ProcedureLeg.rnp_centinm stays 0 (dfd1/dfd2/xplane12 load it).
+      leg.is_mapt = IsMaptDesc(ColumnText(stmt, 9));
+      const int route_type = ParseRouteTypeToken(ColumnText(stmt, 10));
 
       auto& groups = leg_groups[tid];
       if (groups.empty() || groups.back().transition != trans) {
         // `runway` is set only when this transition is a runway transition
         // (ident prefixed "RW", e.g. "RW18L"); enroute/IAF transitions carry a
         // fix name, not a runway, so they leave `runway` empty. Mirrors the
-        // dfd1/dfd2/cifp loaders' RW-prefix guard. For approaches the
-        // Transition column always holds an IAF name (or ""), so approach
-        // `runway` is always empty -- matching the other loaders.
-        groups.push_back(LegGroup{{}, trans, trans.rfind("RW", 0) == 0 ? trans : ""});
+        // dfd1/dfd2/cifp loaders' RW-prefix guard. Approach runway comes from
+        // Terminals.Rwy at emit time (not from Transition).
+        groups.push_back(LegGroup{{}, trans, trans.rfind("RW", 0) == 0 ? trans : "", route_type});
       }
       groups.back().legs.push_back(std::move(leg));
     });
@@ -715,7 +719,11 @@ void EmitTerminalProcedure(int tid, const std::unordered_map<int, Procedure>& pr
   if (cit != common_legs.end() && !cit->second.empty()) {
     Procedure proc = base;
     proc.transition_ident = "";
-    proc.runway = "";
+    // Approaches: Terminals.Rwy is the structured runway (already normalized
+    // into base.runway). SID/STAR common segments stay runway-independent.
+    if (base.type != ProcedureType::kApproach) {
+      proc.runway = "";
+    }
     proc.legs = cit->second;
     cifp.procedures.push_back(std::move(proc));
   }
@@ -724,7 +732,12 @@ void EmitTerminalProcedure(int tid, const std::unordered_map<int, Procedure>& pr
   for (const auto& group : git->second) {
     Procedure proc = base;
     proc.transition_ident = group.transition;
-    proc.runway = group.runway;
+    proc.route_type = group.route_type;
+    if (base.type == ProcedureType::kApproach) {
+      // Keep Terminals.Rwy (normalized into base.runway); Transition is an IAF.
+    } else {
+      proc.runway = group.runway;
+    }
     proc.legs = group.legs;
     if (cit != common_legs.end()) {
       proc.legs.insert(proc.legs.end(), cit->second.begin(), cit->second.end());
@@ -750,9 +763,9 @@ Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
   // index instead of degrading to a full table scan plus an in-code filter.
   const bool single_airport = airport_ids != nullptr && airport_ids->size() == 1;
   {
-    std::string sql = single_airport ? "SELECT ID, AirportID, Proc, Name FROM Terminals "
+    std::string sql = single_airport ? "SELECT ID, AirportID, Proc, Name, Rwy FROM Terminals "
                                        "WHERE AirportID = ? ORDER BY ID"
-                                     : "SELECT ID, AirportID, Proc, Name FROM Terminals "
+                                     : "SELECT ID, AirportID, Proc, Name, Rwy FROM Terminals "
                                        "ORDER BY AirportID, ID";
     Result<SqliteStmt> ts = Prepare(conn, sql);
     if (!ts) {
@@ -782,6 +795,12 @@ Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
         proc.type = ProcedureType::kApproach;
       }
       proc.name = ColumnText(stmt, 3);
+      // Approaches carry a structured Rwy column ("18"/"06L"); normalize to the
+      // internal RW-prefixed form. SID/STAR runway still comes from an
+      // RW-prefixed Transition at emit time.
+      if (proc.type == ProcedureType::kApproach) {
+        proc.runway = NormalizeRunwayIdent(ColumnText(stmt, 4));
+      }
       proc_by_tid[tid] = std::move(proc);
       airport_tids[aid].push_back(tid);
     });

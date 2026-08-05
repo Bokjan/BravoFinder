@@ -153,6 +153,31 @@ TEST_CASE("CIFP parser: RWY records yield threshold coordinates", "[unit][cifp]"
   CHECK_THAT(r.threshold.longitude, WithinAbs(-73.7847, 1e-3));
 }
 
+TEST_CASE("CIFP parser: APPCH fills runway from name and is_mapt from WD", "[unit][cifp]") {
+  // Verbatim KTVL R18 final-segment rows (cycle 2601): empty transition, MAPT
+  // at SAKYY (WD "EY M"), then missed-approach start KATFR (WD "EYM" — not MAPT).
+  const std::vector<std::string> lines = {
+      "APPCH:010,R,R18, ,OBAVE,K2,P,C,E  I, ,   ,IF, , , , , ,      ,    ,    ,    ,    "
+      ",+,11000,     ,18000, ,   ,    ,   , , , , , ,A,J,S;",
+      "APPCH:040,R,R18, ,SAKYY,K2,P,C,EY M, ,   ,TF, , , , , ,      ,    ,    ,    ,    "
+      ", ,     ,     ,     , ,   ,    ,   , , , , , ,A,J,S;",
+      "APPCH:050,R,R18, ,KATFR,K2,P,C,EYM , ,   ,DF, , , , , ,      ,    ,    ,    ,    "
+      ", ,     ,     ,     , ,   ,    ,   , , , , , ,A,J,S;",
+  };
+  const bf::CifpData data = bf::CifpParser::ParseLines(lines);
+  REQUIRE(data.procedures.size() == 1);
+  const bf::Procedure& p = data.procedures[0];
+  CHECK(p.type == bf::ProcedureType::kApproach);
+  CHECK(p.name == "R18");
+  CHECK(p.runway == "RW18");
+  CHECK(p.route_type == static_cast<int>('R'));
+  REQUIRE(p.legs.size() == 3);
+  CHECK_FALSE(p.legs[0].is_mapt);
+  CHECK(p.legs[1].is_mapt);
+  CHECK(p.legs[1].fix.IdentView() == "SAKYY");
+  CHECK_FALSE(p.legs[2].is_mapt);
+}
+
 TEST_CASE("CIFP parser: all ARINC 424 path terminators are recognized", "[unit][cifp]") {
   // Round-trip every terminator token through parse + name. The full cycle-2601
   // corpus (14838 airports) uses all 23 of these; none must fall to kUnknown.

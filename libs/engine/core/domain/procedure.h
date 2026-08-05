@@ -89,15 +89,37 @@ struct AltitudeConstraint {
 // descriptor logic does not.
 AltitudeConstraint ParseAltConstraint(std::string_view desc, int alt1, int alt2);
 
+// ARINC 424 Waypoint Description Code: character 4 (1-based) == 'M' marks the
+// Missed Approach Point. The input is right-padded with spaces to length 4 so
+// short codes like "EY M" / "E  M" match and a 3-char missed-approach start
+// like "EYM" does not (do not use a naive "contains M" test).
+bool IsMaptDesc(std::string_view desc);
+
+// Normalize a bare runway token ("18", "06L") to the internal "RW…" form used
+// by RunwayMatches / --rwy-arr. Empty → empty; already RW-prefixed → unchanged.
+std::string NormalizeRunwayIdent(std::string_view rwy);
+
+// Derive an approach's runway filter key from its procedure name (ARINC type
+// prefix + runway digits + optional L/R/C), e.g. "R18"/"I14-Z"/"R10LY" →
+// "RW18"/"RW14"/"RW10L". Circling / unparseable names return empty (exempt from
+// runway filtering). Used by DFD/CIFP where no structured runway column exists
+// on the approach final segment.
+std::string ApproachRunwayFromName(std::string_view name);
+
+// Encode an ARINC route_type token for Procedure::route_type: numeric strings
+// parse as ints (SID/STAR); a single alpha character is stored as its char
+// value (IAP 'A'/'R'/…); anything else → 0.
+int ParseRouteTypeToken(std::string_view token);
+
 // One leg of a procedure: the path terminator, its (possibly empty) fix, and
 // the course/distance/altitude data parsed from the CIFP row. Legs that do not
 // terminate at a fix leave `fix` empty and rely on course/distance.
 //
 // Layout is pinned at 36 bytes (align 4) for the ~765k-leg eager array:
-//   FixedIdent(12) + 2×float(8) + 2×int(8) + 2×u16(4) + 3×u8-ish(3) + 1 pad.
+//   FixedIdent(12) + 2×float(8) + 2×int(8) + 2×u16(4) + 4×u8-ish(4).
 // course/distance are float: CIFP source quantum is 0.1, and seed/route A/B
 // confirmed no fingerprint drift (see research/2026-08-05_struct_layout_audit).
-// Wire (cifp_codec) still stores F64 — memory-only change, no format_version bump.
+// Wire (cifp_codec) stores F64 for course/distance and a U8 for is_mapt.
 struct ProcedureLeg {
   // Compact 12-byte fixed ident (vs 64B Ident): the leg array is by far the
   // largest CIFP structure (~765k legs), so this cuts eager-mode resident memory
@@ -116,6 +138,9 @@ struct ProcedureLeg {
   PathTerminator path_term = PathTerminator::kUnknown;
   AltConstraintKind alt_kind = AltConstraintKind::kNone;
   char turn_dir = '\0';  // 'L'/'R' turn direction, or '\0' when unspecified.
+  // Missed Approach Point: ARINC 424 Waypoint Description Code character 4
+  // (1-based) == 'M'. Derived at load time; raw WD code is not retained.
+  bool is_mapt = false;
 
   void set_alt(const AltitudeConstraint& a) {
     alt_kind = a.kind;
