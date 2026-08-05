@@ -1276,6 +1276,10 @@ TEST_CASE("real data: no-STAR arrival connects via an on-network approach IAF", 
   CHECK(last.to == "KTVL");
   CHECK(last.via == "DCT");
   CHECK(last.from != "KTVL");
+  // T6: connection points are IF gates only — never a MAPT / intermediate fix.
+  CHECK(last.from != "SAKYY");
+  CHECK(last.from != "JEZYY");
+  CHECK(last.from != "SERVY");
   CHECK(r.arr_distance_nm > 1.0);  // more than a doorstep stub
   // Seed stops at MAPT (excludes missed-approach hold); keep a soft upper bound.
   CHECK(r.arr_distance_nm < 80.0);
@@ -1314,6 +1318,24 @@ TEST_CASE("real data: STAR airport is unchanged by approach arrival path", "[int
   CHECK_FALSE(r.star.empty());
   REQUIRE_FALSE(r.legs.empty());
   CHECK(r.legs.back().via == "STAR");
+}
+
+TEST_CASE("real data: KMFR no-STAR arrival uses terminal_transition", "[integration]") {
+  // Issue #24 T9 smoke: KMFR has approaches and no STAR.
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KLAX", "KMFR"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK(r.star.empty());
+  CHECK(r.terminal_transition);
+  CHECK(r.arr_connection == bf::ConnectionKind::kTerminalTransition);
+  REQUIRE_FALSE(r.legs.empty());
+  CHECK(r.legs.back().to == "KMFR");
+  CHECK(r.legs.back().via == "DCT");
 }
 
 TEST_CASE("real data: unmatched --star does not fall through to approach IAFs", "[integration]") {
