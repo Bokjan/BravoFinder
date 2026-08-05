@@ -642,11 +642,11 @@ Result<void> LoadProcTable(sqlite3* conn, const char* table, ProcedureType type,
     }
     leg.fix = FixedIdent::FromParts(wp_ident, ColumnText(stmt, c.wp_icao));
     leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
-    leg.course_deg = ColumnDouble(stmt, c.course);  // DFD: degrees (not tenths)
+    leg.course_deg = static_cast<float>(ColumnDouble(stmt, c.course));  // DFD: degrees (not tenths)
     // distance_flag 'D'=distance in nm, 'T'=time (no field for it), blank=none.
     const std::string flag = ColumnText(stmt, c.dist_flag);
     if (flag == "D") {
-      leg.distance_nm = ColumnDouble(stmt, c.dist_value);
+      leg.distance_nm = static_cast<float>(ColumnDouble(stmt, c.dist_value));
     }
     leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                    ColumnInt(stmt, c.alt2)));
@@ -791,10 +791,10 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
       }
       leg.fix = FixedIdent::FromParts(wp_ident2, ColumnText(stmt, c.wp_icao));
       leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
-      leg.course_deg = ColumnDouble(stmt, c.course);
+      leg.course_deg = static_cast<float>(ColumnDouble(stmt, c.course));
       const std::string flag = ColumnText(stmt, c.dist_flag);
       if (flag == "D") {
-        leg.distance_nm = ColumnDouble(stmt, c.dist_value);
+        leg.distance_nm = static_cast<float>(ColumnDouble(stmt, c.dist_value));
       }
       leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                      ColumnInt(stmt, c.alt2)));

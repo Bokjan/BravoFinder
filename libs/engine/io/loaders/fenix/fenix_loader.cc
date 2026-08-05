@@ -643,8 +643,8 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
         }
       }
 
-      leg.course_deg = ColumnDouble(stmt, 3);
-      leg.distance_nm = ColumnOptDouble(stmt, 4);
+      leg.course_deg = static_cast<float>(ColumnDouble(stmt, 3));
+      leg.distance_nm = static_cast<float>(ColumnOptDouble(stmt, 4));
       leg.set_alt(ParseFenixAlt(ColumnText(stmt, 5)));
       std::string td = ColumnText(stmt, 6);
       // TurnDir: 'L'/'R' only; anything else ('E' ×114 in real data) becomes

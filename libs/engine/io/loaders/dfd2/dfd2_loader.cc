@@ -499,11 +499,11 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
   const double course = ColumnDouble(stmt, c.course);
   const std::string flag = ColumnText(stmt, c.course_flag);
-  leg.course_deg = (flag == "T") ? ToMagnetic(course, magvar) : course;
+  leg.course_deg = static_cast<float>((flag == "T") ? ToMagnetic(course, magvar) : course);
   // v2 distance: distance_time holds the value, route_distance_... holds the flag.
   const std::string dflag = ColumnText(stmt, c.dist_flag);
   if (dflag == "D") {
-    leg.distance_nm = ColumnDouble(stmt, c.dist_value);
+    leg.distance_nm = static_cast<float>(ColumnDouble(stmt, c.dist_value));
   }
   leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
                                  ColumnInt(stmt, c.alt2)));

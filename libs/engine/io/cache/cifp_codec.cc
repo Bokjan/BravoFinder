@@ -190,8 +190,8 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
         return std::nullopt;
       }
       leg.path_term = static_cast<PathTerminator>(path_byte);
-      leg.course_deg = br.F64();
-      leg.distance_nm = br.F64();
+      leg.course_deg = static_cast<float>(br.F64());
+      leg.distance_nm = static_cast<float>(br.F64());
       const uint8_t alt_byte = br.U8();
       if (alt_byte > static_cast<uint8_t>(AltConstraintKind::kBetween)) {
         return std::nullopt;
