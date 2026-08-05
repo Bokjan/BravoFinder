@@ -76,6 +76,15 @@ class ProcedureConnector {
                                               const GraphBuilder& builder,
                                               const std::string& runway_filter);
 
+  // Arrival connections from approach IAFs when the airport has no STAR.
+  // Gate-only (path_term IF); only on-network inbound fixes. Seed is IAF→MAPT
+  // (transition∥final splice) plus the MAPT→airport stub. Off-network IAFs are
+  // not included here (proxy goals are a separate path).
+  static std::vector<Connection> BuildApproachArrival(const CifpData& cifp,
+                                                      const Coordinate& airport_coord,
+                                                      const GraphBuilder& builder,
+                                                      const std::string& runway_filter);
+
   // DCT fallback: connect to the nearest on-network waypoints by great-circle
   // distance. Used when no procedure connections are available. `arrival` picks
   // the direction: departures seed on fixes with an outbound airway edge (leave

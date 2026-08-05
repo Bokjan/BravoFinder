@@ -32,9 +32,9 @@ namespace {
 // procedures contributes several seeded connection fixes; a plain waypoint or a
 // DCT-fallback airport contributes one or a few. `airport_icao` is empty for a
 // bare waypoint endpoint. `has_procedures` records whether the airport actually
-// publishes procedures for this side (SID for departure, STAR for arrival), so a
-// DCT fallback can be told apart from missing data: procedures that exist but
-// reach no on-network fix (radar vectors) still fall back to DCT.
+// publishes procedures for this side (SID for departure; STAR or approach for
+// arrival), so a DCT fallback can be told apart from missing data: procedures
+// that exist but reach no on-network fix (radar vectors) still fall back to DCT.
 struct EndpointPlan {
   std::vector<Connection> connections;
   std::string airport_icao;  // empty if the endpoint is a plain waypoint
@@ -211,6 +211,11 @@ void SelectProcedures(const EndpointPlan& plan, int fix_vertex, std::string& nam
       continue;
     }
     for (const ProcedureRef& ref : c.procedures) {
+      // Approach refs are not STARs: leave star/star_options empty (filed via
+      // stays DCT). Approach metadata is filled by a later phase.
+      if (ref.type == ProcedureType::kApproach) {
+        continue;
+      }
       options.push_back(FormatRef(ref));
       if (name.empty()) {
         name = ref.name;
@@ -544,24 +549,39 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
       const Coordinate apt = builder_->graph().CoordOf(airport);
       const CifpData* cifp = ProceduresFor(up);
       if (cifp != nullptr) {
-        const ProcedureType want = departure ? ProcedureType::kSid : ProcedureType::kStar;
         for (const Procedure& p : cifp->procedures) {
-          if (p.type == want) {
+          if (departure) {
+            if (p.type == ProcedureType::kSid) {
+              plan.has_procedures = true;
+              break;
+            }
+          } else if (p.type == ProcedureType::kStar || p.type == ProcedureType::kApproach) {
             plan.has_procedures = true;
             break;
           }
         }
         const std::string& rwy = departure ? request.departure_runway : request.arrival_runway;
-        plan.connections = departure
-                               ? ProcedureConnector::BuildDeparture(*cifp, apt, *builder_, rwy)
-                               : ProcedureConnector::BuildArrival(*cifp, apt, *builder_, rwy);
-        // Optional SID/STAR selection by name: keep only the requested procedure.
-        // If none matches, mark it so the caller errors instead of falling back.
         const std::string& sel = departure ? request.departure_sid : request.arrival_star;
-        if (!sel.empty() && !FilterConnectionsByName(plan.connections, sel)) {
-          plan.connections.clear();
-          plan.named_procedure_unmatched = true;
-          return plan;
+        if (departure) {
+          plan.connections = ProcedureConnector::BuildDeparture(*cifp, apt, *builder_, rwy);
+          if (!sel.empty() && !FilterConnectionsByName(plan.connections, sel)) {
+            plan.connections.clear();
+            plan.named_procedure_unmatched = true;
+            return plan;
+          }
+        } else {
+          plan.connections = ProcedureConnector::BuildArrival(*cifp, apt, *builder_, rwy);
+          // Named --star must match a STAR connection; never silently fall through
+          // to approach IAFs (D1).
+          if (!sel.empty()) {
+            if (!FilterConnectionsByName(plan.connections, sel)) {
+              plan.connections.clear();
+              plan.named_procedure_unmatched = true;
+              return plan;
+            }
+          } else if (plan.connections.empty()) {
+            plan.connections = ProcedureConnector::BuildApproachArrival(*cifp, apt, *builder_, rwy);
+          }
         }
         plan.used_procedures = !plan.connections.empty();
       } else if (!(departure ? request.departure_sid : request.arrival_star).empty()) {

@@ -197,13 +197,16 @@ TEST_CASE("real data: K candidates can use different procedures", "[integration]
     CHECK(rs[i].route_string != rs[i - 1].route_string);
   }
 
-  // At least two candidates differ in their STAR, proving alternatives can cross
-  // connection fixes / procedures rather than sharing a single fixed pair.
-  std::set<std::string> stars;
+  // At least two candidates join via different STAR entry fixes, proving
+  // alternatives can cross connection points rather than sharing a single fixed
+  // pair. (Primary star name alone is not enough: KIMMO3 and WAYVE1 share LHS as
+  // interchangeable options, and SelectProcedures picks the min-seed ref.)
+  std::set<std::string> entry_fixes;
   for (const bf::Route& r : rs) {
-    stars.insert(r.star);
+    REQUIRE_FALSE(r.legs.empty());
+    entry_fixes.insert(r.legs.back().from);
   }
-  CHECK(stars.size() >= 2);
+  CHECK(entry_fixes.size() >= 2);
 }
 
 TEST_CASE("real data: high cruise altitude still finds a route", "[integration]") {
@@ -1250,6 +1253,79 @@ TEST_CASE("real data: one rule may enumerate many regions and designators", "[in
   for (const std::string_view blocked : {"W131", "W134", "W19", "A470", "A599"}) {
     CHECK(vias.count(std::string(blocked)) == 0);
   }
+}
+
+TEST_CASE("real data: no-STAR arrival connects via an on-network approach IAF", "[integration]") {
+  // Issue #24 phase 2: KTVL has approaches (R18/X18) but no STAR. The arrival
+  // tail must be an on-network IAF (HETRY/HUYJO/SWR/…) then DCT KTVL — not a
+  // bare nearest-fix DCT — and must not invent a STAR name.
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KLAX", "KTVL"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK(r.star.empty());
+  REQUIRE_FALSE(r.legs.empty());
+  const bf::RouteLeg& last = r.legs.back();
+  CHECK(last.to == "KTVL");
+  CHECK(last.via == "DCT");
+  // Known on-network IAFs for KTVL approaches (cycle 2601); at least one of
+  // these (or another IF with inbound edges) should be the handoff fix.
+  const std::set<std::string> ktvl_iafs = {"HETRY", "HUYJO", "SWR", "FMG", "OBAVE", "KINGS"};
+  CHECK(ktvl_iafs.count(last.from) == 1);
+  CHECK(r.arr_distance_nm > 1.0);  // more than a doorstep stub
+  // Seed stops at MAPT (excludes missed-approach hold); a full R18 walk past
+  // SAKYY including HETRY hold is well above 30 NM — keep a soft upper bound.
+  CHECK(r.arr_distance_nm < 80.0);
+}
+
+TEST_CASE("real data: arrival runway filter restricts approach IAF connections", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::RouteRequest req = MakeRequest("KLAX", "KTVL");
+  req.arrival_runway = "RW18";
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK(r.star.empty());
+  REQUIRE_FALSE(r.legs.empty());
+  CHECK(r.legs.back().via == "DCT");
+  CHECK(r.legs.back().to == "KTVL");
+  // RW18 approaches use HETRY/HUYJO (R18) or FMG/SWR (X18) — not runway-36 IAFs.
+  const std::set<std::string> rw18_iafs = {"HETRY", "HUYJO", "SWR", "FMG", "OBAVE", "KINGS"};
+  CHECK(rw18_iafs.count(r.legs.back().from) == 1);
+}
+
+TEST_CASE("real data: STAR airport is unchanged by approach arrival path", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KJFK", "KLAX"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK_FALSE(r.star.empty());
+  REQUIRE_FALSE(r.legs.empty());
+  CHECK(r.legs.back().via == "STAR");
+}
+
+TEST_CASE("real data: unmatched --star does not fall through to approach IAFs", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::RouteRequest req = MakeRequest("KLAX", "KTVL");
+  req.arrival_star = "NOSUCHSTAR";
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
+  REQUIRE_FALSE(routes);
+  CHECK(routes.error().code == bf::ErrorCode::kProcedureNotFound);
 }
 
 }  // namespace
