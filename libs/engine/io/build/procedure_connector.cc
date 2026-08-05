@@ -383,9 +383,29 @@ double ApproachBodyAndStubNm(const Procedure& gate_proc, int gate_v, const CifpD
     if (final_proc != nullptr) {
       ApproachWalk final_walk;
       // Start from the beginning of the final record (start_vertex < 0) and
-      // stop at MAPT. The transition already flew to the final IF; do not
-      // double-count that fix — WalkApproachSegment from start measures the
-      // final IF→MAPT polyline (cumulative from first fix).
+      // stop at MAPT. WalkApproachSegment from start measures the final
+      // first-definite→MAPT polyline (the first fix contributes 0 nm).
+      //
+      // Implicit splice assumption: the transition's last definite fix equals
+      // the final's first definite fix (typically the final IF). When that
+      // holds, body = (IAF→IF) + (IF→MAPT) with no double-count and no gap.
+      // Cycle-2601 X-Plane CIFP audit (~65k named approach transitions): the
+      // assumption holds for ~95% of records, including every transition at
+      // the major hubs sampled (KLAX/KJFK/KDEN/…/KMFR/KTVL). The remaining
+      // ~5% are NOT a single "missed gap" pathology — they split into:
+      //   (a) PT / hold-at-FAF: transition ends at a fix that appears LATER
+      //       in the final (FAF), so the final IF is upstream of the splice;
+      //       a naive GC(transition_end → final_IF) would add a reverse leg
+      //       and then still walk IF→FAF, over-counting.
+      //   (b) True disjoint (arc/VI intercept, etc.): transition end never
+      //       appears on the final — here a GC gap would under-count less,
+      //       but only this subset benefits.
+      // Seed is an approximation used only for goal pricing (not routing
+      // feasibility), so behavior stays "add the two walks" and accepts the
+      // rare under/over-count rather than a one-sided gap fill that worsens
+      // (a). A pattern-aware splice (walk final from the overlapping fix when
+      // present; else add GC to the final IF) is the right follow-up if seed
+      // bias at no-STAR PT/arc airports becomes user-visible.
       if (WalkApproachSegment(*final_proc, builder, /*start_vertex=*/-1, /*stop_at_mapt=*/true,
                               final_walk) &&
           final_walk.have_end) {
@@ -484,6 +504,15 @@ std::vector<Connection> ProcedureConnector::BuildApproachArrival(const CifpData&
   // No STAR: connect via approach IAFs (IF legs). On-network inbound IAFs are
   // ordinary goals; off-network IAFs contribute proxy goals at nearby inbound
   // fixes (seed folds |F→I| into the cost — no virtual edges on the CSR).
+  //
+  // TODO(perf): Recomputed on every FindRoutes for airports with an empty STAR
+  // set (KTVL/KMFR/04TT-class). Cost is in-memory only (walk approach legs +
+  // NearestOnNetwork via DegreeGrid, sub-ms to a few ms) — not a measured
+  // hotspot today, and airports that publish STARs never enter this path.
+  // If profiling later shows no-STAR airports on the HTTP/MCP hot path, cache
+  // by airport (optionally + runway_filter) with the same double-checked
+  // locking + unique_ptr pattern as procedure_cache_, keeping FindRoutes const
+  // and concurrently safe; any such cache must pass the tsan preset.
   std::unordered_map<int, Connection> by_fix =
       CollectApproachArrivals(cifp, airport_coord, builder, runway_filter);
   return Finalize(by_fix);
