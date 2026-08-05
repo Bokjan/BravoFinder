@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "registry.h"
 
+#include <format>
 #include <utility>
 
 namespace bf::service {
@@ -17,7 +18,7 @@ Result<const NavDatabase*> NavDatabaseRegistry::Get(std::optional<uint32_t> cycl
           Error(ErrorCode::kDataMissing, "no navigation databases loaded"));
     }
     return Result<const NavDatabase*>::Err(
-        Error(ErrorCode::kDataMissing, "unknown AIRAC cycle: " + std::to_string(*cycle)));
+        Error(ErrorCode::kDataMissing, std::format("unknown AIRAC cycle: {}", *cycle)));
   }
 
   const uint32_t key = entry->cycle;

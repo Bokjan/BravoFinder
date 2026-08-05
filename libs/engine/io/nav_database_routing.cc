@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <optional>
 #include <queue>
@@ -683,8 +684,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     if (request.airway_rules.size() > AirwayRuleConstraint::kMaxRules) {
       return Result<Routes>::Err(
           Error(ErrorCode::kRouteParseError,
-                "too many airway rules (max " + std::to_string(AirwayRuleConstraint::kMaxRules) +
-                    "); note one rule may list any number of regions and designators"));
+                std::format("too many airway rules (max {}); note one rule may list any number of "
+                            "regions and designators",
+                            AirwayRuleConstraint::kMaxRules)));
     }
     airway_rules.emplace(ResolveAirwayRules(*builder_, request.airway_rules));
   }

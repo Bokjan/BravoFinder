@@ -13,6 +13,7 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -122,7 +123,8 @@ Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const
   }
   // Unknown method: reply with method-not-found only for a request (has id).
   if (has_id) {
-    return {MakeError(request["id"], jsonrpc::kMethodNotFound, "method not found: " + method),
+    return {MakeError(request["id"], jsonrpc::kMethodNotFound,
+                      std::format("method not found: {}", method)),
             true};
   }
   return {};
@@ -378,7 +380,7 @@ std::string Dispatcher::HandleToolsCall(const rapidjson::Value& id,
   }
   // The tool name is client-controlled, so escape it (a name with a quote must
   // not break the JSON frame).
-  return MakeToolResult(id, bf::service::JsonError("unknown tool: " + name), true);
+  return MakeToolResult(id, bf::service::JsonError(std::format("unknown tool: {}", name)), true);
 }
 
 }  // namespace bf::mcp

@@ -12,6 +12,7 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <format>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -473,7 +474,7 @@ std::string RenderError(OutputFormat fmt, const std::string& message) {
   if (fmt == OutputFormat::kJson) {
     return JsonError(message);
   }
-  return std::string(kTextErrorPrefix) + message + "\n";
+  return std::format("{}{}\n", kTextErrorPrefix, message);
 }
 
 }  // namespace bf::service

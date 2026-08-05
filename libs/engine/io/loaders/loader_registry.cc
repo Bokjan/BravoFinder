@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -52,7 +53,7 @@ Result<std::unique_ptr<Loader>> MakeLoader(const std::string& name) {
 
   if (it == kRegistry.end() || it->name != name) {
     return Result<std::unique_ptr<Loader>>::Err(
-        Error(ErrorCode::kInvalidArgument, "unknown loader: " + name));
+        Error(ErrorCode::kInvalidArgument, std::format("unknown loader: {}", name)));
   }
   return Result<std::unique_ptr<Loader>>::Ok(it->factory());
 }

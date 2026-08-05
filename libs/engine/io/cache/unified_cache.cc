@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <span>
 #include <utility>
@@ -177,7 +178,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   std::ofstream f(path, std::ios::binary | std::ios::trunc);
   if (!f.is_open()) {
     return Result<void>::Err(
-        Error(ErrorCode::kDataMissing, "cannot open .bfdb for writing: " + path));
+        Error(ErrorCode::kDataMissing, std::format("cannot open .bfdb for writing: {}", path)));
   }
   WriteAll(f, header);
   WriteAll(f, table);
@@ -191,7 +192,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   }
   if (!f) {
     return Result<void>::Err(
-        Error(ErrorCode::kSerializationError, "failed writing .bfdb: " + path));
+        Error(ErrorCode::kSerializationError, std::format("failed writing .bfdb: {}", path)));
   }
   return Result<void>::Ok();
 }
@@ -199,13 +200,15 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
 Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
   std::ifstream f(path, std::ios::binary);
   if (!f.is_open()) {
-    return Result<UnifiedHeader>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
+    return Result<UnifiedHeader>::Err(
+        Error(ErrorCode::kDataMissing, std::format("cannot open .bfdb: {}", path)));
   }
   std::vector<uint8_t> buf(kMaxHeaderPrefix);
   ReadInto(f, buf);  // may short-read a tiny file; gcount() tells how much
   buf.resize(static_cast<size_t>(f.gcount()));
   if (buf.size() < 4) {
-    return Result<UnifiedHeader>::Err(Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
+    return Result<UnifiedHeader>::Err(
+        Error(ErrorCode::kCacheCorrupt, std::format("truncated .bfdb: {}", path)));
   }
   if (std::memcmp(buf.data(), kMagic, 4) != 0) {
     return Result<UnifiedHeader>::Err(
@@ -232,7 +235,8 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
 Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open()) {
-    return Result<UnifiedData>::Err(Error(ErrorCode::kDataMissing, "cannot open .bfdb: " + path));
+    return Result<UnifiedData>::Err(
+        Error(ErrorCode::kDataMissing, std::format("cannot open .bfdb: {}", path)));
   }
   const std::streamoff file_size = f.tellg();
   f.seekg(0);

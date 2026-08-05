@@ -4,6 +4,7 @@
 #include "work.h"
 
 #include <exception>
+#include <format>
 #include <memory>
 #include <string>
 #include <utility>
@@ -36,7 +37,7 @@ void OnWork(uv_work_t* req) {
     // The closure should go through Result, but never let an unexpected
     // exception cross the thread boundary: turn it into a 500.
     w->result.status = kStatusInternalServerError;
-    w->result.body = JsonError(std::string("internal error: ") + e.what());
+    w->result.body = JsonError(std::format("internal error: {}", e.what()));
   } catch (...) {
     w->result.status = kStatusInternalServerError;
     w->result.body = JsonError("internal error");

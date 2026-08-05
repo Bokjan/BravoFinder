@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
+#include <format>
 #include <optional>
 #include <string>
 #include <vector>
@@ -91,13 +92,13 @@ std::string FormatAltToken(const AltitudeConstraint& a) {
     case AltConstraintKind::kNone:
       return {};
     case AltConstraintKind::kAt:
-      return "@" + std::to_string(a.alt1_ft);
+      return std::format("@{}", a.alt1_ft);
     case AltConstraintKind::kAtOrAbove:
-      return "+" + std::to_string(a.alt1_ft);
+      return std::format("+{}", a.alt1_ft);
     case AltConstraintKind::kAtOrBelow:
-      return "-" + std::to_string(a.alt1_ft);
+      return std::format("-{}", a.alt1_ft);
     case AltConstraintKind::kBetween:
-      return std::to_string(a.alt2_ft) + "-" + std::to_string(a.alt1_ft);
+      return std::format("{}-{}", a.alt2_ft, a.alt1_ft);
   }
   return {};
 }

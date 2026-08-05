@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <utility>
 #include <vector>
@@ -297,7 +298,8 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
   archive.file_ = PreadFile(path);
   if (!archive.file_.is_open()) {
     return Result<CifpArchive>::Err(
-        Error(ErrorCode::kDataMissing, "cannot open .bfdb for CIFP segment reads: " + path));
+        Error(ErrorCode::kDataMissing,
+              std::format("cannot open .bfdb for CIFP segment reads: {}", path)));
   }
   archive.pool_ = std::move(pool_blob);
 

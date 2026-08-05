@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/loaders/sqlite_util.h"
 
+#include <format>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -30,7 +31,7 @@ thread_local std::unordered_map<std::string, SqliteHandle> tls_conns;
 }  // namespace
 
 Result<sqlite3*> AcquireConn(std::string_view loader_name, const std::string& db_path) {
-  const std::string key = std::string(loader_name) + "|" + db_path;
+  const std::string key = std::format("{}|{}", loader_name, db_path);
   if (auto it = tls_conns.find(key); it != tls_conns.end()) {
     return Result<sqlite3*>::Ok(it->second.get());
   }
@@ -42,7 +43,7 @@ Result<sqlite3*> AcquireConn(std::string_view loader_name, const std::string& db
     if (raw != nullptr) {
       sqlite3_close(raw);
     }
-    return Result<sqlite3*>::Err(Error(ErrorCode::kDataMissing, "SQLite: " + msg));
+    return Result<sqlite3*>::Err(Error(ErrorCode::kDataMissing, std::format("SQLite: {}", msg)));
   }
   SqliteHandle handle(raw);
   sqlite3* ptr = handle.get();
@@ -55,7 +56,7 @@ Result<SqliteStmt> Prepare(sqlite3* conn, std::string_view sql) {
   const int rc = sqlite3_prepare_v2(conn, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
   if (rc != SQLITE_OK) {
     return Result<SqliteStmt>::Err(Error(
-        ErrorCode::kParseError, std::string("SQLite prepare failed: ") + sqlite3_errmsg(conn)));
+        ErrorCode::kParseError, std::format("SQLite prepare failed: {}", sqlite3_errmsg(conn))));
   }
   return Result<SqliteStmt>::Ok(SqliteStmt(stmt));
 }
@@ -70,7 +71,7 @@ Result<bool> Step(sqlite3_stmt* stmt) {
   }
   return Result<bool>::Err(
       Error(ErrorCode::kParseError,
-            std::string("SQLite step failed: ") + sqlite3_errmsg(sqlite3_db_handle(stmt))));
+            std::format("SQLite step failed: {}", sqlite3_errmsg(sqlite3_db_handle(stmt)))));
 }
 
 std::string ColumnText(sqlite3_stmt* stmt, int col) {

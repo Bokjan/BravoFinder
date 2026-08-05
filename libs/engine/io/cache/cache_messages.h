@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
+#include <format>
 #include <string>
 #include <string_view>
 
@@ -11,7 +12,7 @@ namespace bf {
 inline constexpr std::string_view kCacheRebuildHint = "; run bf build to regenerate";
 
 inline std::string WithRebuildHint(std::string_view why) {
-  return std::string(why) + std::string(kCacheRebuildHint);
+  return std::format("{}{}", why, kCacheRebuildHint);
 }
 
 }  // namespace bf

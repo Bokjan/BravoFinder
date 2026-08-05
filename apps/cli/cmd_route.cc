@@ -14,7 +14,6 @@
 #include "core/routing/route_request.h"
 #include "handlers.h"
 #include "queries.h"
-#include "render.h"
 
 namespace bf::cli {
 
@@ -111,7 +110,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     // on-demand procedure parsing.
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
-      std::cerr << bf::service::kTextErrorPrefix << db.error().message << "\n";
+      PrintCliError("{}", db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -122,8 +121,8 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     if (!a->alt_spec.empty()) {
       std::optional<FlRange> range = ParseAltSpec(a->alt_spec);
       if (!range) {
-        std::cerr << bf::service::kTextErrorPrefix << "invalid --alt '" << a->alt_spec
-                  << "' (expected a level like 350 or a range like 300-400)\n";
+        PrintCliError("invalid --alt '{}' (expected a level like 350 or a range like 300-400)",
+                      a->alt_spec);
         exit_code = EXIT_FAILURE;
         return;
       }
@@ -139,8 +138,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
       std::string error;
       std::optional<AirwayRule> rule = bf::cli::ParseAirwayFilter(spec, error);
       if (!rule) {
-        std::cerr << bf::service::kTextErrorPrefix << "invalid --airway-filter '" << spec
-                  << "': " << error << "\n";
+        PrintCliError("invalid --airway-filter '{}': {}", spec, error);
         exit_code = EXIT_FAILURE;
         return;
       }

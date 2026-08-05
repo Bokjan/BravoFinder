@@ -37,7 +37,7 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
   parse->callback([a, &exit_code]() {
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir);
     if (!db) {
-      std::cerr << bf::service::kTextErrorPrefix << db.error().message << "\n";
+      PrintCliError("{}", db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <fstream>
 #include <limits>
 #include <string>
@@ -297,7 +298,8 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
 Result<CifpData> CifpParser::Parse(const std::string& path) {
   std::ifstream in(path);
   if (!in.is_open()) {
-    return Result<CifpData>::Err(Error(ErrorCode::kDataMissing, "cannot open CIFP file: " + path));
+    return Result<CifpData>::Err(
+        Error(ErrorCode::kDataMissing, std::format("cannot open CIFP file: {}", path)));
   }
   std::vector<std::string> lines;
   std::string line;

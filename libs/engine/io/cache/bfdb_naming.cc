@@ -2,6 +2,7 @@
 #include "io/cache/bfdb_naming.h"
 
 #include <filesystem>
+#include <format>
 
 namespace bf {
 
@@ -9,7 +10,7 @@ std::string FormatBfdbName(uint32_t cycle) {
   if (cycle == 0) {
     return "nav.bfdb";
   }
-  return "nav_" + std::to_string(cycle) + ".bfdb";
+  return std::format("nav_{}.bfdb", cycle);
 }
 
 std::optional<uint32_t> ParseBfdbName(std::string_view path) {

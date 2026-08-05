@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <optional>
 #include <string>
@@ -85,8 +86,7 @@ Result<std::string> FindV2Db(const std::string& source_dir) {
 // tbl_hdr_header (Prepare fails or no row) or a different dataset means the user
 // likely pointed dfd2 at a v1 DB; give an actionable message.
 Result<void> CheckV2Header(sqlite3* conn) {
-  const std::string sql =
-      std::string("SELECT dataset FROM ") + std::string(kTblHeader) + " LIMIT 1";
+  const std::string sql = std::format("SELECT dataset FROM {} LIMIT 1", kTblHeader);
   Result<SqliteStmt> stmt = Prepare(conn, sql);
   std::string dataset;
   if (stmt) {
@@ -96,10 +96,11 @@ Result<void> CheckV2Header(sqlite3* conn) {
     }
   }
   if (dataset != "NG_FWDFD") {
-    return Result<void>::Err(
-        Error(ErrorCode::kInvalidArgument,
-              "not a DFD v2 database (tbl_hdr_header missing or wrong dataset); "
-              "for DFD v1 use --loader dfd1"));
+    return Result<void>::Err(Error(
+        ErrorCode::kInvalidArgument,
+        std::format("not a DFD v2 database ({} missing or wrong dataset); for DFD v1 use --loader "
+                    "dfd1",
+                    kTblHeader)));
   }
   return Result<void>::Ok();
 }
@@ -147,10 +148,9 @@ int ParseHemiCoord(const std::string& s) {
 // --- Per-table loaders (column names that differ from v1 are noted). ---
 
 Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
-  const std::string sql = std::string(
-                              "SELECT icao_code, waypoint_identifier, "
-                              "waypoint_latitude, waypoint_longitude FROM ") +
-                          std::string(kTblEnrouteWp);
+  const std::string sql = std::format(
+      "SELECT icao_code, waypoint_identifier, waypoint_latitude, waypoint_longitude FROM {}",
+      kTblEnrouteWp);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -170,10 +170,9 @@ Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_
   // belongs to, e.g. "01OH"): region_code is not a region, mismatches how
   // airways/procedures reference the fix, and overflows FixedIdent::kArinc424IcaoCodeCap.
   // (Same as dfd1; see the dfd1 LoadTerminalWaypoints comment.)
-  const std::string sql = std::string(
-                              "SELECT icao_code, waypoint_identifier, "
-                              "waypoint_latitude, waypoint_longitude FROM ") +
-                          std::string(kTblTerminalWp);
+  const std::string sql = std::format(
+      "SELECT icao_code, waypoint_identifier, waypoint_latitude, waypoint_longitude FROM {}",
+      kTblTerminalWp);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -191,12 +190,10 @@ Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_
 Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
   // v2: navaid_identifier / navaid_latitude / navaid_longitude / navaid_frequency
   // (v1 used vor_*).
-  const std::string sql =
-      std::string(
-          "SELECT icao_code, navaid_identifier, navaid_frequency, navaid_class, "
-          "range, station_declination, dme_elevation, navaid_latitude, "
-          "navaid_longitude FROM ") +
-      std::string(kTblVhf);
+  const std::string sql = std::format(
+      "SELECT icao_code, navaid_identifier, navaid_frequency, navaid_class, range, "
+      "station_declination, dme_elevation, navaid_latitude, navaid_longitude FROM {}",
+      kTblVhf);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -223,10 +220,10 @@ Result<void> LoadNdbNavaids(sqlite3* conn, NavData& data, std::string_view table
                             std::unordered_set<Ident>& seen) {
   // v2: navaid_identifier / navaid_frequency / navaid_latitude / navaid_longitude
   // (v1 used ndb_*).
-  const std::string sql = std::string(
-                              "SELECT icao_code, navaid_identifier, navaid_frequency, range, "
-                              "navaid_latitude, navaid_longitude FROM ") +
-                          std::string(table);
+  const std::string sql = std::format(
+      "SELECT icao_code, navaid_identifier, navaid_frequency, range, navaid_latitude, "
+      "navaid_longitude FROM {}",
+      table);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -246,12 +243,11 @@ Result<void> LoadNdbNavaids(sqlite3* conn, NavData& data, std::string_view table
 
 Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   // Column names are the same as v1; only the table name differs.
-  const std::string sql =
-      std::string(
-          "SELECT route_identifier, seqno, waypoint_identifier, icao_code, "
-          "direction_restriction, flightlevel, minimum_altitude1, maximum_altitude, "
-          "outbound_course, inbound_course, waypoint_description_code FROM ") +
-      std::string(kTblAirways) + " ORDER BY route_identifier, seqno";
+  const std::string sql = std::format(
+      "SELECT route_identifier, seqno, waypoint_identifier, icao_code, direction_restriction, "
+      "flightlevel, minimum_altitude1, maximum_altitude, outbound_course, inbound_course, "
+      "waypoint_description_code FROM {} ORDER BY route_identifier, seqno",
+      kTblAirways);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -306,10 +302,10 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
 }
 
 Result<void> LoadAirports(sqlite3* conn, NavData& data) {
-  const std::string sql = std::string(
-                              "SELECT icao_code, airport_identifier, "
-                              "airport_ref_latitude, airport_ref_longitude, elevation FROM ") +
-                          std::string(kTblAirports);
+  const std::string sql = std::format(
+      "SELECT icao_code, airport_identifier, airport_ref_latitude, airport_ref_longitude, "
+      "elevation FROM {}",
+      kTblAirports);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -326,8 +322,8 @@ Result<void> LoadAirports(sqlite3* conn, NavData& data) {
 // course) legs to magnetic. Read by the procedure loaders only.
 Result<std::unordered_map<std::string, double>> LoadAirportMagvars(sqlite3* conn) {
   std::unordered_map<std::string, double> out;
-  const std::string sql = std::string("SELECT airport_identifier, magnetic_variation FROM ") +
-                          std::string(kTblAirports);
+  const std::string sql =
+      std::format("SELECT airport_identifier, magnetic_variation FROM {}", kTblAirports);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<std::unordered_map<std::string, double>>::Err(s.error());
@@ -341,12 +337,10 @@ Result<std::unordered_map<std::string, double>> LoadAirportMagvars(sqlite3* conn
 }
 
 Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
-  const std::string sql =
-      std::string(
-          "SELECT region_code, icao_code, waypoint_identifier, inbound_holding_course, "
-          "turn_direction, leg_length, leg_time, minimum_altitude, maximum_altitude, "
-          "holding_speed FROM ") +
-      std::string(kTblHoldings);
+  const std::string sql = std::format(
+      "SELECT region_code, icao_code, waypoint_identifier, inbound_holding_course, turn_direction, "
+      "leg_length, leg_time, minimum_altitude, maximum_altitude, holding_speed FROM {}",
+      kTblHoldings);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -372,13 +366,11 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
 }
 
 Result<void> LoadMsa(sqlite3* conn, NavData& data) {
-  const std::string sql =
-      std::string(
-          "SELECT airport_identifier, msa_center, radius_limit, "
-          "sector_bearing_1, sector_altitude_1, sector_bearing_2, sector_altitude_2, "
-          "sector_bearing_3, sector_altitude_3, sector_bearing_4, sector_altitude_4, "
-          "sector_bearing_5, sector_altitude_5 FROM ") +
-      std::string(kTblMsa);
+  const std::string sql = std::format(
+      "SELECT airport_identifier, msa_center, radius_limit, sector_bearing_1, sector_altitude_1, "
+      "sector_bearing_2, sector_altitude_2, sector_bearing_3, sector_altitude_3, sector_bearing_4, "
+      "sector_altitude_4, sector_bearing_5, sector_altitude_5 FROM {}",
+      kTblMsa);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -408,14 +400,12 @@ Result<void> LoadGridMora(sqlite3* conn, NavData& data) {
   // already carries the full 1-degree value (verified), so we take only those and
   // skip A/B/C/D (the 1-degree MoraGrid cannot store the 30-min offset). Starting
   // coords are VarChar "N07"/"W090", unlike v1's INTEGER.
-  const std::string sql =
-      std::string(
-          "SELECT starting_latitude, starting_longitude, quadrant_code, "
-          "mora01, mora02, mora03, mora04, mora05, mora06, mora07, mora08, mora09, mora10, "
-          "mora11, mora12, mora13, mora14, mora15, mora16, mora17, mora18, mora19, mora20, "
-          "mora21, mora22, mora23, mora24, mora25, mora26, mora27, mora28, mora29, mora30 "
-          "FROM ") +
-      std::string(kTblGridMora);
+  const std::string sql = std::format(
+      "SELECT starting_latitude, starting_longitude, quadrant_code, mora01, mora02, mora03, "
+      "mora04, mora05, mora06, mora07, mora08, mora09, mora10, mora11, mora12, mora13, mora14, "
+      "mora15, mora16, mora17, mora18, mora19, mora20, mora21, mora22, mora23, mora24, mora25, "
+      "mora26, mora27, mora28, mora29, mora30 FROM {}",
+      kTblGridMora);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<void>::Err(s.error());
@@ -471,25 +461,18 @@ struct ProcCols {
 
 // SQL for one procedure table, in ProcCols column order.
 std::string ProcSql(std::string_view table, bool single_airport) {
-  std::string sql = std::string(
-                        "SELECT airport_identifier, procedure_identifier, route_type, "
-                        "transition_identifier, seqno, waypoint_identifier, waypoint_icao_code, "
-                        "path_termination, course, course_flag, distance_time, "
-                        "route_distance_holding_distance_time, altitude_description, altitude1, "
-                        "altitude2, rnp, turn_direction, speed_limit, "
-                        "waypoint_description_code FROM ") +
-                    std::string(table);
-  if (single_airport) {
-    sql += " WHERE airport_identifier = ?";
-  }
   // route_type is part of the flush key, so it must be in the ORDER BY to give
   // the partitioning a total order: without it, rows sharing (name, transition)
   // but differing in route_type could interleave and split one procedure across
   // two records (the SQL engine is free to return same-key rows in any order).
-  sql +=
-      " ORDER BY airport_identifier, procedure_identifier, transition_identifier, "
-      "route_type, seqno";
-  return sql;
+  return std::format(
+      "SELECT airport_identifier, procedure_identifier, route_type, transition_identifier, "
+      "seqno, waypoint_identifier, waypoint_icao_code, path_termination, course, course_flag, "
+      "distance_time, route_distance_holding_distance_time, altitude_description, altitude1, "
+      "altitude2, rnp, turn_direction, speed_limit, waypoint_description_code FROM {}{}"
+      " ORDER BY airport_identifier, procedure_identifier, transition_identifier, route_type, "
+      "seqno",
+      table, single_airport ? " WHERE airport_identifier = ?" : "");
 }
 
 // Emit one Procedure leg from a row. `magvar` converts true courses (course_flag
@@ -617,10 +600,10 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
 
 Result<std::unordered_map<std::string, std::vector<Runway>>> LoadAllRunways(sqlite3* conn) {
   std::unordered_map<std::string, std::vector<Runway>> by_airport;
-  const std::string sql = std::string(
-                              "SELECT airport_identifier, runway_identifier, runway_latitude, "
-                              "runway_longitude, landing_threshold_elevation FROM ") +
-                          std::string(kTblRunways) + " ORDER BY airport_identifier";
+  const std::string sql = std::format(
+      "SELECT airport_identifier, runway_identifier, runway_latitude, runway_longitude, "
+      "landing_threshold_elevation FROM {} ORDER BY airport_identifier",
+      kTblRunways);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
     return Result<std::unordered_map<std::string, std::vector<Runway>>>::Err(s.error());
@@ -725,9 +708,9 @@ std::optional<CifpData> LoadAirportProcedures(
     flush_current();
   }
   Result<SqliteStmt> rs =
-      Prepare(conn, std::string("SELECT runway_identifier, runway_latitude, runway_longitude, "
-                                "landing_threshold_elevation FROM ") +
-                        std::string(kTblRunways) + " WHERE airport_identifier = ?");
+      Prepare(conn, std::format("SELECT runway_identifier, runway_latitude, runway_longitude, "
+                                "landing_threshold_elevation FROM {} WHERE airport_identifier = ?",
+                                kTblRunways));
   if (rs) {
     sqlite3_stmt* stmt = rs.value().get();
     sqlite3_bind_text(stmt, 1, airport.c_str(), -1, SQLITE_TRANSIENT);
@@ -783,8 +766,7 @@ Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
 
   NavData data;
   // AIRAC cycle from tbl_hdr_header.cycle (e.g. "2601").
-  const std::string cycle_sql =
-      std::string("SELECT cycle FROM ") + std::string(kTblHeader) + " LIMIT 1";
+  const std::string cycle_sql = std::format("SELECT cycle FROM {} LIMIT 1", kTblHeader);
   Result<SqliteStmt> s = Prepare(conn.value(), cycle_sql);
   if (s) {
     Result<bool> row = Step(s.value().get());
@@ -923,9 +905,11 @@ std::optional<CifpData> Dfd2Loader::LoadProcedure(const std::string& source_dir,
   // On-demand: read just this airport's magvar (one row) rather than the whole
   // airports table.
   std::unordered_map<std::string, double> magvar;
-  Result<SqliteStmt> ms =
-      Prepare(conn.value(), std::string("SELECT airport_identifier, magnetic_variation FROM ") +
-                                std::string(kTblAirports) + " WHERE airport_identifier = ?");
+  Result<SqliteStmt> ms = Prepare(
+      conn.value(),
+      std::format(
+          "SELECT airport_identifier, magnetic_variation FROM {} WHERE airport_identifier = ?",
+          kTblAirports));
   if (ms) {
     sqlite3_stmt* stmt = ms.value().get();
     sqlite3_bind_text(stmt, 1, icao.c_str(), -1, SQLITE_TRANSIENT);

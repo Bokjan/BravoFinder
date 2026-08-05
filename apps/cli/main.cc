@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <CLI/CLI.hpp>
 #include <cstdlib>
+#include <format>
 #include <string>
 
 #include "commands.h"
@@ -14,11 +15,13 @@ int main(int argc, char** argv) {
   // GPL/LGPL text, satisfying LGPLv3 section 4c for this combined work.
   app.set_version_flag(
       "--version",
-      std::string("BravoFinder ") + bf::kBravoFinderVersion + "\n" +
+      std::format(
+          "BravoFinder {}\n"
           "Copyright (c) Boyin Chen, and all contributors\n"
           "MIT-licensed, except the route engine (libs/engine/) which is under the GNU LGPL "
           "v3.0-or-later.\n"
-          "See LICENSE.md, LICENSE.MIT, libs/engine/LICENSE and libs/engine/LICENSE.GPLv3.");
+          "See LICENSE.md, LICENSE.MIT, libs/engine/LICENSE and libs/engine/LICENSE.GPLv3.",
+          bf::kBravoFinderVersion));
 
   int exit_code = EXIT_SUCCESS;
   bf::cli::RegisterBuild(app, exit_code);

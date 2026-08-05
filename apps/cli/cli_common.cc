@@ -6,6 +6,7 @@
 
 #include <charconv>
 #include <cmath>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -73,7 +74,7 @@ bool SplitCsv(std::string_view field, std::vector<std::string>& out, std::string
     const std::string_view item = field.substr(
         start, comma == std::string_view::npos ? std::string_view::npos : comma - start);
     if (item.empty()) {
-      error = "empty entry in '" + std::string(field) + "'";
+      error = std::format("empty entry in '{}'", field);
       return false;
     }
     out.emplace_back(bf::ToUpper(std::string(item)));
@@ -181,17 +182,15 @@ std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string
     // Reject "block:0.5" rather than ignoring the number: a silently dropped value
     // reads as if the penalty took effect.
     if (!value.empty()) {
-      error = "'" + std::string(bf::service::kActionBlock) +
-              "' takes no value (drop the ':" + std::string(value) + "')";
+      error = std::format("'{}' takes no value (drop the ':{}')", bf::service::kActionBlock, value);
       return std::nullopt;
     }
     rule.action = AirwayRule::Action::kBlock;
     return rule;
   }
   if (action != bf::service::kActionPenalize) {
-    error = "unknown action '" + std::string(action) + "' (expected '" +
-            std::string(bf::service::kActionBlock) + "' or '" +
-            std::string(bf::service::kActionPenalize) + "')";
+    error = std::format("unknown action '{}' (expected '{}' or '{}')", action,
+                        bf::service::kActionBlock, bf::service::kActionPenalize);
     return std::nullopt;
   }
   rule.action = AirwayRule::Action::kPenalize;
@@ -203,14 +202,14 @@ std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string
   const char* fend = fbegin + value.size();
   auto [fptr, fec] = std::from_chars(fbegin, fend, fraction);
   if (fec != std::errc{} || fptr != fend) {
-    error = "penalty fraction '" + std::string(value) + "' must be a number >= 0";
+    error = std::format("penalty fraction '{}' must be a number >= 0", value);
     return std::nullopt;
   }
   // Reject negatives and non-finite values: a negative penalty would break the
   // search heuristic's admissibility. No upper bound -- a large fraction is a
   // legitimate "almost block, but keep the graph connected".
   if (!std::isfinite(fraction) || fraction < 0.0) {
-    error = "penalty fraction '" + std::string(value) + "' must be a number >= 0";
+    error = std::format("penalty fraction '{}' must be a number >= 0", value);
     return std::nullopt;
   }
   rule.penalty_fraction = fraction;
