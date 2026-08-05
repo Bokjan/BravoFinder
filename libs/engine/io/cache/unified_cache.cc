@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "io/cache/byte_io.h"
+#include "io/cache/cache_messages.h"
 #include "io/cache/cifp_codec.h"
 #include "io/cache/crc32c.h"
 #include "io/cache/graph_codec.h"
@@ -207,14 +208,13 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
     return Result<UnifiedHeader>::Err(Error(ErrorCode::kCacheCorrupt, "truncated .bfdb: " + path));
   }
   if (std::memcmp(buf.data(), kMagic, 4) != 0) {
-    return Result<UnifiedHeader>::Err(Error(
-        ErrorCode::kCacheCorrupt, "not a .bfdb file (bad magic); run bf build to regenerate"));
+    return Result<UnifiedHeader>::Err(
+        Error(ErrorCode::kCacheCorrupt, WithRebuildHint("not a .bfdb file (bad magic)")));
   }
   ByteReader r(std::span<const uint8_t>(buf).subspan(4));
   if (r.U32() != kFormatVersion) {
     return Result<UnifiedHeader>::Err(
-        Error(ErrorCode::kFormatMismatch,
-              "incompatible .bfdb format version; run bf build to regenerate"));
+        Error(ErrorCode::kFormatMismatch, WithRebuildHint("incompatible .bfdb format version")));
   }
   r.U32();  // section_count -- not needed to read the header fields
   UnifiedHeader header;
@@ -224,7 +224,7 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
   header.data_dir = r.Str();
   if (!r.ok()) {
     return Result<UnifiedHeader>::Err(
-        Error(ErrorCode::kCacheCorrupt, "corrupt .bfdb header; run bf build to regenerate"));
+        Error(ErrorCode::kCacheCorrupt, WithRebuildHint("corrupt .bfdb header")));
   }
   return Result<UnifiedHeader>::Ok(std::move(header));
 }
@@ -238,8 +238,7 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   f.seekg(0);
 
   auto bad = [&](const char* why) {
-    return Result<UnifiedData>::Err(
-        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
+    return Result<UnifiedData>::Err(Error(ErrorCode::kCacheCorrupt, WithRebuildHint(why)));
   };
 
   if (file_size < 4) {
@@ -302,8 +301,7 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   }
   if (format != kFormatVersion) {
     return Result<UnifiedData>::Err(
-        Error(ErrorCode::kFormatMismatch,
-              "incompatible .bfdb format version; run bf build to regenerate"));
+        Error(ErrorCode::kFormatMismatch, WithRebuildHint("incompatible .bfdb format version")));
   }
   uint32_t section_count = 0;
   if (!readU32(section_count) || section_count != kSectionCount) {

@@ -473,7 +473,7 @@ std::string RenderError(OutputFormat fmt, const std::string& message) {
   if (fmt == OutputFormat::kJson) {
     return JsonError(message);
   }
-  return "error: " + message + "\n";
+  return std::string(kTextErrorPrefix) + message + "\n";
 }
 
 }  // namespace bf::service

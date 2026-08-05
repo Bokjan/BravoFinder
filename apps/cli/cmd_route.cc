@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -9,7 +10,9 @@
 
 #include "cli_common.h"
 #include "commands.h"
+#include "core/constraints/airway_rule_constraint.h"
 #include "core/routing/route_request.h"
+#include "handlers.h"
 #include "queries.h"
 #include "render.h"
 
@@ -54,8 +57,9 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
   route->add_option("--alt", a->alt_spec,
-                    "Cruise flight level or range, e.g. 350 or 300-400 (enables "
-                    "altitude/MORA filters)");
+                    std::format("Cruise flight level or range, e.g. 350 or 300-400 (enables "
+                                "altitude/MORA filters; accepted FL is 0..{})",
+                                bf::service::kMaxFl));
   route->add_option("--level", a->level, "Airway level preference: none, low, high")
       ->capture_default_str()
       ->check(CLI::IsMember({"none", "low", "high"}));
@@ -81,13 +85,16 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
                    "Waypoint(s) to avoid; ident or IDENT/ARINC424_ICAO_CODE. Repeatable.")
       ->allow_extra_args(false);
   route
-      ->add_option("--airway-filter", a->airway_filter,
-                   "Restrict airways by ICAO region and designator: "
-                   "<regions>:<designators>[=block|penalize[:<fraction>]]. A trailing '*' means "
-                   "prefix, no '*' means exact, a bare '*' means any; comma-separate to list "
-                   "several. Defaults to penalize with fraction 0.5. Repeatable (each value is one "
-                   "rule, max 32). E.g. ZB,ZG,ZH,ZJ,ZL,ZP,ZS,ZU,ZW,ZY:J*=block (all J routes in "
-                   "mainland China), *:J60=block (exactly J60, anywhere), *:V*=penalize:0.8.")
+      ->add_option(
+          "--airway-filter", a->airway_filter,
+          std::format(
+              "Restrict airways by ICAO region and designator: "
+              "<regions>:<designators>[=block|penalize[:<fraction>]]. A trailing '*' means "
+              "prefix, no '*' means exact, a bare '*' means any; comma-separate to list "
+              "several. Defaults to penalize with fraction {}. Repeatable (each value is one "
+              "rule, max {}). E.g. ZB,ZG,ZH,ZJ,ZL,ZP,ZS,ZU,ZW,ZY:J*=block (all J routes in "
+              "mainland China), *:J60=block (exactly J60, anywhere), *:V*=penalize:0.8.",
+              bf::kDefaultPenaltyFraction, bf::AirwayRuleConstraint::kMaxRules))
       ->allow_extra_args(false);
   route->add_option("--seed", a->seed,
                     "Randomize routing with this seed for reproducible route diversity");
@@ -104,7 +111,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     // on-demand procedure parsing.
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
-      std::cerr << "error: " << db.error().message << "\n";
+      std::cerr << bf::service::kTextErrorPrefix << db.error().message << "\n";
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -115,7 +122,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     if (!a->alt_spec.empty()) {
       std::optional<FlRange> range = ParseAltSpec(a->alt_spec);
       if (!range) {
-        std::cerr << "error: invalid --alt '" << a->alt_spec
+        std::cerr << bf::service::kTextErrorPrefix << "invalid --alt '" << a->alt_spec
                   << "' (expected a level like 350 or a range like 300-400)\n";
         exit_code = EXIT_FAILURE;
         return;
@@ -132,7 +139,8 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
       std::string error;
       std::optional<AirwayRule> rule = bf::cli::ParseAirwayFilter(spec, error);
       if (!rule) {
-        std::cerr << "error: invalid --airway-filter '" << spec << "': " << error << "\n";
+        std::cerr << bf::service::kTextErrorPrefix << "invalid --airway-filter '" << spec
+                  << "': " << error << "\n";
         exit_code = EXIT_FAILURE;
         return;
       }

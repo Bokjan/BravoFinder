@@ -7,6 +7,7 @@
 #include "commands.h"
 #include "io/cache/bfdb_naming.h"
 #include "io/nav_database.h"
+#include "render.h"
 
 namespace bf::cli {
 
@@ -29,7 +30,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
   build->callback([args, &exit_code]() {
     Result<NavDatabase> db = NavDatabase::Open(args->data_dir, args->loader);
     if (!db) {
-      std::cerr << "error: " << db.error().message << "\n";
+      std::cerr << bf::service::kTextErrorPrefix << db.error().message << "\n";
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -44,7 +45,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
     // cannot resolve SID/STAR).
     Result<uint32_t> written = db.value().WriteUnified(out);
     if (!written) {
-      std::cerr << "error: " << written.error().message << "\n";
+      std::cerr << bf::service::kTextErrorPrefix << written.error().message << "\n";
       exit_code = EXIT_FAILURE;
       return;
     }

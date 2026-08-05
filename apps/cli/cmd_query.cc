@@ -46,7 +46,7 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
   query->callback([a, &exit_code]() {
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir);
     if (!db) {
-      std::cerr << "error: " << db.error().message << "\n";
+      std::cerr << bf::service::kTextErrorPrefix << db.error().message << "\n";
       exit_code = EXIT_FAILURE;
       return;
     }

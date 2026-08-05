@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/query/query_types.h"
@@ -76,6 +77,9 @@ std::string RenderProceduresMixed(
 
 // ---- Error payload ----------------------------------------------------------
 // JSON: {"error":"<message>"}. Text: "error: <message>\n".
+// Prefix shared with the CLI's stderr messages so the two cannot drift.
+inline constexpr std::string_view kTextErrorPrefix = "error: ";
+
 std::string RenderError(OutputFormat fmt, const std::string& message);
 
 // Build an error JSON payload `{"error":"<message>"}` with RapidJSON's Writer so

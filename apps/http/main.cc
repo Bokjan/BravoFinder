@@ -22,6 +22,7 @@
 #include "core/version.h"
 #include "io/cache/bfdb_inventory.h"
 #include "registry.h"
+#include "render.h"
 #include "router.h"
 #include "server.h"
 
@@ -87,11 +88,11 @@ int main(int argc, char** argv) {
   // Build the registry (fail-fast, matching bf-mcp).
   bf::Result<bf::BfdbInventory> inventory = bf::BfdbInventory::Scan(db_dir);
   if (!inventory) {
-    std::cerr << "error: " << inventory.error().message << "\n";
+    std::cerr << bf::service::kTextErrorPrefix << inventory.error().message << "\n";
     return EXIT_FAILURE;
   }
   if (inventory.value().empty()) {
-    std::cerr << "error: no nav_<cycle>.bfdb caches found in '" << db_dir
+    std::cerr << bf::service::kTextErrorPrefix << "no nav_<cycle>.bfdb caches found in '" << db_dir
               << "' (build one with `bf build`, or set --db-dir / BRAVOFINDER_NAVDATA)\n";
     return EXIT_FAILURE;
   }
@@ -114,8 +115,8 @@ int main(int argc, char** argv) {
   bf::http_server::Server server(&loop, router, limits);
   const int rc = server.Listen(host, port);
   if (rc != 0) {
-    std::cerr << "error: cannot listen on " << host << ":" << port << ": " << uv_strerror(rc)
-              << "\n";
+    std::cerr << bf::service::kTextErrorPrefix << "cannot listen on " << host << ":" << port << ": "
+              << uv_strerror(rc) << "\n";
     return EXIT_FAILURE;
   }
 

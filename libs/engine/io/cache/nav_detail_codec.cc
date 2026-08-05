@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "io/cache/byte_io.h"
+#include "io/cache/cache_messages.h"
 
 namespace bf {
 
@@ -95,8 +96,7 @@ Result<void> NavDetailCodec::Encode(const NavDetailArchive& archive, ByteWriter&
 Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
                                                 std::span<const uint8_t> pool) {
   auto bad = [](const char* why) {
-    return Result<NavDetailArchive>::Err(
-        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
+    return Result<NavDetailArchive>::Err(Error(ErrorCode::kCacheCorrupt, WithRebuildHint(why)));
   };
 
   ByteReader r(body);

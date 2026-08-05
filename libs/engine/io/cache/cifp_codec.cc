@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "io/cache/byte_io.h"
+#include "io/cache/cache_messages.h"
 #include "io/cache/crc32c.h"
 
 namespace bf {
@@ -287,8 +288,7 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
                                            uint64_t section_length, uint32_t section_crc,
                                            std::vector<uint8_t> pool_blob) {
   auto bad = [&](const char* why) {
-    return Result<CifpArchive>::Err(
-        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
+    return Result<CifpArchive>::Err(Error(ErrorCode::kCacheCorrupt, WithRebuildHint(why)));
   };
 
   // Open a positional-read handle on the unified file and read the CIFP section's

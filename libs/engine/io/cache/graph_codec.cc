@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "io/cache/byte_io.h"
+#include "io/cache/cache_messages.h"
 #include "io/cache/graph_snapshot.h"
 
 namespace bf {
@@ -224,8 +225,7 @@ Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
   ByteReader r(body);
 
   auto bad = [](const char* why) {
-    return Result<GraphSnapshot>::Err(
-        Error(ErrorCode::kCacheCorrupt, std::string(why) + "; run bf build to regenerate"));
+    return Result<GraphSnapshot>::Err(Error(ErrorCode::kCacheCorrupt, WithRebuildHint(why)));
   };
 
   GraphSnapshot snapshot;
