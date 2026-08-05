@@ -1256,9 +1256,9 @@ TEST_CASE("real data: one rule may enumerate many regions and designators", "[in
 }
 
 TEST_CASE("real data: no-STAR arrival connects via an on-network approach IAF", "[integration]") {
-  // Issue #24 phase 2: KTVL has approaches (R18/X18) but no STAR. The arrival
-  // tail must be an on-network IAF (HETRY/HUYJO/SWR/…) then DCT KTVL — not a
-  // bare nearest-fix DCT — and must not invent a STAR name.
+  // Issue #24: KTVL has approaches (R18/X18) but no STAR. Arrival tail is
+  // "<on-network fix> DCT KTVL" with an empty star — either an on-network IAF
+  // (HETRY/…) or a proxy near an off-net IAF (same pool, D7). Never a STAR name.
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("prebuilt bfdb not found");
@@ -1272,13 +1272,9 @@ TEST_CASE("real data: no-STAR arrival connects via an on-network approach IAF", 
   const bf::RouteLeg& last = r.legs.back();
   CHECK(last.to == "KTVL");
   CHECK(last.via == "DCT");
-  // Known on-network IAFs for KTVL approaches (cycle 2601); at least one of
-  // these (or another IF with inbound edges) should be the handoff fix.
-  const std::set<std::string> ktvl_iafs = {"HETRY", "HUYJO", "SWR", "FMG", "OBAVE", "KINGS"};
-  CHECK(ktvl_iafs.count(last.from) == 1);
+  CHECK(last.from != "KTVL");
   CHECK(r.arr_distance_nm > 1.0);  // more than a doorstep stub
-  // Seed stops at MAPT (excludes missed-approach hold); a full R18 walk past
-  // SAKYY including HETRY hold is well above 30 NM — keep a soft upper bound.
+  // Seed stops at MAPT (excludes missed-approach hold); keep a soft upper bound.
   CHECK(r.arr_distance_nm < 80.0);
 }
 
@@ -1297,9 +1293,10 @@ TEST_CASE("real data: arrival runway filter restricts approach IAF connections",
   REQUIRE_FALSE(r.legs.empty());
   CHECK(r.legs.back().via == "DCT");
   CHECK(r.legs.back().to == "KTVL");
-  // RW18 approaches use HETRY/HUYJO (R18) or FMG/SWR (X18) — not runway-36 IAFs.
-  const std::set<std::string> rw18_iafs = {"HETRY", "HUYJO", "SWR", "FMG", "OBAVE", "KINGS"};
-  CHECK(rw18_iafs.count(r.legs.back().from) == 1);
+  CHECK(r.legs.back().from != "KTVL");
+  // RW18 filter must still yield an approach-priced arrival (not a no-connection
+  // failure / bare missing-procedure path).
+  CHECK(r.arr_distance_nm > 1.0);
 }
 
 TEST_CASE("real data: STAR airport is unchanged by approach arrival path", "[integration]") {
@@ -1326,6 +1323,34 @@ TEST_CASE("real data: unmatched --star does not fall through to approach IAFs", 
   bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
   REQUIRE_FALSE(routes);
   CHECK(routes.error().code == bf::ErrorCode::kProcedureNotFound);
+}
+
+TEST_CASE("real data: off-network approach IAF uses a proxy on-network goal", "[integration]") {
+  // Issue #24 phase 3: 04TT has approaches whose IAFs (APOLE/BOVIE/…) are not
+  // inbound-on-network. The search must still connect via a nearby inbound fix
+  // F with filed tail "… F DCT 04TT" (IAF never appears; star stays empty).
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("KLAX", "04TT"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK(r.star.empty());
+  REQUIRE_FALSE(r.legs.empty());
+  const bf::RouteLeg& last = r.legs.back();
+  CHECK(last.to == "04TT");
+  CHECK(last.via == "DCT");
+  // Proxy F is an enroute fix, not the airport and not an off-net IAF name that
+  // would only appear if we had spliced IAF into the string.
+  CHECK(last.from != "04TT");
+  CHECK(last.from != "APOLE");
+  CHECK(last.from != "BOVIE");
+  CHECK(last.from != "FANIG");
+  // Seed includes |F→I| + approach body, so arr phase is more than a bare
+  // airport-nearest DCT stub.
+  CHECK(r.arr_distance_nm > 5.0);
 }
 
 }  // namespace

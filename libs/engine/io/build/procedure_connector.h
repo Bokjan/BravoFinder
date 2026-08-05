@@ -77,9 +77,10 @@ class ProcedureConnector {
                                               const std::string& runway_filter);
 
   // Arrival connections from approach IAFs when the airport has no STAR.
-  // Gate-only (path_term IF); only on-network inbound fixes. Seed is IAF→MAPT
-  // (transition∥final splice) plus the MAPT→airport stub. Off-network IAFs are
-  // not included here (proxy goals are a separate path).
+  // Gate-only (path_term IF). On-network inbound IAFs are ordinary goals;
+  // off-network IAFs contribute K nearest inbound proxy goals (seed folds
+  // |F→I| into the cost — no CSR mutation). Seed body is IAF→MAPT
+  // (transition∥final splice) plus the MAPT→airport stub.
   static std::vector<Connection> BuildApproachArrival(const CifpData& cifp,
                                                       const Coordinate& airport_coord,
                                                       const GraphBuilder& builder,

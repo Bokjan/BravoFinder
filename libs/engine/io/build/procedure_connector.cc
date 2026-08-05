@@ -349,10 +349,10 @@ const Procedure* FindApproachFinal(const CifpData& cifp, const std::string& name
 
 // Seed body from an IAF gate through MAPT (splicing transition ∥ final) plus
 // the MAPT→airport stub. `gate_proc` is the record that owns the IF; `gate_v`
-// is the on-network IAF vertex.
-double ApproachSeedNm(const Procedure& gate_proc, int gate_v, const CifpData& cifp,
-                      const Coordinate& airport_coord, const GraphBuilder& builder,
-                      double& bearing_out) {
+// is the IAF vertex (on- or off-network). Does not include any |F→I| proxy leg.
+double ApproachBodyAndStubNm(const Procedure& gate_proc, int gate_v, const CifpData& cifp,
+                             const Coordinate& airport_coord, const GraphBuilder& builder,
+                             double& bearing_from_iaf_out) {
   ApproachWalk from_gate;
   // Transition record: IAF → end of transition (usually the final IF).
   // Final record: start → MAPT. When gate_proc itself is the final (empty
@@ -365,9 +365,9 @@ double ApproachSeedNm(const Procedure& gate_proc, int gate_v, const CifpData& ci
   double body = from_gate.nm;
   Coordinate end = from_gate.have_end ? from_gate.end_coord : builder.graph().CoordOf(gate_v);
   if (from_gate.have_next) {
-    bearing_out = builder.graph().CoordOf(gate_v).BearingTo(from_gate.next_coord);
+    bearing_from_iaf_out = builder.graph().CoordOf(gate_v).BearingTo(from_gate.next_coord);
   } else {
-    bearing_out = builder.graph().CoordOf(gate_v).BearingTo(airport_coord);
+    bearing_from_iaf_out = builder.graph().CoordOf(gate_v).BearingTo(airport_coord);
   }
 
   if (!gate_is_final) {
@@ -390,12 +390,16 @@ double ApproachSeedNm(const Procedure& gate_proc, int gate_v, const CifpData& ci
   return body + end.DistanceTo(airport_coord);
 }
 
-// Approach IAF connections for airports with no STAR: gate-only (path_term IF),
-// on-network inbound only. Seed = IAF→MAPT (+ transition∥final splice) + stub.
-std::unordered_map<int, Connection> CollectApproachOnNetwork(const CifpData& cifp,
-                                                             const Coordinate& airport_coord,
-                                                             const GraphBuilder& builder,
-                                                             const std::string& runway_filter) {
+constexpr int kApproachProxyK = 5;
+
+// Approach IAF connections for airports with no STAR: gate-only (path_term IF).
+// On-network inbound IAFs become search goals directly; off-network IAFs that
+// still resolve to a vertex are represented by K nearest inbound on-network
+// proxies F with seed |F→I| + (I→MAPT…) + stub (no graph mutation).
+std::unordered_map<int, Connection> CollectApproachArrivals(const CifpData& cifp,
+                                                            const Coordinate& airport_coord,
+                                                            const GraphBuilder& builder,
+                                                            const std::string& runway_filter) {
   std::unordered_map<int, Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
     if (p.type != ProcedureType::kApproach || !RunwayMatches(p, runway_filter)) {
@@ -405,13 +409,29 @@ std::unordered_map<int, Connection> CollectApproachOnNetwork(const CifpData& cif
       if (leg.path_term != PathTerminator::kIF || !leg.fix_is_definite()) {
         continue;
       }
-      const int v = ResolveFix(leg, builder);
-      if (v < 0 || !builder.HasInbound(v)) {
+      const int iaf = ResolveFix(leg, builder);
+      if (iaf < 0) {
+        continue;  // no vertex — cannot price or proxy
+      }
+      double bearing_from_iaf = -1.0;
+      const double body_stub =
+          ApproachBodyAndStubNm(p, iaf, cifp, airport_coord, builder, bearing_from_iaf);
+      if (builder.HasInbound(iaf)) {
+        Accumulate(by_fix, iaf, body_stub, bearing_from_iaf, MakeRef(p));
         continue;
       }
-      double bearing = -1.0;
-      const double seed = ApproachSeedNm(p, v, cifp, airport_coord, builder, bearing);
-      Accumulate(by_fix, v, seed, bearing, MakeRef(p));
+      // Proxy goals: nearest on-network inbound fixes around the off-net IAF.
+      const Coordinate iaf_coord = builder.graph().CoordOf(iaf);
+      for (int f : builder.NearestOnNetwork(iaf_coord, kApproachProxyK, /*inbound=*/true)) {
+        if (f == iaf) {
+          continue;
+        }
+        const Coordinate f_coord = builder.graph().CoordOf(f);
+        const double seed = f_coord.DistanceTo(iaf_coord) + body_stub;
+        // Turn at F is priced as leaving F toward the IAF (the virtual first leg).
+        const double bearing = f_coord.BearingTo(iaf_coord);
+        Accumulate(by_fix, f, seed, bearing, MakeRef(p));
+      }
     }
   }
   return by_fix;
@@ -451,11 +471,11 @@ std::vector<Connection> ProcedureConnector::BuildApproachArrival(const CifpData&
                                                                  const Coordinate& airport_coord,
                                                                  const GraphBuilder& builder,
                                                                  const std::string& runway_filter) {
-  // No STAR: connect via approach IAFs (IF legs) that sit on the enroute
-  // network. Gate-only — never fall back to FAF/MAPT/missed-approach fixes as
-  // connection points. Off-network IAFs are left for the proxy-goal path.
+  // No STAR: connect via approach IAFs (IF legs). On-network inbound IAFs are
+  // ordinary goals; off-network IAFs contribute proxy goals at nearby inbound
+  // fixes (seed folds |F→I| into the cost — no virtual edges on the CSR).
   std::unordered_map<int, Connection> by_fix =
-      CollectApproachOnNetwork(cifp, airport_coord, builder, runway_filter);
+      CollectApproachArrivals(cifp, airport_coord, builder, runway_filter);
   return Finalize(by_fix);
 }
 
