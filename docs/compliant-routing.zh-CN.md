@@ -1,6 +1,6 @@
 # 合规航路引擎：不只是地理最短
 
-> BravoFinder 与「玩具版最短路」最根本的区别。面向想理解「为什么这条航路是这么走的」 的读者。相关代码：`libs/engine/core/constraints/`、`libs/engine/io/build/graph_builder.cc`、`libs/engine/core/graph/`。
+> BravoFinder 与「玩具版最短路」最根本的区别。面向想理解「为什么这条航路是这么走的」的读者。相关代码：`libs/engine/core/constraints/`、`libs/engine/io/build/graph_builder.cc`、`libs/engine/core/graph/`。
 
 ## 1. 出发点：地理最短 ≠ 可飞/合规
 
@@ -12,13 +12,13 @@ BravoFinder 的 v1（2016）、v2（2018）都只做一件事：把航路点连�
 - 低于**最低扇区/航路高度**（MORA）撞山；
 - 进出机场优先走**真实的 SID/STAR 程序**，不是从跑道拉一条直线到最近航路点；无 STAR 时用 DCT-to-IAF 接进近（详见 [procedure-modeling.zh-CN.md](procedure-modeling.zh-CN.md)）。
 
-v3 是一次完全重写，目标从「算最短」变成**「算真实、合规的航路」**。产出的航路应当尊重上述 所有约束，像一份能提交的飞行计划，而不仅是几何上的最短折线。
+v3 是一次完全重写，目标从「算最短」变成**「算真实、合规的航路」**。产出的航路应当尊重上述所有约束，像一份能提交的飞行计划，而不仅是几何上的最短折线。
 
 > 程序建模（SID/STAR）本身内容很多，单独成文见 [procedure-modeling.zh-CN.md](procedure-modeling.zh-CN.md)。本文聚焦航路网层面的约束。
 
 ## 2. 方向性：在建图阶段就落实
 
-航路的方向性不是查询期才判断的，而是**建图时就编码进边**。X-Plane `earth_awy.dat` 每段 航路有一个方向字段：`N`=双向、`F`=仅正向（from→to）、`B`=仅反向（to→from）。
+航路的方向性不是查询期才判断的，而是**建图时就编码进边**。X-Plane `earth_awy.dat` 每段航路有一个方向字段：`N`=双向、`F`=仅正向（from→to）、`B`=仅反向（to→from）。
 
 `GraphBuilder` 据此决定给这条航路段生成哪些有向边（`libs/engine/io/build/graph_builder.cc`）：
 
@@ -26,11 +26,11 @@ v3 是一次完全重写，目标从「算最短」变成**「算真实、合规
 - `F`（仅正向）→ 只生成 from→to；
 - `B`（仅反向）→ 只生成 to→from。
 
-这样「不能逆行单向航路」这条约束**天然由图结构保证**——搜索根本看不到那条反向边，无需 运行期再判断。实测方向分布里 `N` 占多数，`F`/`B` 是单向段，正是单向航路建模的数据基础。
+这样「不能逆行单向航路」这条约束**天然由图结构保证**——搜索根本看不到那条反向边，无需运行期再判断。实测方向分布里 `N` 占多数，`F`/`B` 是单向段，正是单向航路建模的数据基础。
 
 ## 3. 可插拔约束框架：硬过滤 + 软代价
 
-除了方向性（图结构层），其余约束是**查询期**的、按巡航高度/偏好变化的，所以做成一个 可插拔框架（`libs/engine/core/constraints/constraint.h`）。每个约束对一条边给出一个 `EdgeVerdict`：
+除了方向性（图结构层），其余约束是**查询期**的、按巡航高度/偏好变化的，所以做成一个可插拔框架（`libs/engine/core/constraints/constraint.h`）。每个约束对一条边给出一个 `EdgeVerdict`：
 
 ```cpp
 struct EdgeVerdict {
@@ -42,7 +42,7 @@ struct EdgeVerdict {
 - **硬过滤**（`allowed=false`）：直接禁掉边，搜索绕开它。
 - **软代价**（`extra_cost>0`）：边仍可用，但更「贵」，搜索倾向避开——用于「偏好」而非「禁止」。
 
-搜索在松弛每条边时，对所有激活的约束求值：**任一约束 block 则边不可用；软代价累加** （`libs/engine/core/graph/astar.cc` 的 `EdgeAllowed`）。约束彼此独立、无状态，组合方式由搜索统一处理。 这是 §4.5 设计里「可插拔」的落点：以后要加欧控 RAD/CDR 之类的限制航路约束，只需新增一个 `Constraint` 子类，**不动图与算法**。
+搜索在松弛每条边时，对所有激活的约束求值：**任一约束 block 则边不可用；软代价累加** （`libs/engine/core/graph/astar.cc` 的 `EdgeAllowed`）。约束彼此独立、无状态，组合方式由搜索统一处理。这是 §4.5 设计里「可插拔」的落点：以后要加欧控 RAD/CDR 之类的限制航路约束，只需新增一个 `Constraint` 子类，**不动图与算法**。
 
 ## 4. 内置约束
 
@@ -52,7 +52,7 @@ struct EdgeVerdict {
 |---|---|---|
 | `AltitudeBandConstraint` | 硬 | 巡航高度（FL）必须落在航段的 `[base_fl, top_fl]` 内，否则禁用该段 |
 | `MoraConstraint` | 硬 | 巡航高度不得低于该位置的 MORA（最低离地安全高度），否则禁用 |
-| `LevelPreferenceConstraint` | 软 | 高空(Jet)/低空(Victor)偏好：不匹配的航路加代价而非禁止 |
+| `LevelPreferenceConstraint` | 软 | 高空（Jet）/低空（Victor）偏好：不匹配的航路加代价而非禁止 |
 | `AvoidWaypointConstraint` | 硬 | 禁用所有进入指定航路点的边（用户显式避让） |
 | `AirwayRuleConstraint` | 硬+软 | 按 ICAO 区域 × 航路 designator 封锁或惩罚（国别惯例，如「中国的 J 航路」） |
 | `RandomizeConstraint` | 软 | 由 seed 派生的确定性抖动，产出可复现的航路多样性 |
@@ -60,14 +60,14 @@ struct EdgeVerdict {
 几个实现要点：
 
 - **高度统一用 FL（百英尺）**。DCT 合成边（`base=top=0`）视为无高度限制，不被高度带约束拦。
-- **MORA 是安全下限的合理近似**：MORA 是 MSL 高度、巡航是气压高度 FL，直接比较作为安全下限 是可接受的近似。缺 MORA 数据时网格为空，不施加下限。
-- **高低空是软偏好不是硬约束**：给你想要的那层更低代价，但不彻底禁止另一层——因为现实里 跨层衔接是常见的。同理，区域级的航路规则默认也走软惩罚：硬封锁是不可逆的连通性断裂，可能让唯一接入某机场的航路消失、查询直接无解。
+- **MORA 是安全下限的合理近似**：MORA 是 MSL 高度、巡航是气压高度 FL，直接比较作为安全下限是可接受的近似。缺 MORA 数据时网格为空，不施加下限。
+- **高低空是软偏好不是硬约束**：给你想要的那层更低代价，但不彻底禁止另一层——因为现实里跨层衔接是常见的。同理，区域级的航路规则默认也走软惩罚：硬封锁是不可逆的连通性断裂，可能让唯一接入某机场的航路消失、查询直接无解。
 
 > 约束层的接口设计、可采纳性论证、热路径纪律，以及扩展一个新约束时会踩到的坑（尤其是「匹配粒度」——同一条国别规则有名字级/实例级/逐段级三种读法，误伤差 7.5 倍），见 [constraint-layer.zh-CN.md](constraint-layer.zh-CN.md)。
 
 ## 5. Yen K-shortest：为「择优合规」留出候选
 
-最短的那一条未必是你想要的——可能它擦着某个约束边界、或换个 SID/STAR 更顺。所以引擎不只 返回一条，而是用 **Yen K-shortest** 返回前 K 条候选（`libs/engine/core/graph/yen_kshortest.cc`），按 （含软代价的）有效成本排序。约束在每条候选的搜索中都参与，所以**每条候选本身就是合规的**； K 条给了用户/上层在合规集合里择优的空间。
+最短的那一条未必是你想要的——可能它擦着某个约束边界、或换个 SID/STAR 更顺。所以引擎不只返回一条，而是用 **Yen K-shortest** 返回前 K 条候选（`libs/engine/core/graph/yen_kshortest.cc`），按（含软代价的）有效成本排序。约束在每条候选的搜索中都参与，所以**每条候选本身就是合规的**； K 条给了用户/上层在合规集合里择优的空间。
 
 > Yen 在大图上有性能挑战，我们做了 Lawler 优化 + heuristic memoization，见 [yen-lawler-optimization.zh-CN.md](yen-lawler-optimization.zh-CN.md)。
 
@@ -80,4 +80,4 @@ struct EdgeVerdict {
 3. **查询期软代价**——高低空偏好（引导而非禁止）；
 4. **候选集**——Yen K-shortest 在合规解里给出多个备选。
 
-外加机场靠**真实程序**接入航路网（另见程序建模专文），产出的才是一条「像样的、能飞的」 航路，而不是一条穿山越界的几何直线。
+外加机场靠**真实程序**接入航路网（另见程序建模专文），产出的才是一条「像样的、能飞的」航路，而不是一条穿山越界的几何直线。

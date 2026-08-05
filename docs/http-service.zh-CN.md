@@ -1,12 +1,12 @@
 # HTTP 查询服务（bf-http）
 
-> 面向读者的架构说明。CLI 用法在仓库根 [README.md](../README.md) 的「HTTP server」段； 本文讲**内部怎么工作、为什么这么设计**。
+> 面向读者的架构说明。CLI 用法在仓库根 [README.md](../README.md) 的「HTTP server」段；本文讲**内部怎么工作、为什么这么设计**。
 
 ## 定位：服务化，不做 in-process binding
 
 `bf-http` 是一个**内网航路查询服务**：上层业务（Go 网关）通过 HTTP+JSON 调用它，而不是把 C++ 库以 cgo/pybind 方式嵌进业务进程。理由：
 
-- 一次路由查询本身是 **~10ms(k=1) ~ 13–30ms(k=10)** 的纯计算（见 [性能测试](performance.zh-CN.md)）， 相比之下 JSON 序列化（µs 级）、localhost 往返（亚 ms）都低 1–3 个数量级——「为省编组开销选 in-process」不成立。
+- 一次路由查询本身是 **~10ms(k=1) ~ 13–30ms(k=10)** 的纯计算（见 [性能测试](performance.zh-CN.md)），相比之下 JSON 序列化（µs 级）、localhost 往返（亚 ms）都低 1–3 个数量级——「为省编组开销选 in-process」不成立。
 - 数据模型天然「加载一次、服务多次」：`OpenCached(kEager)` 常驻后无锁并发（[线程安全契约](thread-safety.zh-CN.md)）。
 - 进程隔离：C++ 崩溃不连坐 Go 网关，Go 保持 `CGO_ENABLED=0`。
 - 消费侧要强类型对象时，Go 的 `encoding/json` 反序列化即得——比 cgo 手写 C-struct 镜像省事得多。
@@ -21,7 +21,7 @@ handler 返回 `HandlerResult{body, status}`（HTTP 风格状态码）。两种�
 
 传输本身也不属于任何一种消费者。连接状态机、TCP listener、线程池 offload、`RequestHandler` 接口与传输本地的 `WorkResult`，都在 **顶层 `libs/http_server/`（命名空间 `bf::http_server`，target `bf_http_server`）**：REST 服务（`apps/http`）与 MCP-over-HTTP 传输（`apps/mcp` http 模式）**共用同一份**。它是 **JSON/查询中性**的——不依赖 `bf_service_lib`（正如 `libs/engine/` 不依赖网络），消费者实现 `RequestHandler` 赋予请求含义。（其头文件名是 `transport.h` 而非 `dispatcher.h`：后者是 MCP 的 JSON-RPC dispatcher 专名，两目录在编译 `bf_mcp_lib` 时都在 include 路径上，同名会歧义。）
 
-- **libuv**：事件循环 + 内置线程池，统一 API 下自动走 epoll(Linux)/kqueue(macOS)/IOCP(Windows)， 天然跨平台，原生支持 MSVC。
+- **libuv**：事件循环 + 内置线程池，统一 API 下自动走 epoll（Linux）/kqueue（macOS）/IOCP（Windows），天然跨平台，原生支持 MSVC。
 - **llhttp**：Node 的 HTTP/1.1 解析器，只做**解析**（喂字节 → 回调）。
 
 ### 线程拓扑与异步铁律
@@ -36,7 +36,7 @@ libuv 内置线程池  ── registry.Get(cycle) → handler (10–30ms CPU)
 loop 线程：连接仍存活则写响应，否则丢弃结果
 ```
 
-**铁律：10–30ms 的路由计算绝不在 loop 线程上跑。** 用 `uv_queue_work(work, after_work)` offload 到线程池；worker 只碰 `registry`/`handler`/`args`/`result`，**绝不碰 libuv handle**（handle 非线程 安全）。`registry` 与各 `NavDatabase` 单实例跨所有线程共享，只读、并发安全（线程安全契约）。起步单 loop 即可扛高连接数（重计算已 offload）。
+**铁律：10–30ms 的路由计算绝不在 loop 线程上跑。** 用 `uv_queue_work(work, after_work)` offload 到线程池；worker 只碰 `registry`/`handler`/`args`/`result`，**绝不碰 libuv handle**（handle 非线程安全）。`registry` 与各 `NavDatabase` 单实例跨所有线程共享，只读、并发安全（线程安全契约）。起步单 loop 即可扛高连接数（重计算已 offload）。
 
 ### 连接生命周期与存活守卫（头号并发陷阱）
 
@@ -53,13 +53,13 @@ loop 线程：连接仍存活则写响应，否则丢弃结果
 
 llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（缺一不可）：
 
-- **keep-alive**：依 `llhttp_should_keep_alive` 复用连接；复用前**完整重置** parser 与请求缓冲， 防上一请求残留串到下一请求。
+- **keep-alive**：依 `llhttp_should_keep_alive` 复用连接；复用前**完整重置** parser 与请求缓冲，防上一请求残留串到下一请求。
 - **响应帧**：手写状态行 + `Content-Type`/`Content-Length`/`Connection`/`Date`；只发 `Content-Length`。
 - **上限**：header 总长/条数上限（→ 431）、body 上限（`--max-body` → 413），防内存耗尽。
 - **超时**：单个 idle 定时器覆盖 header 读取 / body 读取 / 空闲 keep-alive（`--io-timeout`），防 slowloris 慢连接占用。
-- **chunked 拒绝**：内网 JSON API 不需要 `Transfer-Encoding: chunked` → **显式拒绝**（400 + 关连接）， 安全地拒而非误解析，防请求走私。
+- **chunked 拒绝**：内网 JSON API 不需要 `Transfer-Encoding: chunked` → **显式拒绝**（400 + 关连接），安全地拒而非误解析，防请求走私。
 - **单请求在飞**：不做 pipelining——一个请求分发后忽略后续输入字节，直到响应写完（但仍响应断开）。
-- **异常兜底**：worker 里 handler 理论只走 `Result`，仍 try/catch 兜住意外异常 → 500，绝不让异常 穿过线程边界。
+- **异常兜底**：worker 里 handler 理论只走 `Result`，仍 try/catch 兜住意外异常 → 500，绝不让异常穿过线程边界。
 
 ## 端点与错误模型
 
@@ -74,7 +74,7 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 | **400** | `Transfer-Encoding: chunked` 请求体（显式拒绝） |
 | **500** | worker 未捕获异常 |
 
-区分「你传错了」(400) 与「你没传错但无解」(422)，是错误模型的核心。
+区分「你传错了」（400）与「你没传错但无解」（422），是错误模型的核心。
 
 探针：`/healthz` 恒 200（进程存活）；`/readyz` 最新周期可打开才 200，否则 503（且开库可能有磁盘 I/O，故 readyz 也走 offload）。
 
