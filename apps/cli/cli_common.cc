@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "api_keys.h"
 #include "core/base/string_util.h"
 
 namespace bf::cli {
@@ -176,18 +177,21 @@ std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string
     action = action_field.substr(0, value_sep);
     value = action_field.substr(value_sep + 1);
   }
-  if (action == "block") {
+  if (action == bf::service::kActionBlock) {
     // Reject "block:0.5" rather than ignoring the number: a silently dropped value
     // reads as if the penalty took effect.
     if (!value.empty()) {
-      error = "'block' takes no value (drop the ':" + std::string(value) + "')";
+      error = "'" + std::string(bf::service::kActionBlock) +
+              "' takes no value (drop the ':" + std::string(value) + "')";
       return std::nullopt;
     }
     rule.action = AirwayRule::Action::kBlock;
     return rule;
   }
-  if (action != "penalize") {
-    error = "unknown action '" + std::string(action) + "' (expected 'block' or 'penalize')";
+  if (action != bf::service::kActionPenalize) {
+    error = "unknown action '" + std::string(action) + "' (expected '" +
+            std::string(bf::service::kActionBlock) + "' or '" +
+            std::string(bf::service::kActionPenalize) + "')";
     return std::nullopt;
   }
   rule.action = AirwayRule::Action::kPenalize;

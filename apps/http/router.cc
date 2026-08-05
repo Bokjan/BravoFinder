@@ -7,9 +7,11 @@
 #include <charconv>
 #include <functional>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
+#include "api_keys.h"
 #include "conn.h"  // http_server::Connection
 #include "io/cache/bfdb_inventory.h"
 #include "rapidjson/document.h"
@@ -29,17 +31,21 @@ namespace {
 constexpr int kMaxInflightWork = 256;
 
 // The HTTP path each shared handler is exposed under (see docs/http-service).
-// Keyed by the stable bf::service handler name.
+// Keyed by the stable bf::service handler name (api_keys.h).
 struct Route {
-  const char* name;
+  std::string_view name;
   const char* path;
 };
 const Route kRoutes[] = {
-    {"find_routes", "/v1/routes"},           {"parse_route", "/v1/parse-route"},
-    {"lookup_waypoints", "/v1/waypoints"},   {"lookup_airports", "/v1/airports"},
-    {"lookup_procedures", "/v1/procedures"}, {"lookup_procedure_legs", "/v1/procedure-legs"},
-    {"lookup_airways", "/v1/airways"},       {"lookup_navaid_detail", "/v1/navaid-detail"},
-    {"lookup_holds", "/v1/holds"},
+    {bf::service::kHandlerFindRoutes, "/v1/routes"},
+    {bf::service::kHandlerParseRoute, "/v1/parse-route"},
+    {bf::service::kHandlerLookupWaypoints, "/v1/waypoints"},
+    {bf::service::kHandlerLookupAirports, "/v1/airports"},
+    {bf::service::kHandlerLookupProcedures, "/v1/procedures"},
+    {bf::service::kHandlerLookupProcedureLegs, "/v1/procedure-legs"},
+    {bf::service::kHandlerLookupAirways, "/v1/airways"},
+    {bf::service::kHandlerLookupNavaidDetail, "/v1/navaid-detail"},
+    {bf::service::kHandlerLookupHolds, "/v1/holds"},
 };
 
 // Parse an optional ?cycle=NNNN out of the raw query string. Returns false if a
@@ -132,7 +138,7 @@ Router::Router(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop)
     by_name.emplace(std::move(nh.name), std::move(nh.handler));
   }
   for (const Route& r : kRoutes) {
-    auto it = by_name.find(r.name);
+    auto it = by_name.find(std::string(r.name));
     // Every path we expose must map to a handler registered by
     // bf::service::MakeHandlers(); a name drift there would otherwise silently
     // drop the endpoint. Catch it in debug builds.
