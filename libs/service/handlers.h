@@ -16,7 +16,6 @@
 #include <string>
 #include <vector>
 
-#include "http_status.h"
 #include "io/nav_database.h"
 #include "rapidjson/document.h"
 
@@ -36,9 +35,11 @@ struct HandlerResult {
 };
 
 // A HandlerResult.status at or above this is an error (4xx/5xx); below it is a
-// success (2xx). Alias of http_server::kStatusClientErrorMin so MCP/CLI/HTTP
-// thresholds cannot drift from the transport status table.
-inline constexpr int kErrorStatusThreshold = bf::http_server::kStatusClientErrorMin;
+// success (2xx). Deliberately a bare 400: the service layer stays independent of
+// the HTTP transport's status table (mirroring its transport-neutral JsonError);
+// 400 is a boundary every consumer reads as "error", and re-deriving it from
+// http_server would pull a transport header into the service API.
+inline constexpr int kErrorStatusThreshold = 400;
 
 // Server-side request caps shared with the MCP JSON-Schema (tools.cc) so the
 // schema maximum/maxItems and the adapter's 400 messages cannot drift.

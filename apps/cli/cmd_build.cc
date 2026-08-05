@@ -30,7 +30,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
   build->callback([args, &exit_code]() {
     Result<NavDatabase> db = NavDatabase::Open(args->data_dir, args->loader);
     if (!db) {
-      PrintCliError("{}", db.error().message);
+      PrintCliError(db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -45,7 +45,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
     // cannot resolve SID/STAR).
     Result<uint32_t> written = db.value().WriteUnified(out);
     if (!written) {
-      PrintCliError("{}", written.error().message);
+      PrintCliError(written.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }

@@ -505,7 +505,7 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
     h.inbound_course = ColumnDouble(stmt, 3);
     h.leg_time_min = ColumnOptDouble(stmt, 4);
     h.leg_dist_nm = ColumnOptDouble(stmt, 5);
-    h.turn_dir = (ColumnText(stmt, 6) == "L") ? kTurnLeft : kTurnRight;
+    h.turn_dir = EqualsCode(ColumnText(stmt, 6), kTurnLeft) ? kTurnLeft : kTurnRight;
 
     int mn = ColumnOptInt(stmt, 7);
     int mx = ColumnOptInt(stmt, 8);
@@ -684,7 +684,9 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
       std::string td = ColumnText(stmt, 6);
       // TurnDir: 'L'/'R' only; anything else ('E' ×114 in real data) becomes
       // '\0'.  'E' appears to mean "either" — '\0' fallback is acceptable.
-      leg.turn_dir = (td == "L") ? kTurnLeft : (td == "R") ? kTurnRight : '\0';
+      leg.turn_dir = EqualsCode(td, kTurnLeft)    ? kTurnLeft
+                     : EqualsCode(td, kTurnRight) ? kTurnRight
+                                                  : '\0';
       double spd = ColumnOptDouble(stmt, 8);
       // uint16_t: clamp to [0, 65535] so a corrupt out-of-range speed does not
       // wrap (matches dfd1/dfd2). Real speeds are well below this.

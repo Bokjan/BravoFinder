@@ -58,6 +58,11 @@ std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string
 // User-facing CLI failure line: "error: <message>\n" on stderr. Keeps the
 // stable kTextErrorPrefix contract (scripts/tests grep it); does not go through
 // BF_LOG_* (default-silent engine log, and [ERROR] file:line is a different shape).
+// Two overloads: a single-argument form for an already-formatted string, and a
+// variadic template for a compile-time format string + args. Overload resolution
+// picks the template only for a literal format string (std::format_string's
+// constructor is explicit and requires a constant format), so a runtime string
+// always lands on the single-argument form.
 inline void PrintCliError(std::string_view message) {
   std::cerr << bf::service::kTextErrorPrefix << message << '\n';
 }

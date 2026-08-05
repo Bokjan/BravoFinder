@@ -110,7 +110,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     // on-demand procedure parsing.
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
-      PrintCliError("{}", db.error().message);
+      PrintCliError(db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }

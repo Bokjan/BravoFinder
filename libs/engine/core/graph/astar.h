@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "core/constraints/constraint.h"
+#include "core/domain/sentinels.h"
 #include "core/graph/nav_graph.h"
-#include "core/graph/search_sentinels.h"
 #include "core/routing/route_request.h"
 
 namespace bf {

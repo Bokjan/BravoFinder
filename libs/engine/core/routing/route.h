@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "core/domain/coordinate.h"
-#include "core/graph/search_sentinels.h"
+#include "core/domain/sentinels.h"
 
 namespace bf {
 

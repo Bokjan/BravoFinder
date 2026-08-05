@@ -129,10 +129,10 @@ uint16_t RnpCentinm(const std::string& field) {
 
 // Normalize a turn-direction field to 'L'/'R', or '\0' when unspecified.
 char TurnDir(const std::string& field) {
-  if (field == "L") {
+  if (EqualsCode(field, kTurnLeft)) {
     return kTurnLeft;
   }
-  if (field == "R") {
+  if (EqualsCode(field, kTurnRight)) {
     return kTurnRight;
   }
   return '\0';
