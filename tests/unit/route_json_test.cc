@@ -24,6 +24,7 @@ struct StubWriter {
   void String(const char* s, unsigned) { out += std::string("\"") + s + "\""; }
   void String(const char* s) { out += std::string("\"") + s + "\""; }
   void Double(double) { out += "#"; }
+  void Bool(bool v) { out += v ? "true" : "false"; }
 };
 
 TEST_CASE("WriteRouteJson emits concurrent_airways only on concurrency legs",
@@ -110,6 +111,30 @@ TEST_CASE("ToString maps every connection kind", "[unit][route_json]") {
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kProcedure)) == "procedure");
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kDirect)) == "direct");
   CHECK(std::string(bf::ToString(bf::ConnectionKind::kRadarVectors)) == "radar_vectors");
+  CHECK(std::string(bf::ToString(bf::ConnectionKind::kTerminalTransition)) ==
+        "terminal_transition");
+}
+
+TEST_CASE("WriteRouteJson emits terminal_transition approach fields", "[unit][route_json]") {
+  bf::Route route;
+  route.route_string = "A DCT KTVL";
+  route.arr_connection = bf::ConnectionKind::kTerminalTransition;
+  route.terminal_transition = true;
+  route.approach = "R18.HETRY";
+  route.approach_iaf = "HETRY";
+  route.approach_bearing = 160.0;
+  route.approach_options = {"R18.HETRY", "R18.HUYJO"};
+  route.arr_runway = "RW18";
+
+  StubWriter w;
+  bf::WriteRouteJson(w, route);
+  const std::string& s = w.out;
+  CHECK(s.find("\"terminal_transition\"") != std::string::npos);
+  CHECK(s.find("<approach>") != std::string::npos);
+  CHECK(s.find("\"R18.HETRY\"") != std::string::npos);
+  CHECK(s.find("<approach_iaf>") != std::string::npos);
+  CHECK(s.find("\"HETRY\"") != std::string::npos);
+  CHECK(s.find("<approach_options>") != std::string::npos);
 }
 
 TEST_CASE("WriteRouteJson preserves coordinate precision with a 6-dp writer",

@@ -70,6 +70,23 @@ void WriteRouteText(std::ostream& os, const bf::Route& route) {
   }
   if (route.arr_connection == bf::ConnectionKind::kRadarVectors) {
     os << "STAR: RADAR VECTORS\n";
+  } else if (route.terminal_transition ||
+             route.arr_connection == bf::ConnectionKind::kTerminalTransition) {
+    os << "[APCH PROC] " << route.approach;
+    if (!route.approach_iaf.empty()) {
+      os << " via " << route.approach_iaf;
+    }
+    if (!route.arr_runway.empty()) {
+      os << " (rwy " << route.arr_runway << ")";
+    }
+    if (route.approach_options.size() > 1) {
+      os << " [options: ";
+      for (size_t i = 0; i < route.approach_options.size(); ++i) {
+        os << route.approach_options[i] << (i + 1 < route.approach_options.size() ? ", " : "");
+      }
+      os << "]";
+    }
+    os << "\n";
   } else if (!route.star.empty()) {
     os << "STAR: " << route.star;
     if (!route.arr_runway.empty()) {

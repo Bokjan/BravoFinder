@@ -43,18 +43,25 @@ ProcedureRef MakeRef(const Procedure& p) {
   return ref;
 }
 
+ProcedureRef MakeApproachRef(const Procedure& p, std::string_view iaf) {
+  ProcedureRef ref = MakeRef(p);
+  ref.iaf = std::string(iaf);
+  return ref;
+}
+
 // Merge a (fix_vertex, seed, bearing, ref) finding into the connection map,
 // keeping the smallest seed distance per fix (and its matching bearing) and
 // collecting every procedure ref. When the seed wins, the winning ref is moved
 // to procedures.front() so SelectProcedures / metadata pick the priced option.
 void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, double seed,
-                double bearing, const ProcedureRef& ref) {
+                double bearing, const ProcedureRef& ref, double approach_bearing = -1.0) {
   auto it = by_fix.find(fix_vertex);
   if (it == by_fix.end()) {
     Connection c;
     c.fix_vertex = fix_vertex;
     c.seed_distance_nm = seed;
     c.bearing = bearing;
+    c.approach_bearing = approach_bearing;
     c.procedures.push_back(ref);
     by_fix.emplace(fix_vertex, std::move(c));
     return;
@@ -63,6 +70,7 @@ void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, dou
   if (seed < it->second.seed_distance_nm) {
     it->second.seed_distance_nm = seed;
     it->second.bearing = bearing;
+    it->second.approach_bearing = approach_bearing;
     std::swap(it->second.procedures.front(), it->second.procedures.back());
   }
 }
@@ -416,8 +424,10 @@ std::unordered_map<int, Connection> CollectApproachArrivals(const CifpData& cifp
       double bearing_from_iaf = -1.0;
       const double body_stub =
           ApproachBodyAndStubNm(p, iaf, cifp, airport_coord, builder, bearing_from_iaf);
+      const std::string iaf_ident(leg.fix.IdentView());
+      const ProcedureRef pref = MakeApproachRef(p, iaf_ident);
       if (builder.HasInbound(iaf)) {
-        Accumulate(by_fix, iaf, body_stub, bearing_from_iaf, MakeRef(p));
+        Accumulate(by_fix, iaf, body_stub, bearing_from_iaf, pref, bearing_from_iaf);
         continue;
       }
       // Proxy goals: nearest on-network inbound fixes around the off-net IAF.
@@ -430,7 +440,7 @@ std::unordered_map<int, Connection> CollectApproachArrivals(const CifpData& cifp
         const double seed = f_coord.DistanceTo(iaf_coord) + body_stub;
         // Turn at F is priced as leaving F toward the IAF (the virtual first leg).
         const double bearing = f_coord.BearingTo(iaf_coord);
-        Accumulate(by_fix, f, seed, bearing, MakeRef(p));
+        Accumulate(by_fix, f, seed, bearing, pref, bearing_from_iaf);
       }
     }
   }

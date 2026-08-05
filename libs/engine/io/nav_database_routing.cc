@@ -39,6 +39,7 @@ struct EndpointPlan {
   std::vector<Connection> connections;
   std::string airport_icao;  // empty if the endpoint is a plain waypoint
   bool used_procedures = false;
+  bool used_approach = false;  // arrival joined via BuildApproachArrival
   bool has_procedures = false;
   // Set when the request named a SID/STAR that the airport does not publish (or
   // whose fixes reach no on-network vertex): the caller reports an Error instead
@@ -211,14 +212,37 @@ void SelectProcedures(const EndpointPlan& plan, int fix_vertex, std::string& nam
       continue;
     }
     for (const ProcedureRef& ref : c.procedures) {
-      // Approach refs are not STARs: leave star/star_options empty (filed via
-      // stays DCT). Approach metadata is filled by a later phase.
+      // Approach refs are not STARs — handled by SelectApproachProcedures.
       if (ref.type == ProcedureType::kApproach) {
         continue;
       }
       options.push_back(FormatRef(ref));
       if (name.empty()) {
         name = ref.name;
+        runway = ref.runway;
+      }
+    }
+    break;
+  }
+}
+
+// Fill approach_* metadata for a terminal-transition arrival at `fix_vertex`.
+void SelectApproachProcedures(const EndpointPlan& plan, int fix_vertex, std::string& approach,
+                              std::string& approach_iaf, double& approach_bearing,
+                              std::string& runway, std::vector<std::string>& options) {
+  for (const Connection& c : plan.connections) {
+    if (c.fix_vertex != fix_vertex) {
+      continue;
+    }
+    approach_bearing = c.approach_bearing;
+    for (const ProcedureRef& ref : c.procedures) {
+      if (ref.type != ProcedureType::kApproach) {
+        continue;
+      }
+      options.push_back(FormatRef(ref));
+      if (approach.empty()) {
+        approach = FormatRef(ref);
+        approach_iaf = ref.iaf;
         runway = ref.runway;
       }
     }
@@ -581,9 +605,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
             }
           } else if (plan.connections.empty()) {
             plan.connections = ProcedureConnector::BuildApproachArrival(*cifp, apt, *builder_, rwy);
+            plan.used_approach = !plan.connections.empty();
           }
         }
-        plan.used_procedures = !plan.connections.empty();
+        plan.used_procedures = !plan.connections.empty() && !plan.used_approach;
       } else if (!(departure ? request.departure_sid : request.arrival_star).empty()) {
         // A procedure was named but the airport has no CIFP data at all.
         plan.named_procedure_unmatched = true;
@@ -782,6 +807,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   // per-endpoint verdict: a procedure was used; else procedures exist but none
   // reached the network (radar vectors); else no procedure data at all.
   auto connection_kind = [](const EndpointPlan& plan) {
+    if (plan.used_approach) {
+      return ConnectionKind::kTerminalTransition;
+    }
     if (plan.used_procedures) {
       return ConnectionKind::kProcedure;
     }
@@ -813,7 +841,16 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     std::string star_name;
     std::string arr_rwy;
     std::vector<std::string> star_options;
-    SelectProcedures(arr, arr_fix, star_name, arr_rwy, star_options);
+    std::string approach;
+    std::string approach_iaf;
+    double approach_bearing = -1.0;
+    std::vector<std::string> approach_options;
+    if (arr.used_approach) {
+      SelectApproachProcedures(arr, arr_fix, approach, approach_iaf, approach_bearing, arr_rwy,
+                               approach_options);
+    } else {
+      SelectProcedures(arr, arr_fix, star_name, arr_rwy, star_options);
+    }
 
     Route route = MakeRoute(*builder_, graph, p, dep.airport_icao, arr.airport_icao, sid_name,
                             star_name, dep_seed, arr_seed, options);
@@ -825,6 +862,13 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     route.star_options = star_options;
     route.dep_connection = dep_kind;
     route.arr_connection = arr_kind;
+    if (arr.used_approach) {
+      route.terminal_transition = true;
+      route.approach = std::move(approach);
+      route.approach_iaf = std::move(approach_iaf);
+      route.approach_bearing = approach_bearing;
+      route.approach_options = std::move(approach_options);
+    }
     route.forced_points = forced_echo;
     routes.push_back(std::move(route));
   }

@@ -1268,6 +1268,9 @@ TEST_CASE("real data: no-STAR arrival connects via an on-network approach IAF", 
   REQUIRE_FALSE(routes.value().empty());
   const bf::Route& r = routes.value().front();
   CHECK(r.star.empty());
+  CHECK(r.terminal_transition);
+  CHECK(r.arr_connection == bf::ConnectionKind::kTerminalTransition);
+  CHECK_FALSE(r.approach.empty());
   REQUIRE_FALSE(r.legs.empty());
   const bf::RouteLeg& last = r.legs.back();
   CHECK(last.to == "KTVL");
@@ -1338,6 +1341,10 @@ TEST_CASE("real data: off-network approach IAF uses a proxy on-network goal", "[
   REQUIRE_FALSE(routes.value().empty());
   const bf::Route& r = routes.value().front();
   CHECK(r.star.empty());
+  CHECK(r.terminal_transition);
+  CHECK(r.arr_connection == bf::ConnectionKind::kTerminalTransition);
+  CHECK_FALSE(r.approach.empty());
+  CHECK_FALSE(r.approach_iaf.empty());
   REQUIRE_FALSE(r.legs.empty());
   const bf::RouteLeg& last = r.legs.back();
   CHECK(last.to == "04TT");
@@ -1348,6 +1355,8 @@ TEST_CASE("real data: off-network approach IAF uses a proxy on-network goal", "[
   CHECK(last.from != "APOLE");
   CHECK(last.from != "BOVIE");
   CHECK(last.from != "FANIG");
+  // approach_iaf names the real IAF, not the proxy handoff fix.
+  CHECK(last.from != r.approach_iaf);
   // Seed includes |F→I| + approach body, so arr phase is more than a bare
   // airport-nearest DCT stub.
   CHECK(r.arr_distance_nm > 5.0);

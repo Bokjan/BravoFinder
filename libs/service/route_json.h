@@ -54,6 +54,15 @@ void WriteRouteJson(Writer& writer, const Route& route) {
   key_str("star", route.star);
   key_str("arr_runway", route.arr_runway);
   key_str_array("star_options", route.star_options);
+  if (route.terminal_transition) {
+    writer.Key("terminal_transition");
+    writer.Bool(true);
+    key_str("approach", route.approach);
+    key_str("approach_iaf", route.approach_iaf);
+    writer.Key("approach_bearing");
+    writer.Double(route.approach_bearing);
+    key_str_array("approach_options", route.approach_options);
+  }
   if (!route.forced_points.empty()) {
     key_str_array("forced_points", route.forced_points);
   }
