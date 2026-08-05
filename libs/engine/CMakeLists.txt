@@ -151,6 +151,7 @@ if(BRAVOFINDER_INSTALL)
           ARCHIVE DESTINATION lib)
 
   install(FILES core/result.h                          DESTINATION include/bf/core)
+  install(FILES core/domain/arinc_codes.h             DESTINATION include/bf/core/domain)
   install(FILES core/domain/airport.h                  DESTINATION include/bf/core/domain)
   install(FILES core/domain/airway.h                   DESTINATION include/bf/core/domain)
   install(FILES core/domain/coordinate.h               DESTINATION include/bf/core/domain)

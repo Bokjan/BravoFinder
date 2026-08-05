@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "core/domain/airway.h"
+#include "core/domain/arinc_codes.h"
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/navaid_detail.h"
@@ -290,7 +291,7 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
     h.inbound_course = inbound_course;
     h.leg_time_min = leg_time;
     h.leg_dist_nm = leg_dist;
-    h.turn_dir = (turn == "L") ? 'L' : 'R';
+    h.turn_dir = (turn == "L") ? kTurnLeft : kTurnRight;
     h.min_alt_ft = min_alt;
     h.max_alt_ft = max_alt;
     h.speed_limit_kt = speed;

@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/domain/arinc_codes.h"
 #include "core/domain/nav_tokens.h"
 
 namespace bf {
@@ -128,10 +129,10 @@ uint16_t RnpCentinm(const std::string& field) {
 // Normalize a turn-direction field to 'L'/'R', or '\0' when unspecified.
 char TurnDir(const std::string& field) {
   if (field == "L") {
-    return 'L';
+    return kTurnLeft;
   }
   if (field == "R") {
-    return 'R';
+    return kTurnRight;
   }
   return '\0';
 }

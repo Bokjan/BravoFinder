@@ -18,6 +18,7 @@
 #include "core/base/log.h"
 #include "core/domain/airport.h"
 #include "core/domain/airway.h"
+#include "core/domain/arinc_codes.h"
 #include "core/domain/coordinate.h"
 #include "core/domain/encoding_scale.h"
 #include "core/domain/hold_fix.h"
@@ -299,7 +300,7 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     // raw (untrimmed): trimming a blank column 1 would shift the byte offsets and
     // silently miss the 'E', reintroducing cross-instance phantom legs. (Same as dfd1.)
     const std::string desc = ColumnTextRaw(stmt, 10);
-    prev_is_awy_end = desc.size() > 1 && desc[1] == 'E';
+    prev_is_awy_end = desc.size() > 1 && desc[1] == kWptDescEndOfAirway;
     have_prev = true;
   });
 }
@@ -359,7 +360,7 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
     const std::string turn = ColumnText(stmt, 4);
     // Hold turn direction defaults to right ('R') when absent/unknown, matching
     // the X-Plane earth_hold parse (see dfd1_loader for the same convention).
-    h.turn_dir = (turn == "L") ? 'L' : 'R';
+    h.turn_dir = (turn == "L") ? kTurnLeft : kTurnRight;
     h.leg_dist_nm = ColumnDouble(stmt, 5);
     h.leg_time_min = ColumnDouble(stmt, 6);
     h.min_alt_ft = ColumnInt(stmt, 7);
@@ -500,10 +501,11 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
   const double course = ColumnDouble(stmt, c.course);
   const std::string flag = ColumnText(stmt, c.course_flag);
-  leg.course_deg = static_cast<float>((flag == "T") ? ToMagnetic(course, magvar) : course);
+  leg.course_deg = static_cast<float>(
+      (flag.size() == 1 && flag[0] == kCourseFlagTrue) ? ToMagnetic(course, magvar) : course);
   // v2 distance: distance_time holds the value, route_distance_... holds the flag.
   const std::string dflag = ColumnText(stmt, c.dist_flag);
-  if (dflag == "D") {
+  if (dflag.size() == 1 && dflag[0] == kDistTimeFlagDistance) {
     leg.distance_nm = static_cast<float>(ColumnDouble(stmt, c.dist_value));
   }
   leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
@@ -516,7 +518,7 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   leg.rnp_centinm = static_cast<uint16_t>(
       std::clamp<long>(rnp_centi, 0, static_cast<long>(std::numeric_limits<uint16_t>::max())));
   const std::string turn = ColumnText(stmt, c.turn_dir);
-  leg.turn_dir = (turn == "L") ? 'L' : (turn == "R") ? 'R' : '\0';
+  leg.turn_dir = (turn == "L") ? kTurnLeft : (turn == "R") ? kTurnRight : '\0';
   leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(
       ColumnInt(stmt, c.speed_limit), 0, static_cast<int>(std::numeric_limits<uint16_t>::max())));
   leg.is_mapt = IsMaptDesc(ColumnText(stmt, c.wpt_desc));
