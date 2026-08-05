@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/domain/coordinate.h"
+#include "core/graph/search_sentinels.h"
 
 namespace bf {
 
@@ -101,11 +102,11 @@ struct Route {
   // sits in an empty-transition (final) record, or "NAME.TRANSITION" when it
   // comes from a named transition record ("R18.HETRY"); `approach_iaf` is the
   // IAF ident (never a proxy fix); `approach_bearing` is the IAF outbound
-  // heading or -1.
+  // heading or kNoBearing.
   bool terminal_transition = false;
   std::string approach;
   std::string approach_iaf;
-  double approach_bearing = -1.0;
+  double approach_bearing = kNoBearing;
   std::vector<std::string> approach_options;
 
   // The forced ("via") points the route was routed through, in order, echoed as

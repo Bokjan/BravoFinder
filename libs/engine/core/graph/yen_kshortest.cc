@@ -150,11 +150,11 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   const std::vector<double> source_seed = BuildSeedTable(sources, n);
   const std::vector<double> goal_seed = BuildSeedTable(goals, n);
   // Per-vertex procedure headings at the endpoints, for the turn-angle penalty.
-  // `no_source_bearing` is an all-(-1) table for mid-path spur searches whose
+  // `no_source_bearing` is an all-kNoBearing table for mid-path spur searches whose
   // spur node is not a real SID source (it has no procedure inbound heading).
   const std::vector<double> source_bearing = BuildBearingTable(sources, n);
   const std::vector<double> goal_bearing = BuildBearingTable(goals, n);
-  const std::vector<double> no_source_bearing(n, -1.0);
+  const std::vector<double> no_source_bearing(n, kNoBearing);
 
   // The goal set is fixed for the whole run, so h(v) is constant per vertex.
   // Build one memoized heuristic and share it across the first search and every
@@ -283,7 +283,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
       // Single-source (the spur node) -> any goal. The spur node's own seed is
       // irrelevant here; CostOfPathMulti re-applies the true source seed from the
       // stitched path's first vertex. The spur node has no procedure inbound
-      // heading, so pass the all-(-1) source bearing table -- no SID-exit turn
+      // heading, so pass the all-kNoBearing source bearing table -- no SID-exit turn
       // penalty is applied at the spur node during the search (the re-cost still
       // applies the real source bearing at the stitched path's true front fix).
       const ShortestPath spur =

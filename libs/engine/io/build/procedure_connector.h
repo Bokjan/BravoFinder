@@ -32,18 +32,18 @@ struct ProcedureRef {
 // Connection; the refs let the result list all equivalent SID/STAR(+runway)
 // choices without re-searching.
 struct Connection {
-  int fix_vertex = -1;
+  int fix_vertex = kNoVertex;
   double seed_distance_nm = 0.0;
-  // Procedure heading at the fix in degrees [0, 360), or -1 when unknown.
+  // Procedure heading at the fix in degrees [0, 360), or kNoBearing when unknown.
   // For a SID this is the INBOUND heading (direction the procedure arrives at
   // the fix from the runway side); for a STAR the OUTBOUND heading (direction
   // it leaves the fix toward the runway). Drives the turn-angle penalty at the
   // SID-exit / STAR-entry handoff. For an approach proxy goal this is the
   // outbound heading leaving the proxy toward the off-network IAF.
-  double bearing = -1.0;
-  // Approach IAF outbound heading [0, 360), or -1. Set for approach connections
-  // (on-network or proxy); used for route metadata, not the turn penalty.
-  double approach_bearing = -1.0;
+  double bearing = kNoBearing;
+  // Approach IAF outbound heading [0, 360), or kNoBearing. Set for approach
+  // connections (on-network or proxy); used for route metadata, not the turn penalty.
+  double approach_bearing = kNoBearing;
   std::vector<ProcedureRef> procedures;
 };
 

@@ -129,12 +129,12 @@ std::vector<double> BuildSeedTable(const std::vector<SeededEndpoint>& endpoints,
 }
 
 std::vector<double> BuildBearingTable(const std::vector<SeededEndpoint>& endpoints, int n) {
-  // Per-vertex procedure heading for the turn-angle penalty, or -1 when v is
+  // Per-vertex procedure heading for the turn-angle penalty, or kNoBearing when v is
   // not an endpoint or carries no procedure heading. Mirrors BuildSeedTable's
   // "smallest seed wins" merge so the bearing matches the seed the search
   // actually uses: when several endpoints land on v, the cheapest seed's
   // bearing is the one the search will pick.
-  std::vector<double> bearing(n, -1.0);
+  std::vector<double> bearing(n, kNoBearing);
   std::vector<double> best_seed(n, -1.0);
   for (const SeededEndpoint& e : endpoints) {
     if (e.vertex < 0 || e.vertex >= n) {
@@ -243,18 +243,18 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
     }
     // A source's seed cost is the procedure distance already flown to reach it;
     // it counts as both effective cost and geographic distance. The source's
-    // bearing is the procedure's inbound heading at the fix (or -1 when none),
+    // bearing is the procedure's inbound heading at the fix (or kNoBearing when none),
     // seeding the turn-angle penalty for the SID-exit turn onto the first edge.
     const double seed_bearing = source_bearing[s.vertex];
     if (s.cost < ws.G(s.vertex)) {
-      ws.Relax(s.vertex, s.cost, s.cost, -1, seed_bearing);
+      ws.Relax(s.vertex, s.cost, s.cost, kNoVertex, seed_bearing);
       open.push_back(QueueNode{s.cost + heuristic(s.vertex), s.vertex});
       std::push_heap(open.begin(), open.end(), std::greater<>());
     }
   }
 
   double best_total = kInfinity;  // best (g + goal seed + goal turn) reached so far
-  int best_goal = -1;
+  int best_goal = kNoVertex;
 
   while (!open.empty()) {
     std::pop_heap(open.begin(), open.end(), std::greater<>());
@@ -292,7 +292,7 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
     // u is constant across its out-edges; hoist its coordinate once so the
     // unconstrained fast path fetches no per-edge coordinates.
     const Coordinate u_coord = graph.CoordOf(u);
-    const double inb_u = turn.enabled ? ws.Inbound(u) : -1.0;
+    const double inb_u = turn.enabled ? ws.Inbound(u) : kNoBearing;
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
       const int v = e->to;
       if (ws.Closed(v)) {
@@ -315,7 +315,7 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
       // The outbound bearing is reused as v's inbound, so each relaxation pays
       // exactly one atan2 and the inbound is never recomputed downstream.
       double turn_cost = 0.0;
-      double outb = -1.0;
+      double outb = kNoBearing;
       if (turn.enabled && inb_u >= 0.0) {
         const Coordinate v_coord = graph.CoordOf(v);
         outb = u_coord.BearingTo(v_coord);
@@ -334,7 +334,7 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
     return result;  // no source reached any goal
   }
 
-  for (int at = best_goal; at != -1; at = ws.Prev(at)) {
+  for (int at = best_goal; at != kNoVertex; at = ws.Prev(at)) {
     result.vertices.push_back(at);
   }
   std::reverse(result.vertices.begin(), result.vertices.end());

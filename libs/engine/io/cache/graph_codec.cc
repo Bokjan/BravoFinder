@@ -70,7 +70,7 @@ static_assert(kMsaArcSize == 12, "msa-arc wire layout drifted");
 //   header ints : U32 v, U32 e, U32 airway_count, U32 msa_count,
 //                 U32 first_airport_vertex
 //   vertex records [v] : F64 lat, F64 lon, U32 ident_off/len, U32 arinc424_icao_code_off/len,
-//                        U8 flags (bit0 = has_outbound, bit1 = has_inbound), U8 kind
+//                        U8 flags (kFlagHasOutbound | kFlagHasInbound), U8 kind
 //   airport records [v - first_airport_vertex] : I32 elevation_ft
 //   offsets [v + 1] : I32
 //   edges [e] : I32 to, F32 distance_nm, U16 airway_id, I16 base_fl, I16 top_fl,
@@ -127,10 +127,10 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
     w.U32(rr.second);
     uint8_t flags = 0;
     if (snapshot.has_outbound[i]) {
-      flags |= 0x01;
+      flags |= kFlagHasOutbound;
     }
     if (snapshot.has_inbound[i]) {
-      flags |= 0x02;
+      flags |= kFlagHasInbound;
     }
     w.U8(flags);
     if (static_cast<uint8_t>(snapshot.kinds[i]) > static_cast<uint8_t>(WaypointKind::kOther)) {
@@ -306,8 +306,8 @@ Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
     ident_refs[i].ro = r.U32();
     ident_refs[i].rl = r.U32();
     const uint8_t flags = r.U8();
-    snapshot.has_outbound[i] = (flags & 0x01) != 0 ? 1 : 0;
-    snapshot.has_inbound[i] = (flags & 0x02) != 0 ? 1 : 0;
+    snapshot.has_outbound[i] = (flags & kFlagHasOutbound) != 0 ? 1 : 0;
+    snapshot.has_inbound[i] = (flags & kFlagHasInbound) != 0 ? 1 : 0;
     snapshot.kinds[i] = static_cast<WaypointKind>(r.U8());
   }
   // Airport records: elevation per airport vertex, in vertex order.

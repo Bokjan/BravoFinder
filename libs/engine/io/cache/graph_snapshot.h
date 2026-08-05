@@ -14,6 +14,12 @@
 
 namespace bf {
 
+// Wire flags byte in each GraphCodec vertex record (format_version >= 7).
+// bit0 = has_outbound, bit1 = has_inbound; on-network connection logic must
+// keep the two directions separate (STAR entry portals are often inbound-only).
+inline constexpr uint8_t kFlagHasOutbound = 1u << 0;
+inline constexpr uint8_t kFlagHasInbound = 1u << 1;
+
 // A flat, self-contained snapshot of the route-graph data a NavDatabase needs
 // to answer queries, decoupled from GraphBuilder's internal indexing. GraphCodec
 // encodes and decodes this snapshot as one section of a unified `.bfdb`;

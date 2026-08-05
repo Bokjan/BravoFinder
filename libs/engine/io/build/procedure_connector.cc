@@ -12,13 +12,13 @@ namespace bf {
 namespace {
 
 // Resolve a procedure leg's fix to a graph vertex by its full (ident, region)
-// key. Returns -1 when the leg has no resolvable fix. The ident-only fallback
+// key. Returns kNoVertex when the leg has no resolvable fix. The ident-only fallback
 // was removed: a procedure leg carries its region, so resolving by
 // (ident, region) is both correct and unambiguous, and silently guessing a
 // region would risk wiring a procedure to the wrong fix.
 int ResolveFix(const ProcedureLeg& leg, const GraphBuilder& builder) {
   if (leg.fix.IdentView().empty()) {
-    return -1;
+    return kNoVertex;
   }
   return builder.VertexByIdent(leg.fix);
 }
@@ -54,7 +54,7 @@ ProcedureRef MakeApproachRef(const Procedure& p, std::string_view iaf) {
 // collecting every procedure ref. When the seed wins, the winning ref is moved
 // to procedures.front() so SelectProcedures / metadata pick the priced option.
 void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, double seed,
-                double bearing, const ProcedureRef& ref, double approach_bearing = -1.0) {
+                double bearing, const ProcedureRef& ref, double approach_bearing = kNoBearing) {
   auto it = by_fix.find(fix_vertex);
   if (it == by_fix.end()) {
     Connection c;
@@ -143,7 +143,7 @@ WalkResult WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder, W
   double pending_nm = 0.0;
   for (size_t i = 0; i < p.legs.size(); ++i) {
     const ProcedureLeg& leg = p.legs[i];
-    const int v = leg.fix_is_definite() ? ResolveFix(leg, builder) : -1;
+    const int v = leg.fix_is_definite() ? ResolveFix(leg, builder) : kNoVertex;
     if (v < 0) {
       if (leg.distance_nm > 0.0) {
         pending_nm += leg.distance_nm;
@@ -299,7 +299,7 @@ bool WalkApproachSegment(const Procedure& p, const GraphBuilder& builder, int st
   bool found_start = (start_vertex < 0);
 
   for (const ProcedureLeg& leg : p.legs) {
-    const int v = leg.fix_is_definite() ? ResolveFix(leg, builder) : -1;
+    const int v = leg.fix_is_definite() ? ResolveFix(leg, builder) : kNoVertex;
     if (v < 0) {
       if (measuring && leg.distance_nm > 0.0) {
         pending_nm += leg.distance_nm;
@@ -406,8 +406,8 @@ double ApproachBodyAndStubNm(const Procedure& gate_proc, int gate_v, const CifpD
       // (a). A pattern-aware splice (walk final from the overlapping fix when
       // present; else add GC to the final IF) is the right follow-up if seed
       // bias at no-STAR PT/arc airports becomes user-visible.
-      if (WalkApproachSegment(*final_proc, builder, /*start_vertex=*/-1, /*stop_at_mapt=*/true,
-                              final_walk) &&
+      if (WalkApproachSegment(*final_proc, builder, /*start_vertex=*/kNoVertex,
+                              /*stop_at_mapt=*/true, final_walk) &&
           final_walk.have_end) {
         body += final_walk.nm;
         end = final_walk.end_coord;
@@ -441,7 +441,7 @@ std::unordered_map<int, Connection> CollectApproachArrivals(const CifpData& cifp
       if (iaf < 0) {
         continue;  // no vertex — cannot price or proxy
       }
-      double bearing_from_iaf = -1.0;
+      double bearing_from_iaf = kNoBearing;
       const double body_stub =
           ApproachBodyAndStubNm(p, iaf, cifp, airport_coord, builder, bearing_from_iaf);
       const std::string iaf_ident(leg.fix.IdentView());

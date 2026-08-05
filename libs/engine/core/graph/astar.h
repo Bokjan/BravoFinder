@@ -9,6 +9,7 @@
 
 #include "core/constraints/constraint.h"
 #include "core/graph/nav_graph.h"
+#include "core/graph/search_sentinels.h"
 #include "core/routing/route_request.h"
 
 namespace bf {
@@ -35,7 +36,7 @@ inline int64_t EdgeKey(int from, int to) {
 // and growing a fresh priority_queue.
 struct QueueNode {
   double f = 0.0;
-  int vertex = -1;
+  int vertex = kNoVertex;
   bool operator>(const QueueNode& other) const { return f > other.f; }
 };
 
@@ -48,8 +49,8 @@ struct QueueNode {
 // type-erased call -- this replaces a std::function<bool(int)> that profiling
 // showed at ~10% of the multi-source search.
 struct NodeFilter {
-  int airport_first = -1;                    // first airport vertex (inclusive), or -1 if none
-  int airport_last = -1;                     // one-past-last airport vertex (exclusive)
+  int airport_first = kNoVertex;  // first airport vertex (inclusive), or kNoVertex if none
+  int airport_last = kNoVertex;   // one-past-last airport vertex (exclusive)
   const std::vector<int>* banned = nullptr;  // sorted ascending, or nullptr
 
   bool Blocks(int v) const {
@@ -205,15 +206,15 @@ ShortestPath FindShortestPath(const NavGraph& graph, int start, int goal);
 // runway. The connection fixes are ordinary graph vertices, so procedures need
 // no graph mutation.
 struct SeededEndpoint {
-  int vertex = -1;
+  int vertex = kNoVertex;
   double cost = 0.0;  // SID distance (source) or STAR distance (goal), in NM
   // Heading at the connection fix for the turn-angle constraint, in degrees
-  // [0, 360), or -1 when unknown (no procedure / a forced via-point). For a
+  // [0, 360), or kNoBearing when unknown (no procedure / a forced via-point). For a
   // source (SID) this is the INBOUND heading -- the direction the procedure
   // arrives at the fix from the runway side. For a goal (STAR) it is the
   // OUTBOUND heading -- the direction the procedure leaves the fix toward the
   // runway. Symmetric: both are "the procedure leg heading at the fix".
-  double bearing = -1.0;
+  double bearing = kNoBearing;
 };
 
 // Reusable per-vertex scratch for A*. Yen runs the search hundreds of times over
@@ -222,7 +223,7 @@ struct SeededEndpoint {
 // arrays every time dominated the search cost. Instead the caller keeps one
 // workspace and hands it to each search: the arrays are allocated once, and a
 // per-search generation stamp makes clearing O(1). A slot whose stamp is not the
-// current generation reads as its initial value (g = +inf, prev = -1, not
+// current generation reads as its initial value (g = +inf, prev = kNoVertex, not
 // closed), so bumping `generation` logically resets everything without touching
 // memory. Owned by a single search or a single Yen invocation on the stack -- no
 // static/thread_local state -- so distinct concurrent queries never share one,
@@ -250,13 +251,13 @@ class SearchWorkspace {
   // guarded like G()/Prev() so a stray read of an untouched vertex returns 0
   // rather than a stale value from a previous generation.
   double Geo(int v) const { return Live(v) ? geo_[v] : 0.0; }
-  // Predecessor on the best path, or -1 until written this generation.
-  int Prev(int v) const { return Live(v) ? prev_[v] : -1; }
-  // Inbound heading at v along the best path, in degrees, or -1 until written
+  // Predecessor on the best path, or kNoVertex until written this generation.
+  int Prev(int v) const { return Live(v) ? prev_[v] : kNoVertex; }
+  // Inbound heading at v along the best path, in degrees, or kNoBearing until written
   // this generation. Set by Relax to the bearing of the edge the path used to
   // reach v (or the seeded procedure heading for a source). Read by the
   // turn-angle penalty when relaxing v's out-edges and when finishing at a goal.
-  double Inbound(int v) const { return Live(v) ? inbound_[v] : -1.0; }
+  double Inbound(int v) const { return Live(v) ? inbound_[v] : kNoBearing; }
   // Closed is its own generation stamp, so it clears in O(1) with the rest and
   // needs no per-slot byte array (a std::vector<bool> would add bit-masking to
   // the hot pop loop; a stamp compare is a single word comparison).
@@ -264,7 +265,7 @@ class SearchWorkspace {
 
   // Relax vertex `v`: record cost/distance/predecessor/inbound and stamp it live.
   // `inbound` is the heading the path arrived at v along (the bearing of the
-  // edge into v), or -1 for a source with no seeded procedure heading.
+  // edge into v), or kNoBearing for a source with no seeded procedure heading.
   void Relax(int v, double g, double geo, int prev, double inbound) {
     Touch(v);
     g_[v] = g;
@@ -283,8 +284,8 @@ class SearchWorkspace {
       stamp_[v] = generation_;
       g_[v] = kInfinity_;
       geo_[v] = 0.0;
-      prev_[v] = -1;
-      inbound_[v] = -1.0;
+      prev_[v] = kNoVertex;
+      inbound_[v] = kNoBearing;
     }
   }
 
