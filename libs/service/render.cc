@@ -70,8 +70,7 @@ void WriteRouteText(std::ostream& os, const bf::Route& route) {
   }
   if (route.arr_connection == bf::ConnectionKind::kRadarVectors) {
     os << "STAR: RADAR VECTORS\n";
-  } else if (route.terminal_transition ||
-             route.arr_connection == bf::ConnectionKind::kTerminalTransition) {
+  } else if (route.arr_connection == bf::ConnectionKind::kTerminalTransition) {
     os << "[APCH PROC] " << route.approach;
     if (!route.approach_iaf.empty()) {
       os << " via " << route.approach_iaf;

@@ -97,8 +97,11 @@ struct Route {
 
   // Set when arr_connection == kTerminalTransition: the arrival joined via an
   // approach IAF rather than a published STAR. `approach` is FormatRef of the
-  // winning procedure (e.g. "R18.HETRY"); `approach_iaf` is the IAF ident
-  // (never a proxy fix); `approach_bearing` is the IAF outbound heading or -1.
+  // winning procedure -- the bare approach name ("X18") when the IAF's IF leg
+  // sits in an empty-transition (final) record, or "NAME.TRANSITION" when it
+  // comes from a named transition record ("R18.HETRY"); `approach_iaf` is the
+  // IAF ident (never a proxy fix); `approach_bearing` is the IAF outbound
+  // heading or -1.
   bool terminal_transition = false;
   std::string approach;
   std::string approach_iaf;
