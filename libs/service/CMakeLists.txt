@@ -5,7 +5,10 @@
 # other; all depend here. This is an app-tier library (it pulls in rapidjson for
 # JSON rendering), kept out of libs/engine/ so the engine stays JSON-/network-free.
 add_library(bf_service_lib STATIC handlers.cc queries.cc render.cc registry.cc)
-target_link_libraries(bf_service_lib PUBLIC bf::bravofinder rapidjson::rapidjson)
+# bf::http_status is header-only (http_status.h) — shares status codes with the
+# transport without linking bf_http_server / libuv into CLI consumers.
+target_link_libraries(bf_service_lib PUBLIC bf::bravofinder rapidjson::rapidjson
+                      bf::http_status)
 target_include_directories(bf_service_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # rapidjson computes `nullPtr + offset` when its internal stack is first used,

@@ -17,6 +17,7 @@
 #include "core/base/log.h"
 #include "core/domain/airport.h"
 #include "core/domain/airway.h"
+#include "core/domain/encoding_scale.h"
 #include "core/domain/fixed_ident.h"
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"

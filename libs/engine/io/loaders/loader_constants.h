@@ -14,7 +14,4 @@ inline constexpr int kUnknownAltitudeFt = 99999;
 // Flight level = hundreds of feet MSL.
 inline constexpr int kFeetPerFlightLevel = 100;
 
-// Scale for packing a real quantity into centi-units (RNP NM, VHF freq MHz).
-inline constexpr double kCentiScale = 100.0;
-
 }  // namespace bf

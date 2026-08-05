@@ -19,6 +19,7 @@
 #include "core/domain/airport.h"
 #include "core/domain/airway.h"
 #include "core/domain/coordinate.h"
+#include "core/domain/encoding_scale.h"
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"

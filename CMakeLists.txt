@@ -14,7 +14,7 @@ if(APPLE)
 endif()
 
 project(BravoFinder
-        VERSION 3.24.5
+        VERSION 3.24.6
         DESCRIPTION "A realistic and compliant flight routing engine and its query tools"
         LANGUAGES C CXX)
 
@@ -237,8 +237,10 @@ endforeach()
 # Subdirectories
 # ---------------------------------------------------------------------------
 add_subdirectory(libs/engine)
-add_subdirectory(libs/service)
+# http_server before service: bf_service_lib links the header-only bf_http_status
+# INTERFACE target defined here (status-code single source without libuv).
 add_subdirectory(libs/http_server)
+add_subdirectory(libs/service)
 add_subdirectory(apps/cli)
 add_subdirectory(apps/mcp)
 add_subdirectory(apps/http)

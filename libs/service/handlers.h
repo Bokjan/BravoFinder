@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "http_status.h"
 #include "io/nav_database.h"
 #include "rapidjson/document.h"
 
@@ -35,9 +36,9 @@ struct HandlerResult {
 };
 
 // A HandlerResult.status at or above this is an error (4xx/5xx); below it is a
-// success (2xx). MCP maps is_error = (status >= kErrorStatusThreshold); the CLI
-// maps it to a non-zero exit code; HTTP passes the code through directly.
-inline constexpr int kErrorStatusThreshold = 400;
+// success (2xx). Alias of http_server::kStatusClientErrorMin so MCP/CLI/HTTP
+// thresholds cannot drift from the transport status table.
+inline constexpr int kErrorStatusThreshold = bf::http_server::kStatusClientErrorMin;
 
 // Server-side request caps shared with the MCP JSON-Schema (tools.cc) so the
 // schema maximum/maxItems and the adapter's 400 messages cannot drift.

@@ -22,6 +22,7 @@
 #include "core/constraints/airway_rule_constraint.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
+#include "http_status.h"
 #include "queries.h"
 #include "rapidjson/document.h"
 #include "render.h"
@@ -36,11 +37,8 @@ namespace {
 // any tool's JSON-Schema; a handler that rejected unknown keys would wrongly
 // fail every MCP call that pins a cycle, so strict unknown-key validation is
 // out of bounds here.
-//
-// HTTP-style status codes the adapters report on a bad request (see
-// HandlerResult in the header for the 400/404/422 semantics; 404/422 are
-// produced inside the typed entries).
-constexpr int kBadRequest = 400;
+
+using bf::http_server::kStatusBadRequest;
 
 // Parse a string-array argument. Returns nullopt if the member is absent OR
 // malformed (not an array, a non-string element, or more than kMaxIdListSize
@@ -177,7 +175,7 @@ QueryHandler MakeLookupAdapter(Fn fn) {
     if (!ids) {
       return {
           JsonError(std::format("ids (array of at most {} strings) is required", kMaxIdListSize)),
-          kBadRequest};
+          kStatusBadRequest};
     }
     return fn(db, *ids, OutputFormat::kJson);
   };
@@ -189,7 +187,7 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   bf::RouteRequest request;
   if (!args.HasMember("departure") || !args["departure"].IsString() || !args.HasMember("arrival") ||
       !args["arrival"].IsString()) {
-    return {JsonError("departure and arrival are required"), kBadRequest};
+    return {JsonError("departure and arrival are required"), kStatusBadRequest};
   }
   request.departure = args["departure"].GetString();
   request.arrival = args["arrival"].GetString();
@@ -203,7 +201,7 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
       const int min_fl = has_min ? args["min_fl"].GetInt() : args["max_fl"].GetInt();
       const int max_fl = has_max ? args["max_fl"].GetInt() : args["min_fl"].GetInt();
       if (min_fl > max_fl) {
-        return {JsonError("min_fl must not exceed max_fl"), kBadRequest};
+        return {JsonError("min_fl must not exceed max_fl"), kStatusBadRequest};
       }
       // Flight levels are non-negative (hundreds of feet). A negative bound is
       // physically meaningless and would make the altitude-band and MORA
@@ -211,14 +209,14 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
       // "no route" rather than an error. Reject it up front. (min_fl <= max_fl
       // is already enforced, so this bounds both.)
       if (min_fl < 0) {
-        return {JsonError("min_fl and max_fl must be non-negative"), kBadRequest};
+        return {JsonError("min_fl and max_fl must be non-negative"), kStatusBadRequest};
       }
       // Bound the top of the range: an absurdly high FL is physically
       // meaningless and only invites overflow-adjacent inputs. min_fl <= max_fl
       // is already enforced, so capping max_fl bounds both.
       if (max_fl > kMaxFl) {
         return {JsonError(std::format("min_fl and max_fl must not exceed {}", kMaxFl)),
-                kBadRequest};
+                kStatusBadRequest};
       }
       request.altitude = bf::FlRange{min_fl, max_fl};
     }
@@ -241,14 +239,14 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     // not silently dropped to the default: the caller clearly meant to set k, and
     // ignoring it would hand back one route where several were asked for.
     if (!args["k"].IsInt()) {
-      return {JsonError("k must be an integer"), kBadRequest};
+      return {JsonError("k must be an integer"), kStatusBadRequest};
     }
     request.k = args["k"].GetInt();
   }
   // The schema declares minimum:1, but enforce it server-side too: Yen K-shortest
   // is undefined for k <= 0, and a non-positive value must not reach FindRoutes.
   if (request.k < 1) {
-    return {JsonError("k must be a positive integer (>= 1)"), kBadRequest};
+    return {JsonError("k must be a positive integer (>= 1)"), kStatusBadRequest};
   }
   // Cap k as well: each extra path costs a full spur A* search, so an unbounded k
   // (e.g. 2e9) would pin a worker for a long time and let a few requests exhaust
@@ -256,7 +254,7 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   // CLI does not enforce this cap -- it is a server-protection concern -- so the
   // cap lives here in the adapter, not in the typed entry.)
   if (request.k > kMaxK) {
-    return {JsonError(std::format("k must not exceed {}", kMaxK)), kBadRequest};
+    return {JsonError(std::format("k must not exceed {}", kMaxK)), kStatusBadRequest};
   }
   if (args.HasMember("departure_runway") && args["departure_runway"].IsString()) {
     request.departure_runway = args["departure_runway"].GetString();
@@ -278,12 +276,12 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     if (!v) {
       return {JsonError(std::format("avoid_waypoints must be an array of at most {} strings",
                                     kMaxIdListSize)),
-              kBadRequest};
+              kStatusBadRequest};
     }
     request.avoid_waypoints = std::move(*v);
   }
   if (std::optional<std::string> err = ParseAirwayRules(args, request.airway_rules)) {
-    return {JsonError(*err), kBadRequest};
+    return {JsonError(*err), kStatusBadRequest};
   }
   if (args.HasMember("random_seed") && args["random_seed"].IsUint()) {
     request.random_seed = args["random_seed"].GetUint();
@@ -293,7 +291,7 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     if (!v) {
       return {JsonError(std::format("forced_points must be an array of at most {} strings",
                                     kMaxIdListSize)),
-              kBadRequest};
+              kStatusBadRequest};
     }
     request.forced_points = std::move(*v);
   }
@@ -305,7 +303,7 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
 HandlerResult LookupProcedureLegsHandler(const rapidjson::Value& args, const NavDatabase& db) {
   if (!args.HasMember("airport") || !args["airport"].IsString() || !args.HasMember("procedure") ||
       !args["procedure"].IsString()) {
-    return {JsonError("airport and procedure are required"), kBadRequest};
+    return {JsonError("airport and procedure are required"), kStatusBadRequest};
   }
   return LookupProcedureLegs(db, args["airport"].GetString(), args["procedure"].GetString(),
                              OutputFormat::kJson);
@@ -314,7 +312,7 @@ HandlerResult LookupProcedureLegsHandler(const rapidjson::Value& args, const Nav
 // The parse_route handler: validate & expand a filed route string.
 HandlerResult ParseRouteHandler(const rapidjson::Value& args, const NavDatabase& db) {
   if (!args.HasMember("route") || !args["route"].IsString()) {
-    return {JsonError("route (string) is required"), kBadRequest};
+    return {JsonError("route (string) is required"), kStatusBadRequest};
   }
   return ParseRoute(db, args["route"].GetString(), OutputFormat::kJson);
 }

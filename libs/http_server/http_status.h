@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-// http_status.h — canonical HTTP status codes for the transport core and the
-// apps that speak HTTP (bf-http REST, bf-mcp over HTTP). Centralized so no
-// endpoint hard-codes a bare integer status. The bf::service layer keeps its own
-// copy of the codes it needs (queries.cc kOk/kNotFound/kUnprocessable,
-// handlers.cc kBadRequest) because it must not depend on the transport core;
-// the two sets are deliberately independent, mirroring the dual JsonError.
+// http_status.h — canonical HTTP status codes shared by the transport core
+// (bf-http REST, bf-mcp over HTTP) and bf::service (HandlerResult.status).
+// Single source so adapter / query entries cannot drift from the transport.
+//
+// bf_service_lib links the header-only bf_http_status INTERFACE target (include
+// path only) — never bf_http_server — so the CLI does not pull in libuv.
 
 #pragma once
 

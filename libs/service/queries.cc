@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "core/routing/route.h"
+#include "http_status.h"
 #include "io/nav_database.h"
 #include "render.h"
 
@@ -23,10 +24,9 @@ namespace bf::service {
 
 namespace {
 
-// HTTP-style status codes (see HandlerResult in handlers.h for the semantics).
-constexpr int kOk = 200;
-constexpr int kNotFound = 404;
-constexpr int kUnprocessable = 422;
+using bf::http_server::kStatusNotFound;
+using bf::http_server::kStatusOk;
+using bf::http_server::kStatusUnprocessableEntity;
 
 uint32_t ElapsedMs(std::chrono::steady_clock::time_point start) {
   return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -44,9 +44,9 @@ HandlerResult FindRoutes(const bf::NavDatabase& db, const bf::RouteRequest& requ
   if (!result) {
     // A failed route computation is a semantic failure (422): the request was
     // well-formed but no route satisfies it, or an endpoint is unknown.
-    return {RenderError(fmt, result.error().message), kUnprocessable, 0};
+    return {RenderError(fmt, result.error().message), kStatusUnprocessableEntity, 0};
   }
-  return {RenderRoutes(fmt, result.value(), elapsed), kOk, elapsed};
+  return {RenderRoutes(fmt, result.value(), elapsed), kStatusOk, elapsed};
 }
 
 HandlerResult ParseRoute(const bf::NavDatabase& db, const std::string& route_str,
@@ -57,9 +57,9 @@ HandlerResult ParseRoute(const bf::NavDatabase& db, const std::string& route_str
   if (!result) {
     // A parse failure is a semantic failure (422): the string was given but does
     // not form a valid route. The message names the offending token.
-    return {RenderError(fmt, result.error().message), kUnprocessable, 0};
+    return {RenderError(fmt, result.error().message), kStatusUnprocessableEntity, 0};
   }
-  return {RenderRoute(fmt, result.value(), elapsed), kOk, elapsed};
+  return {RenderRoute(fmt, result.value(), elapsed), kStatusOk, elapsed};
 }
 
 // ---- Batch lookups ----------------------------------------------------------
@@ -75,9 +75,9 @@ HandlerResult RunGroupedLookup(const bf::NavDatabase& db, const std::vector<std:
   const bool all_empty =
       std::all_of(results.begin(), results.end(), [](const auto& group) { return group.empty(); });
   if (all_empty) {
-    return {render(fmt, ids, results), kNotFound, 0};
+    return {render(fmt, ids, results), kStatusNotFound, 0};
   }
-  return {render(fmt, ids, results), kOk, elapsed};
+  return {render(fmt, ids, results), kStatusOk, elapsed};
 }
 
 // An optional lookup (airports / procedures / airways) returns an optional per
@@ -91,9 +91,9 @@ HandlerResult RunOptionalLookup(const bf::NavDatabase& db, const std::vector<std
   const bool all_missing =
       std::none_of(results.begin(), results.end(), [](const auto& opt) { return opt.has_value(); });
   if (all_missing) {
-    return {render(fmt, ids, results), kNotFound, 0};
+    return {render(fmt, ids, results), kStatusNotFound, 0};
   }
-  return {render(fmt, ids, results), kOk, elapsed};
+  return {render(fmt, ids, results), kStatusOk, elapsed};
 }
 
 HandlerResult LookupWaypoints(const bf::NavDatabase& db, const std::vector<std::string>& ids,
@@ -162,9 +162,9 @@ HandlerResult LookupProcedureLegs(const bf::NavDatabase& db, const std::string& 
   if (!detail) {
     // Unknown airport, no CIFP data, or no procedure of that name: 404 rather
     // than an empty success payload.
-    return {RenderError(fmt, "no procedure of that name at that airport"), kNotFound, 0};
+    return {RenderError(fmt, "no procedure of that name at that airport"), kStatusNotFound, 0};
   }
-  return {RenderProcedureDetail(fmt, *detail), kOk, elapsed};
+  return {RenderProcedureDetail(fmt, *detail), kStatusOk, elapsed};
 }
 
 // ---- CLI procedure kind (mixed summary / detail selectors) ------------------
@@ -223,9 +223,9 @@ HandlerResult LookupProceduresMixed(const bf::NavDatabase& db,
 
   std::string body = RenderProceduresMixed(fmt, labels, summaries, details);
   if (all_missed) {
-    return {std::move(body), kNotFound, 0};
+    return {std::move(body), kStatusNotFound, 0};
   }
-  return {std::move(body), kOk, elapsed};
+  return {std::move(body), kStatusOk, elapsed};
 }
 
 }  // namespace bf::service

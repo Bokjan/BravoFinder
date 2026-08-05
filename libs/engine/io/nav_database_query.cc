@@ -4,8 +4,8 @@
 #include <vector>
 
 #include "core/base/string_util.h"
+#include "core/domain/encoding_scale.h"
 #include "io/build/graph_builder.h"
-#include "io/loaders/loader_constants.h"
 #include "io/nav_database.h"
 
 namespace bf {

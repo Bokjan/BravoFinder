@@ -17,9 +17,9 @@
 #include <string>
 #include <vector>
 
+#include "core/domain/encoding_scale.h"
 #include "core/routing/route.h"
 #include "core/routing/route_metrics.h"
-#include "io/loaders/loader_constants.h"
 #include "query_json.h"
 #include "route_json.h"
 
