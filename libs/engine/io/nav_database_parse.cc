@@ -324,7 +324,12 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
 
   for (; i < end; ++i) {
     const std::string& tok = tokens[i];
-    const bool is_airway = FindAirway(tok) != nullptr;
+    // Airway designators are stored uppercase, so normalize the token before
+    // both the is_airway probe and the connector handed to expand_airway
+    // (which compares against the stored uppercase designator). Fix lookups
+    // keep the original token so error messages show what the user typed.
+    const std::string up_tok = ToUpper(tok);
+    const bool is_airway = FindAirway(up_tok) != nullptr;
 
     if (expect_fix) {
       // Expecting a fix. A leading connector before any fix is an error.
@@ -375,7 +380,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
       if (tok == kDctToken) {
         pending_connector = std::string(kDctToken);
       } else if (is_airway) {
-        pending_connector = tok;
+        pending_connector = up_tok;
       } else {
         // No connector between two fixes: ICAO requires one between every pair
         // of waypoints. Reject rather than synthesize an implicit DCT.

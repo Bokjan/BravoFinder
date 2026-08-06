@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/base/log.h"
 #include "core/domain/fixed_string.h"
 #include "core/graph/nav_graph.h"
 #include "core/routing/route_string.h"
@@ -258,7 +259,19 @@ void NavDatabase::BuildAirwayIndex() {
   airway_index_.clear();
   airway_index_.reserve(built.size());
   for (auto& entry : built) {
-    airway_index_.emplace_back(FixedName8::From(entry.first), std::move(entry.second));
+    const std::string& designator = entry.first;
+    // Designators are <=5 chars in real AIRAC data; FixedName8 caps at 7. An
+    // over-cap name can never be looked up (FindAirway guards size > kCap),
+    // so skip it rather than storing a truncated, unresolvable key. Assert in
+    // debug, warn + skip in release.
+    if (designator.size() > FixedName8::kCap) {
+      assert(designator.size() <= FixedName8::kCap &&
+             "airway designator overflows FixedName8::kCap");
+      BF_LOG_WARN("airway index: skipping designator '{}' (too long for FixedName8, {} > {})",
+                  designator, designator.size(), FixedName8::kCap);
+      continue;
+    }
+    airway_index_.emplace_back(FixedName8::From(designator), std::move(entry.second));
   }
   std::sort(airway_index_.begin(), airway_index_.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
