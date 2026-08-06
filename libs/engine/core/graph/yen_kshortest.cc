@@ -220,15 +220,17 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
         // Source-level spur: re-run the multi-source search with every starting
         // fix used by an accepted path that shares the (empty) root banned, so a
         // different source fix must be chosen.
-        std::set<int> banned_sources;
+        std::vector<int> banned_sources;
+        banned_sources.reserve(result.size());
         for (const ShortestPath& p : result) {
           if (!p.vertices.empty()) {
-            banned_sources.insert(p.vertices.front());
+            banned_sources.push_back(p.vertices.front());
           }
         }
         std::vector<SeededEndpoint> spur_sources;
         for (const SeededEndpoint& s : sources) {
-          if (banned_sources.count(s.vertex) == 0) {
+          if (std::find(banned_sources.begin(), banned_sources.end(), s.vertex) ==
+              banned_sources.end()) {
             spur_sources.push_back(s);
           }
         }

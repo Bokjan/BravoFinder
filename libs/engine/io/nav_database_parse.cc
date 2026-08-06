@@ -324,7 +324,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
 
   for (; i < end; ++i) {
     const std::string& tok = tokens[i];
-    const bool is_airway = airway_index_.find(tok) != airway_index_.end();
+    const bool is_airway = FindAirway(tok) != nullptr;
 
     if (expect_fix) {
       // Expecting a fix. A leading connector before any fix is an error.

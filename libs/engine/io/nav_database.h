@@ -6,10 +6,12 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 #include "core/base/attributes.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
 #include "core/domain/procedure.h"
@@ -175,6 +177,10 @@ class NavDatabase {
   // so LookupAirways needs no lock (thread-safety contract: immutable after Open).
   void BuildAirwayIndex();
 
+  // Binary-search airway_index_ by designator. Over-long names cannot match
+  // (designators are <=5 chars) and return null without asserting.
+  const AirwayInfo* FindAirway(std::string_view name) const;
+
   // AIRAC provenance, carried into the .bfdb container header.
   uint32_t cycle_ = 0;
   std::unique_ptr<GraphBuilder> builder_;
@@ -186,8 +192,9 @@ class NavDatabase {
   std::unique_ptr<Loader> loader_;
   std::string source_dir_;
   // Airway designator -> its directed segments. Built once at Open, then
-  // immutable, so reads are lock-free.
-  std::unordered_map<std::string, AirwayInfo> airway_index_;
+  // immutable, so reads are lock-free. Sorted by FixedName8 key for
+  // binary search (designators are <=5 chars; ~10k entries, cold-path lookup).
+  std::vector<std::pair<FixedName8, AirwayInfo>> airway_index_;
   // Optional CIFP procedure cache. When present, ProceduresFor fetches segments
   // from it instead of parsing CIFP/<ICAO>.dat files. Immutable after Open, so
   // it needs no lock (its Fetch opens an independent ifstream per call).

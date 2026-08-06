@@ -117,8 +117,8 @@ TEST_CASE("RenderAirways: directed segment line", "[unit][render]") {
   bf::AirwayInfo a;
   a.name = "Y28";
   bf::AirwayLeg s;
-  s.from = "ABC";
-  s.to = "DEF";
+  s.from = bf::FixedName8::From("ABC");
+  s.to = bf::FixedName8::From("DEF");
   s.distance_nm = 12.5;
   s.high = false;
   s.base_fl = 120;

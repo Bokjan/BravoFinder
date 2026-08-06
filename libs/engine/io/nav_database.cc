@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/nav_database.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <format>
 #include <limits>
@@ -12,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/domain/fixed_string.h"
 #include "core/graph/nav_graph.h"
 #include "core/routing/route_string.h"
 #include "core/version.h"
@@ -218,9 +220,13 @@ void NavDatabase::BuildAirwayIndex() {
     // with (to="WPT1", base_fl=20) on the same key "...WPT120..." -- silently
     // discarding the second leg as a false duplicate. A char appends the real
     // null/0x01 byte and keeps every field boundary intact.
-    return l.from + '\0' + l.to + (l.high ? '\1' : '\0') + std::to_string(l.base_fl) + '\0' +
-           std::to_string(l.top_fl);
+    return std::string(l.from.View()) + '\0' + std::string(l.to.View()) + (l.high ? '\1' : '\0') +
+           std::to_string(l.base_fl) + '\0' + std::to_string(l.top_fl);
   };
+  // Accumulate into a hash map, then freeze into the sorted resident vector.
+  // Build is one-shot at Open; the sorted form is what LookupAirways / ParseRoute
+  // share for the rest of the database lifetime.
+  std::unordered_map<std::string, AirwayInfo> built;
   std::unordered_map<std::string, std::unordered_set<std::string>> seen;
   for (int u = 0; u < vcount; ++u) {
     for (const GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
@@ -228,8 +234,8 @@ void NavDatabase::BuildAirwayIndex() {
         continue;  // synthetic DCT edge, not a named airway
       }
       const std::string& name = builder_->AirwayName(e->airway_id);
-      const AirwayLeg leg{builder_->IdentOf(u).ident,
-                          builder_->IdentOf(e->to).ident,
+      const AirwayLeg leg{FixedName8::From(builder_->IdentOf(u).ident),
+                          FixedName8::From(builder_->IdentOf(e->to).ident),
                           e->distance_nm,
                           e->level == AirwayLevel::kHigh,
                           e->base_fl,
@@ -241,7 +247,7 @@ void NavDatabase::BuildAirwayIndex() {
         if (!seen[designator].insert(leg_key(leg)).second) {
           continue;  // exact-duplicate directed leg already registered
         }
-        AirwayInfo& info = airway_index_[designator];
+        AirwayInfo& info = built[designator];
         if (info.name.empty()) {
           info.name = designator;
         }
@@ -249,6 +255,27 @@ void NavDatabase::BuildAirwayIndex() {
       }
     }
   }
+  airway_index_.clear();
+  airway_index_.reserve(built.size());
+  for (auto& entry : built) {
+    airway_index_.emplace_back(FixedName8::From(entry.first), std::move(entry.second));
+  }
+  std::sort(airway_index_.begin(), airway_index_.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+}
+
+const AirwayInfo* NavDatabase::FindAirway(std::string_view name) const {
+  if (name.size() > FixedName8::kCap) {
+    return nullptr;
+  }
+  const FixedName8 key = FixedName8::From(name);
+  auto it = std::lower_bound(
+      airway_index_.begin(), airway_index_.end(), key,
+      [](const std::pair<FixedName8, AirwayInfo>& e, const FixedName8& k) { return e.first < k; });
+  if (it != airway_index_.end() && it->first == key) {
+    return &it->second;
+  }
+  return nullptr;
 }
 
 }  // namespace bf

@@ -2,7 +2,6 @@
 #include "io/build/procedure_connector.h"
 
 #include <algorithm>
-#include <unordered_map>
 
 #include "core/domain/coordinate.h"
 #include "io/build/graph_builder.h"
@@ -49,30 +48,35 @@ ProcedureRef MakeApproachRef(const Procedure& p, std::string_view iaf) {
   return ref;
 }
 
-// Merge a (fix_vertex, seed, bearing, ref) finding into the connection map,
+// Merge a (fix_vertex, seed, bearing, ref) finding into the connection list,
 // keeping the smallest seed distance per fix (and its matching bearing) and
 // collecting every procedure ref. When the seed wins, the winning ref is moved
 // to procedures.front() so SelectProcedures / metadata pick the priced option.
-void Accumulate(std::unordered_map<int, Connection>& by_fix, int fix_vertex, double seed,
-                double bearing, const ProcedureRef& ref, double approach_bearing = kNoBearing) {
-  auto it = by_fix.find(fix_vertex);
-  if (it == by_fix.end()) {
-    Connection c;
-    c.fix_vertex = fix_vertex;
-    c.seed_distance_nm = seed;
-    c.bearing = bearing;
-    c.approach_bearing = approach_bearing;
+// A vector is enough: real airports expose at most a few dozen distinct handoff
+// fixes per side (p99 ~14, max 35 in cycle 2601), so a linear scan beats a hash
+// map and avoids per-airport bucket allocation.
+void Accumulate(std::vector<Connection>& by_fix, int fix_vertex, double seed, double bearing,
+                const ProcedureRef& ref, double approach_bearing = kNoBearing) {
+  for (Connection& c : by_fix) {
+    if (c.fix_vertex != fix_vertex) {
+      continue;
+    }
     c.procedures.push_back(ref);
-    by_fix.emplace(fix_vertex, std::move(c));
+    if (seed < c.seed_distance_nm) {
+      c.seed_distance_nm = seed;
+      c.bearing = bearing;
+      c.approach_bearing = approach_bearing;
+      std::swap(c.procedures.front(), c.procedures.back());
+    }
     return;
   }
-  it->second.procedures.push_back(ref);
-  if (seed < it->second.seed_distance_nm) {
-    it->second.seed_distance_nm = seed;
-    it->second.bearing = bearing;
-    it->second.approach_bearing = approach_bearing;
-    std::swap(it->second.procedures.front(), it->second.procedures.back());
-  }
+  Connection c;
+  c.fix_vertex = fix_vertex;
+  c.seed_distance_nm = seed;
+  c.bearing = bearing;
+  c.approach_bearing = approach_bearing;
+  c.procedures.push_back(ref);
+  by_fix.push_back(std::move(c));
 }
 
 // One on-network fix a procedure record passes, with the polyline distance from
@@ -177,20 +181,15 @@ WalkResult WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder, W
   return result;
 }
 
-std::vector<Connection> Finalize(std::unordered_map<int, Connection>& by_fix) {
-  std::vector<Connection> out;
-  out.reserve(by_fix.size());
-  for (auto& [vertex, conn] : by_fix) {
-    out.push_back(std::move(conn));
-  }
+std::vector<Connection> Finalize(std::vector<Connection> by_fix) {
   // Stable ordering by seed distance keeps results deterministic.
-  std::sort(out.begin(), out.end(), [](const Connection& a, const Connection& b) {
+  std::sort(by_fix.begin(), by_fix.end(), [](const Connection& a, const Connection& b) {
     if (a.seed_distance_nm != b.seed_distance_nm) {
       return a.seed_distance_nm < b.seed_distance_nm;
     }
     return a.fix_vertex < b.fix_vertex;
   });
-  return out;
+  return by_fix;
 }
 
 // Collect one side's connections: walk every matching procedure record and
@@ -202,12 +201,11 @@ std::vector<Connection> Finalize(std::unordered_map<int, Connection>& by_fix) {
 // Bearings are computed from the FULL hit list even when only gates survive: a
 // gate's procedure heading is set by the fix that precedes/follows it along the
 // published track, not by the next gate.
-std::unordered_map<int, Connection> CollectSide(const CifpData& cifp, ProcedureType want,
-                                                WalkDir dir, const Coordinate& airport_coord,
-                                                const GraphBuilder& builder,
-                                                const std::string& runway_filter, bool gate_only) {
+std::vector<Connection> CollectSide(const CifpData& cifp, ProcedureType want, WalkDir dir,
+                                    const Coordinate& airport_coord, const GraphBuilder& builder,
+                                    const std::string& runway_filter, bool gate_only) {
   const bool departure = dir == WalkDir::kOutbound;
-  std::unordered_map<int, Connection> by_fix;
+  std::vector<Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
     if (p.type != want || !RunwayMatches(p, runway_filter)) {
       continue;
@@ -267,13 +265,13 @@ std::unordered_map<int, Connection> CollectSide(const CifpData& cifp, ProcedureT
 std::vector<Connection> BuildSide(const CifpData& cifp, ProcedureType want, WalkDir dir,
                                   const Coordinate& airport_coord, const GraphBuilder& builder,
                                   const std::string& runway_filter) {
-  std::unordered_map<int, Connection> by_fix =
+  std::vector<Connection> by_fix =
       CollectSide(cifp, want, dir, airport_coord, builder, runway_filter, /*gate_only=*/true);
   if (by_fix.empty()) {
     by_fix =
         CollectSide(cifp, want, dir, airport_coord, builder, runway_filter, /*gate_only=*/false);
   }
-  return Finalize(by_fix);
+  return Finalize(std::move(by_fix));
 }
 
 // Polyline distance along a procedure's definite fixes, optionally starting at
@@ -424,11 +422,11 @@ constexpr int kApproachProxyK = 5;
 // On-network inbound IAFs become search goals directly; off-network IAFs that
 // still resolve to a vertex are represented by K nearest inbound on-network
 // proxies F with seed |F→I| + (I→MAPT…) + stub (no graph mutation).
-std::unordered_map<int, Connection> CollectApproachArrivals(const CifpData& cifp,
-                                                            const Coordinate& airport_coord,
-                                                            const GraphBuilder& builder,
-                                                            const std::string& runway_filter) {
-  std::unordered_map<int, Connection> by_fix;
+std::vector<Connection> CollectApproachArrivals(const CifpData& cifp,
+                                                const Coordinate& airport_coord,
+                                                const GraphBuilder& builder,
+                                                const std::string& runway_filter) {
+  std::vector<Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
     if (p.type != ProcedureType::kApproach || !RunwayMatches(p, runway_filter)) {
       continue;
@@ -513,9 +511,9 @@ std::vector<Connection> ProcedureConnector::BuildApproachArrival(const CifpData&
   // by airport (optionally + runway_filter) with the same double-checked
   // locking + unique_ptr pattern as procedure_cache_, keeping FindRoutes const
   // and concurrently safe; any such cache must pass the tsan preset.
-  std::unordered_map<int, Connection> by_fix =
+  std::vector<Connection> by_fix =
       CollectApproachArrivals(cifp, airport_coord, builder, runway_filter);
-  return Finalize(by_fix);
+  return Finalize(std::move(by_fix));
 }
 
 std::vector<Connection> ProcedureConnector::BuildDctFallback(const Coordinate& airport_coord,

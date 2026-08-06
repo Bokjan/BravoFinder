@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/cache/cifp_codec.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <format>
 #include <fstream>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -370,10 +372,19 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
       return bad("corrupt CIFP section: segment overlaps directory");
     }
     const uint64_t abs_off = section_offset + seg_rel;
-    // ICAO bounds were validated above, so the slice is in range.
-    std::string icao(reinterpret_cast<const char*>(archive.pool_.data() + icao_off), icao_len);
-    archive.index_.emplace(std::move(icao), CifpArchive::SegmentLoc{abs_off, seg_len, seg_crc});
+    // ICAO bounds were validated above, so the slice is in range. Real ICAOs
+    // are <=4 chars; an over-cap pool string cannot be a valid key and would
+    // trip FixedName8::From's assert -- reject as corrupt instead.
+    if (icao_len > FixedName8::kCap) {
+      return bad("corrupt CIFP section: ICAO longer than FixedName8::kCap");
+    }
+    const std::string_view icao_sv(reinterpret_cast<const char*>(archive.pool_.data() + icao_off),
+                                   icao_len);
+    archive.index_.emplace_back(FixedName8::From(icao_sv),
+                                CifpArchive::SegmentLoc{abs_off, seg_len, seg_crc});
   }
+  std::sort(archive.index_.begin(), archive.index_.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
   return Result<CifpArchive>::Ok(std::move(archive));
 }
 
@@ -395,28 +406,41 @@ std::unordered_map<std::string, CifpData> CifpArchive::FetchAll() const {
     }
     std::optional<CifpData> data = DeserializeSegment(bytes, pool_);
     if (data.has_value()) {
-      out.emplace(entry.first, std::move(*data));
+      out.emplace(std::string(entry.first.View()), std::move(*data));
     }
   }
   return out;
 }
 
+const CifpArchive::SegmentLoc* CifpArchive::Find(const std::string& icao) const {
+  if (icao.size() > FixedName8::kCap) {
+    return nullptr;
+  }
+  const FixedName8 key = FixedName8::From(icao);
+  auto it = std::lower_bound(
+      index_.begin(), index_.end(), key,
+      [](const std::pair<FixedName8, SegmentLoc>& e, const FixedName8& k) { return e.first < k; });
+  if (it != index_.end() && it->first == key) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
 std::optional<CifpData> CifpArchive::Fetch(const std::string& icao) const {
-  auto it = index_.find(icao);
-  if (it == index_.end()) {
+  const SegmentLoc* loc = Find(icao);
+  if (loc == nullptr) {
     return std::nullopt;
   }
-  const SegmentLoc& loc = it->second;
   // Positional read on the shared handle: pread/ReadFile take an explicit offset
   // and touch no shared cursor, so concurrent fetches for different airports are
   // race-free without a lock (thread-safety contract). Bounds were validated at OpenSection.
-  std::vector<uint8_t> bytes(loc.len);
-  if (loc.len > 0 && !file_.ReadAt(bytes, loc.abs_off)) {
+  std::vector<uint8_t> bytes(loc->len);
+  if (loc->len > 0 && !file_.ReadAt(bytes, loc->abs_off)) {
     return std::nullopt;
   }
   // Verify the segment body before deserializing -- a bit flip into another valid
   // value silently corrupts a procedure/leg field that the decode fuses accept.
-  if (Crc32C::Compute(bytes) != loc.crc) {
+  if (Crc32C::Compute(bytes) != loc->crc) {
     return std::nullopt;
   }
   return DeserializeSegment(bytes, pool_);

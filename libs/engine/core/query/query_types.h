@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/domain/coordinate.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/procedure.h"
 #include "core/domain/waypoint.h"
 
@@ -81,9 +82,12 @@ struct AirportProcedureDetail {
 };
 
 // One directed segment of an airway: a hop between two consecutive fixes.
+// Endpoints are bare fix idents (no region) stored as FixedName8 --
+// real idents are <=5 chars, so the 8B form saves ~48B/leg versus two
+// std::string without changing the LookupAirways JSON shape (render via View()).
 struct AirwayLeg {
-  std::string from{};  // fix ident
-  std::string to{};    // fix ident
+  FixedName8 from{};  // fix ident (no region)
+  FixedName8 to{};    // fix ident (no region)
   double distance_nm = 0.0;
   bool high = false;  // Jet (high) airway segment; false = Victor (low)
   int base_fl = 0;    // lowest usable flight level (0 = no limit)

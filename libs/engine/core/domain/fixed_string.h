@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -42,8 +43,8 @@ struct alignas(1) FixedIdent {
   // is no room for a terminator and `ident`/`arinc424_icao_code` are NOT C
   // strings. Read them only via IdentView()/Arinc424IcaoCodeView() or the raw
   // pointer + its _len. This keeps the struct at exactly 12 bytes (owner chose
-  // 12 over 16). Consistent with FixedIdentNoRegion, which is length-prefixed
-  // for the same reason.
+  // 12 over 16). Consistent with FixedName, which is length-prefixed for the
+  // same reason.
   char ident[kIdentCap] = {};                          // 7 bytes
   char arinc424_icao_code[kArinc424IcaoCodeCap] = {};  // 3 bytes
   // 1 + 1 + 7 + 3 = 12; alignas(1) leaves no padding.
@@ -94,5 +95,56 @@ struct alignas(1) FixedIdent {
 };
 
 static_assert(sizeof(FixedIdent) == 12, "FixedIdent must stay 12 bytes");
+
+// A length-prefixed, region-less short name of exactly N bytes (1 length byte +
+// N-1 chars). Used for sorted-vector lookup keys and compact query fields that
+// carry no region: bare fix idents / AirwayLeg endpoints, airport ICAOs
+// (airport_index_ / CifpArchive directory), airway designators (airway_index_).
+//
+// N is the total sizeof, not the character capacity: FixedName<8> is 8 bytes
+// with kCap=7. Keeping sizeof(key)<=8 makes pair<FixedName8,int> stay at 12
+// bytes (a 9..12B key would pad to 16B). Real AIRAC names are <=5 chars, so
+// the length byte's cost in capacity is fine.
+//
+// Length-prefixed (not NUL-terminated / zero-padded): View() is O(1) and
+// ordering is memcmp of the common prefix then length -- no strnlen scan.
+template <int N>
+struct alignas(1) FixedName {
+  static_assert(N >= 2, "FixedName needs a length byte + at least 1 char");
+
+  static constexpr int kSize = N;
+  static constexpr int kCap = N - 1;  // chars after the length byte
+
+  uint8_t len = 0;
+  // Length-prefixed, NOT NUL-terminated: all kCap bytes hold characters, so
+  // there is NO room for a terminator and `text` is NOT a C string. Never pass
+  // it to strlen/strcmp/printf("%s")/any <cstring> C-string API or treat it as
+  // null-terminated. Read it only via View() (length-bounded) or text + len.
+  char text[kCap] = {};
+
+  std::string_view View() const BF_LIFETIMEBOUND { return {text, len}; }
+
+  // Ordering for sorted-array + binary search: common-prefix memcmp then length.
+  bool operator<(const FixedName& o) const {
+    const int c = std::memcmp(text, o.text, std::min(len, o.len));
+    return c != 0 ? c < 0 : len < o.len;
+  }
+
+  bool operator==(const FixedName& o) const {
+    return len == o.len && std::memcmp(text, o.text, len) == 0;
+  }
+
+  static FixedName From(std::string_view s) {
+    assert(s.size() <= kCap && "name overflows FixedName::kCap");
+    FixedName f;
+    f.len = static_cast<uint8_t>(s.size() < kCap ? s.size() : kCap);
+    std::memcpy(f.text, s.data(), f.len);
+    return f;
+  }
+};
+
+static_assert(sizeof(FixedName<8>) == 8, "FixedName<8> must stay 8 bytes");
+
+using FixedName8 = FixedName<8>;
 
 }  // namespace bf

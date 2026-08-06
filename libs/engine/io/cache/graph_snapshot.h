@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "core/domain/fixed_ident.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"

@@ -20,7 +20,7 @@
 #include "core/domain/airway.h"
 #include "core/domain/arinc_codes.h"
 #include "core/domain/encoding_scale.h"
-#include "core/domain/fixed_ident.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"

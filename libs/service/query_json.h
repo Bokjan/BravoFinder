@@ -3,6 +3,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/query/query_types.h"
@@ -45,13 +46,21 @@ inline const char* ToString(ProcedureType t) {
 namespace detail {
 
 template <class Writer>
+void WriteStr(Writer& w, std::string_view s) {
+  w.String(s.data(), static_cast<unsigned>(s.size()));
+}
+template <class Writer>
 void WriteStr(Writer& w, const std::string& s) {
-  w.String(s.c_str(), static_cast<unsigned>(s.size()));
+  WriteStr(w, std::string_view(s));
+}
+template <class Writer>
+void WriteKeyStr(Writer& w, const char* k, std::string_view s) {
+  w.Key(k);
+  WriteStr(w, s);
 }
 template <class Writer>
 void WriteKeyStr(Writer& w, const char* k, const std::string& s) {
-  w.Key(k);
-  WriteStr(w, s);
+  WriteKeyStr(w, k, std::string_view(s));
 }
 template <class Writer>
 void WriteCoord(Writer& w, const Coordinate& c) {
@@ -165,8 +174,8 @@ void WriteAirwayJson(Writer& w, const AirwayInfo& a) {
   w.StartArray();
   for (const AirwayLeg& s : a.segments) {
     w.StartObject();
-    detail::WriteKeyStr(w, "from", s.from);
-    detail::WriteKeyStr(w, "to", s.to);
+    detail::WriteKeyStr(w, "from", s.from.View());
+    detail::WriteKeyStr(w, "to", s.to.View());
     w.Key("distance_nm");
     w.Double(s.distance_nm);
     w.Key("high");

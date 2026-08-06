@@ -149,9 +149,9 @@ std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
     const std::vector<std::string>& names) const {
   std::vector<std::optional<AirwayInfo>> out(names.size());
   for (size_t i = 0; i < names.size(); ++i) {
-    auto it = airway_index_.find(ToUpper(names[i]));
-    if (it != airway_index_.end()) {
-      out[i] = it->second;
+    const AirwayInfo* info = FindAirway(ToUpper(names[i]));
+    if (info != nullptr) {
+      out[i] = *info;
     }
   }
   return out;

@@ -3,7 +3,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "core/constraints/altitude_constraints.h"
-#include "core/domain/fixed_ident.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/procedure.h"
 #include "core/graph/astar.h"
 #include "core/routing/route_request.h"

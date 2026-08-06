@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/domain/fixed_string.h"
 #include "core/result.h"
 #include "io/cache/pread_file.h"
 #include "io/loaders/xplane12/cifp_parser.h"
@@ -45,7 +46,7 @@ class CifpArchive {
   std::unordered_map<std::string, CifpData> FetchAll() const;
 
   // Whether the archive contains a segment for `icao`.
-  bool Has(const std::string& icao) const { return index_.count(icao) != 0; }
+  bool Has(const std::string& icao) const { return Find(icao) != nullptr; }
 
  private:
   friend class CifpCodec;
@@ -57,8 +58,14 @@ class CifpArchive {
     uint32_t crc;      // CRC-32C of the segment body (0 for an empty segment)
   };
 
+  // Binary-search the sorted ICAO index. Over-long keys cannot match any stored
+  // ICAO (cap 7, real ICAOs <=4) and return null without asserting.
+  const SegmentLoc* Find(const std::string& icao) const;
+
   PreadFile file_;  // shared read-only handle on the unified .bfdb
-  std::unordered_map<std::string, SegmentLoc> index_;  // icao -> segment location + crc
+  // Sorted by ICAO (FixedName8); frozen after OpenSection. Replaces an
+  // unordered_map: ~14k entries, read-only after Open, lookup is cold-path.
+  std::vector<std::pair<FixedName8, SegmentLoc>> index_;
   std::vector<uint8_t> pool_;  // owned copy of the container's global string pool blob
 };
 

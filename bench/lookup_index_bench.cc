@@ -24,7 +24,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "core/domain/fixed_ident.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/ident.h"
 #include "io/cache/unified_cache.h"
 

@@ -323,13 +323,13 @@ std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int cou
 }
 
 std::vector<int> GraphBuilder::VerticesByIdent(const std::string& ident) const {
-  if (ident.size() > FixedIdentNoRegion::kCap) {
+  if (ident.size() > FixedName8::kCap) {
     return {};  // longer than any stored ident -> no match (see VertexByIdent)
   }
-  const FixedIdentNoRegion key = FixedIdentNoRegion::From(ident);
-  auto lo = std::lower_bound(ident_all_.begin(), ident_all_.end(), key,
-                             [](const std::pair<FixedIdentNoRegion, int>& e,
-                                const FixedIdentNoRegion& k) { return e.first < k; });
+  const FixedName8 key = FixedName8::From(ident);
+  auto lo = std::lower_bound(
+      ident_all_.begin(), ident_all_.end(), key,
+      [](const std::pair<FixedName8, int>& e, const FixedName8& k) { return e.first < k; });
   std::vector<int> out;
   for (auto it = lo; it != ident_all_.end() && it->first == key; ++it) {
     out.push_back(it->second);
@@ -338,13 +338,13 @@ std::vector<int> GraphBuilder::VerticesByIdent(const std::string& ident) const {
 }
 
 int GraphBuilder::VertexByAirport(const std::string& icao) const {
-  if (icao.size() > FixedIdentNoRegion::kCap) {
+  if (icao.size() > FixedName8::kCap) {
     return -1;  // longer than any stored ICAO -> no match (see VertexByIdent)
   }
-  const FixedIdentNoRegion key = FixedIdentNoRegion::From(icao);
-  auto it = std::lower_bound(airport_index_.begin(), airport_index_.end(), key,
-                             [](const std::pair<FixedIdentNoRegion, int>& e,
-                                const FixedIdentNoRegion& k) { return e.first < k; });
+  const FixedName8 key = FixedName8::From(icao);
+  auto it = std::lower_bound(
+      airport_index_.begin(), airport_index_.end(), key,
+      [](const std::pair<FixedName8, int>& e, const FixedName8& k) { return e.first < k; });
   if (it != airport_index_.end() && it->first == key) {
     return it->second;
   }
@@ -373,10 +373,10 @@ void GraphBuilder::RebuildIndices() {
   // vertex order, then sorted once for binary-search lookup.
   for (int i = 0; i < first_airport_vertex_; ++i) {
     ident_index_.emplace_back(idents_[i], i);
-    ident_all_.emplace_back(FixedIdentNoRegion::From(idents_[i].IdentView()), i);
+    ident_all_.emplace_back(FixedName8::From(idents_[i].IdentView()), i);
   }
   for (int v = first_airport_vertex_; v < v_count; ++v) {
-    airport_index_.emplace_back(FixedIdentNoRegion::From(idents_[v].IdentView()), v);
+    airport_index_.emplace_back(FixedName8::From(idents_[v].IdentView()), v);
   }
   auto by_key = [](const auto& a, const auto& b) {
     if (a.first < b.first) {

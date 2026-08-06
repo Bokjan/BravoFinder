@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "core/domain/coordinate.h"
-#include "core/domain/fixed_ident.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/ident.h"
 
 namespace bf {

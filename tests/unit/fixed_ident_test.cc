@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: MIT
-#include "core/domain/fixed_ident.h"
-
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <string>
 #include <vector>
 
-#include "core/domain/fixed_ident_no_region.h"
+#include "core/domain/fixed_string.h"
 
-// FixedIdent / FixedIdentNoRegion back the sorted-vector indices that every
+// FixedIdent / FixedName8 back the sorted-vector indices that every
 // binary-search lookup relies on, so their ordering and round-trip must be
 // exact. (Overflow-clamp is deliberately not exercised here: it asserts in debug
 // -- the build these tests run under -- and only clamps in release.)
 
 using bf::FixedIdent;
-using bf::FixedIdentNoRegion;
+using bf::FixedName8;
 using bf::Ident;
 
 TEST_CASE("FixedIdent: round-trips ident and region", "[unit][fixed_ident]") {
@@ -71,24 +69,23 @@ TEST_CASE("FixedIdent: sort + binary search agree", "[unit][fixed_ident]") {
   CHECK_FALSE(std::binary_search(v.begin(), v.end(), absent));
 }
 
-TEST_CASE("FixedIdentNoRegion: round-trips and orders", "[unit][fixed_ident]") {
-  const FixedIdentNoRegion f = FixedIdentNoRegion::From("KIKR");
+TEST_CASE("FixedName8: round-trips and orders", "[unit][fixed_ident]") {
+  const FixedName8 f = FixedName8::From("KIKR");
   CHECK(f.View() == "KIKR");
-  CHECK(f == FixedIdentNoRegion::From("KIKR"));
-  CHECK_FALSE(f == FixedIdentNoRegion::From("KNWL"));
+  CHECK(f == FixedName8::From("KIKR"));
+  CHECK_FALSE(f == FixedName8::From("KNWL"));
 
   // Ordering: memcmp then length, so a prefix sorts before the longer string.
-  CHECK(FixedIdentNoRegion::From("KIK") < FixedIdentNoRegion::From("KIKR"));
-  CHECK(FixedIdentNoRegion::From("KIKR") < FixedIdentNoRegion::From("KNWL"));
-  CHECK_FALSE(FixedIdentNoRegion::From("KNWL") < FixedIdentNoRegion::From("KNWL"));
+  CHECK(FixedName8::From("KIK") < FixedName8::From("KIKR"));
+  CHECK(FixedName8::From("KIKR") < FixedName8::From("KNWL"));
+  CHECK_FALSE(FixedName8::From("KNWL") < FixedName8::From("KNWL"));
 }
 
-TEST_CASE("FixedIdentNoRegion: sort + binary search agree", "[unit][fixed_ident]") {
-  std::vector<FixedIdentNoRegion> v = {
-      FixedIdentNoRegion::From("ZGGG"), FixedIdentNoRegion::From("KIKR"),
-      FixedIdentNoRegion::From("KNWL"), FixedIdentNoRegion::From("ZHHH")};
+TEST_CASE("FixedName8: sort + binary search agree", "[unit][fixed_ident]") {
+  std::vector<FixedName8> v = {FixedName8::From("ZGGG"), FixedName8::From("KIKR"),
+                               FixedName8::From("KNWL"), FixedName8::From("ZHHH")};
   std::sort(v.begin(), v.end());
   CHECK(std::is_sorted(v.begin(), v.end()));
-  CHECK(std::binary_search(v.begin(), v.end(), FixedIdentNoRegion::From("KNWL")));
-  CHECK_FALSE(std::binary_search(v.begin(), v.end(), FixedIdentNoRegion::From("KZZZ")));
+  CHECK(std::binary_search(v.begin(), v.end(), FixedName8::From("KNWL")));
+  CHECK_FALSE(std::binary_search(v.begin(), v.end(), FixedName8::From("KZZZ")));
 }

@@ -8,8 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/domain/fixed_ident.h"
-#include "core/domain/fixed_ident_no_region.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/waypoint.h"
 #include "core/graph/nav_graph.h"
 #include "io/cache/graph_snapshot.h"
@@ -192,9 +191,9 @@ class GraphBuilder {
   // lookup penalty that is immaterial off the A* hot path (endpoint resolution
   // only).
   std::vector<std::pair<FixedIdent, int>> ident_index_;  // sorted by (ident,region) -> vertex
-  std::vector<std::pair<FixedIdentNoRegion, int>>
+  std::vector<std::pair<FixedName8, int>>
       ident_all_;  // sorted by ident; equal range = all vertices sharing the ident
-  std::vector<std::pair<FixedIdentNoRegion, int>> airport_index_;  // sorted by ICAO -> vertex
+  std::vector<std::pair<FixedName8, int>> airport_index_;  // sorted by ICAO -> vertex
 };
 
 }  // namespace bf

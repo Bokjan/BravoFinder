@@ -144,8 +144,8 @@ TEST_CASE("query: airway lookup returns directed segments", "[integration][query
   CHECK(r[0]->name == "Y28");
   CHECK_FALSE(r[0]->segments.empty());
   for (const bf::AirwayLeg& s : r[0]->segments) {
-    CHECK_FALSE(s.from.empty());
-    CHECK_FALSE(s.to.empty());
+    CHECK_FALSE(s.from.View().empty());
+    CHECK_FALSE(s.to.View().empty());
     CHECK(s.distance_nm > 0.0);
   }
   CHECK_FALSE(r[1].has_value());

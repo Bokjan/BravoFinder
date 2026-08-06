@@ -300,7 +300,7 @@ std::string RenderAirways(OutputFormat fmt, const std::vector<std::string>& ids,
     const bf::AirwayInfo& a = *results[i];
     os << a.name << ": " << a.segments.size() << " segments\n";
     for (const bf::AirwayLeg& s : a.segments) {
-      os << "  " << s.from << " -> " << s.to << "  " << s.distance_nm << " NM  "
+      os << "  " << s.from.View() << " -> " << s.to.View() << "  " << s.distance_nm << " NM  "
          << (s.high ? "high" : "low") << "  FL" << s.base_fl << "-" << s.top_fl << "\n";
     }
   }
