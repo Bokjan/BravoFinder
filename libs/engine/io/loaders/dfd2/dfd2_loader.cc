@@ -22,6 +22,7 @@
 #include "core/domain/arinc_codes.h"
 #include "core/domain/coordinate.h"
 #include "core/domain/encoding_scale.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/mora_grid.h"
@@ -486,8 +487,16 @@ std::string ProcSql(std::string_view table, bool single_airport) {
 // 'T'); magnetic courses ('M'/blank) are used as-is.
 void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& proc,
                std::optional<int>& prev_seqno) {
+  // FixedIdent::kIdentCap = 7; skip legs whose waypoint ident is too long
+  // (matches dfd1 — do not silently truncate via FromParts in release).
+  const std::string wp_ident = ColumnText(stmt, c.wp_ident);
+  if (wp_ident.size() > FixedIdent::kIdentCap) {
+    BF_LOG_WARN("dfd2: skipping procedure leg with ident '{}' (too long for FixedIdent, {} > {})",
+                wp_ident, wp_ident.size(), FixedIdent::kIdentCap);
+    return;
+  }
   ProcedureLeg leg;
-  leg.fix = FixedIdent::FromParts(ColumnText(stmt, c.wp_ident), ColumnText(stmt, c.wp_icao));
+  leg.fix = FixedIdent::FromParts(wp_ident, ColumnText(stmt, c.wp_icao));
   leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
   const double course = ColumnDouble(stmt, c.course);
   const std::string flag = ColumnText(stmt, c.course_flag);

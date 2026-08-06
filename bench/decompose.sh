@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-DB="${1:-navdata/nav.bfdb}"
+DB="${1:-navdata/bfdb/nav.bfdb}"
 ROUNDS="${2:-30}"
 
 if [[ ! -f "$DB" ]]; then

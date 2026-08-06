@@ -37,7 +37,7 @@ const std::vector<std::pair<std::string, std::string>> kPairs = {
 }  // namespace
 
 int main(int argc, char** argv) {
-  const std::string db = argc > 1 ? argv[1] : "navdata/nav.bfdb";
+  const std::string db = argc > 1 ? argv[1] : "navdata/bfdb/nav.bfdb";
   const int rounds = argc > 2 ? std::atoi(argv[2]) : 30;
 
   // Optional altitude filter, e.g. "300-400" or "350". When given, every search

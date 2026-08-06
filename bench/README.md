@@ -80,7 +80,7 @@ cat > /tmp/prof_drv.cc <<'CPP'
 #include "core/routing/route_request.h"
 #include "io/nav_database.h"
 int main(int argc, char** argv){
-  auto nav = bf::NavDatabase::OpenCached(argc>1?argv[1]:"navdata/nav.bfdb");
+  auto nav = bf::NavDatabase::OpenCached(argc>1?argv[1]:"navdata/bfdb/nav.bfdb");
   if(!nav) return 1;
   bf::RouteRequest r; r.departure="KJFK"; r.arrival="KLAX"; r.k=10;
   (void)nav.value().FindRoutes(r);                 // warmup
