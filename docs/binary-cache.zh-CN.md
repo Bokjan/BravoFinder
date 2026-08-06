@@ -32,7 +32,7 @@ X-Plane 数据全量解析 + 建图有成本（解析 ARINC 424 尤甚）。冷�
 
 v3 起磁盘改为**逐顶点一条自包含 record**（`coord + ident 引用 + flags + kind`）：加一个 per-vertex 字段就是 record 里多一个字段，没有新平行数组、没有 size 不变量。**机场专属字段** （如 elevation）单独放一个**机场 record 段**（只 `[first_airport_vertex, V)` 的 ~1.5 万条），不摊到 25 万顶点上——语义与布局对齐，机场字段各归其位。
 
-刻意不上 TLV/字段级段目录：`.bfdb` 是本地 `bf build` 产物、非跨版本分发，加字段时 bump 容器 `format_version` + 重建缓存即可，跨版本兼容的价值不足以抵消其复杂度。（最近一次**布局变更**是 `format_version` 5→6：CIFP 每条 leg 增补 RNP / 转向 / 速度限制三字段，旧缓存被拒、`bf build` 重建；此后多为**无布局变更**的保护性 bump——写侧 bug 修好后退役旧版强制重建，完整演进与当前值以 `unified_cache.h` 的 `kFormatVersion` 注释为准，不在此复述以免过期。容器层确有一个**固定 3 项的段表**定位 graph/cifp/detail 三段，见第 8 节——那是分段容器的必需骨架，不是可扩展的字段级 TLV。）
+刻意不上 TLV/字段级段目录：`.bfdb` 是本地 `bf build` 产物、非跨版本分发，加字段时 bump 容器 `format_version` + 重建缓存即可，跨版本兼容的价值不足以抵消其复杂度。（容器 `format_version` 的**当前值与每次 bump 的缘由一律以 `unified_cache.h` 里 `kFormatVersion` 的注释为准**——本文不复述具体数值；它可能因布局变更（如某次为 CIFP leg 增补 RNP / 转向 / 速度限制三字段）或写侧 bug 修好后的保护性（poison）bump 而递增，旧缓存被拒后重跑 `bf build` 重建即可。容器层目前有 **3 项**的段表定位 graph/cifp/detail 三段，见第 8 节——那是分段容器的必需骨架，不是可扩展的字段级 TLV。）
 
 ## 4. 与 protobuf 的异同
 
@@ -81,14 +81,14 @@ uint8  level        // AirwayLevel low/high/both 的原始 enum 值（三态互�
 
 ```
 [file header]   magic "BFDB", format_version, section_count, cycle,
-                program_version, source_loader, data_dir, pool_len
-[section table] 固定 3 项，每项 (type U32, offset U64, length U64)；
-                offset==length==0 表示该段缺席
-[global pool]   pool_len 字节，三段共用（见第 6 节）
-[graph 段] [cifp 段] [detail 段]   顺序紧接，偏移由段表指定
+                program_version, source_loader, data_dir, pool_len, pool_crc
+[section table] 目前 3 项，每项 (type U32, crc U32, offset U64, length U64)；
+                crc 为段体 CRC-32C，offset==length==0 表示该段缺席
+[global pool]   pool_len 字节，三段共用（见第 6 节），pool_crc 覆盖整池
+[graph 段] [cifp 段] [detail 段]   顺序紧接，偏移由段表指定，各段带 crc
 ```
 
-- **pool 放头部而非尾部**：Writer 本就要 buffer 各段体（段表需要每段 offset/length），pool 在序列化中自然累积完成，写盘顺序 header→段表→pool→各段体，无额外成本；Reader 顺序读完 header+段表+pool（~1.5MB）后 pool 已就位，解析各段即时 resolve，不需 seek 到文件尾、不需全量读入。对 CIFP 按需尤其友好：读完 pool 与目录即可开始 `Fetch`，graph/detail 段可跳过。
+- **pool 放头部而非尾部**：Writer 本就要 buffer 各段体（段表需要每段 offset/length），pool 在序列化中自然累积完成，写盘顺序 header→段表→pool→各段体，无额外成本；Reader 顺序读完 header+段表+pool（含 pool_crc，~1.5MB）后 pool 已就位，解析各段即时 resolve，不需 seek 到文件尾、不需全量读入。对 CIFP 按需尤其友好：读完 pool 与目录即可开始 `Fetch`，graph/detail 段可跳过。
 - **CIFP 段**：`airport_count` + `ICAO→（段内相对偏移，段长）` 目录 + 每机场一段 bare body （无局部池，引用直指全局池）。段内相对偏移加上 CIFP 段的 `section_offset` 得绝对文件偏移。
 - **按需加载**（默认 `on-demand`）：`Open` 只读 header+段表+pool+CIFP 目录进内存（~3MB）， `Fetch(icao)` 才按绝对偏移**定位读**（pread / Windows `ReadFile`+`OVERLAPPED`）该段——启动仍毫秒级，不常驻全部程序；
 - **eager 模式**：`Open` 时 `FetchAll` 全量反序列化进内存并冻结（~102MB），之后无锁读，面向 Web/批量并发。
@@ -127,8 +127,8 @@ uint8  level        // AirwayLevel low/high/both 的原始 enum 值（三态互�
 
 缓存格式会演进，必须能干净拒绝不兼容的旧文件而非崩溃。三层版本：
 
-1. **程序 version**（CMake `project VERSION` → `libs/engine/core/version.h` 的 `kBravoFinderVersion` → `bf --version`）；
-2. **容器 `format_version`**（magic 「BFDB」，具体值以 `unified_cache.h` 的 `kFormatVersion` 为准，不在此复述以免过期），机器校验，不符走 `Result::Err(kFormatMismatch)`，提示重跑 `bf build`。**只此一个版本号**管全部布局——统一容器一次性产出三段，不存在「只改 graph 段但 CIFP 段保持旧版」的场景，故不设 per-section 版本号（那是过度设计）；
+1. **程序 version**（CMake `project VERSION` → `libs/engine/core/version.h.in` 构建期生成的 `version.h` 中的 `kBravoFinderVersion` → `bf --version`）；
+2. **容器 `format_version`**（magic 「BFDB」；当前值与每次 bump 的缘由以 `unified_cache.h` 的 `kFormatVersion` 注释为准，本文不记录具体数值），机器校验，不符走 `Result::Err(kFormatMismatch)`，提示重跑 `bf build`。**只此一个版本号**管全部布局——统一容器一次性产出三段，不存在「只改 graph 段但 CIFP 段保持旧版」的场景，故不设 per-section 版本号（那是过度设计）；
 3. **provenance**：程序 version + source_loader + AIRAC cycle 写进容器头。
 
 > 注：`build`（X-Plane `.dat` 头行的 `build YYYYMMDD`）已从格式中删除——它是 X-Plane 专有字段， Navigraph 通用元数据（`cycle_info.txt`/`cycle.json`）只有 `cycle` 和 `revision`，其余格式（iFMS、Little Navmap、CustomData）均无 `build`。统一格式只保留 `cycle` 作主键，`cycle=0` 表示无 AIRAC 出处。
@@ -138,6 +138,8 @@ uint8  level        // AirwayLevel low/high/both 的原始 enum 值（三态互�
 ## 11. 健壮性：损坏文件优雅报错，不崩溃
 
 反序列化面对的是可能损坏/截断/伪造的文件。所有从文件头读出的**计数字段**（顶点/边/airway/ 段数、串长）在 `resize` 之前都用「剩余字节 ÷ 每元素最小磁盘字节数」设上界，越界即走 `Result::Err`，绝不因 `bad_alloc`/`length_error` 崩溃。段表里每个存在的段偏移/段长在 `Open` 时与文件大小交叉校验；CIFP 段内相对偏移与 CIFP 段长交叉校验。这条「损坏走 Result 而非崩溃」是格式的正确性契约。
+
+除了解码期的边界校验，文件还带 **CRC-32C 完整性保护**：全局字符串池有 `pool_crc`、每个段体在段表里记一段 `crc U32`，各自覆盖自己的字节。这能抓住「位翻转落到了另一个合法值」这类字段级解码发现不了的**静默损坏**——比如某段距离 10.0 变成 9.99 仍在区间内、某个 enum 仍是合法码、某个 pool 引用仍能 resolve——这类错误不会被结构校验拦下，但 CRC 会。CRC 不匹配走 `Result::Err(kCacheCorrupt)`，与「版本不符」（`kFormatMismatch`）区分开（缓存层因此有两个独立的错误码）。
 
 ## 12. 小结
 

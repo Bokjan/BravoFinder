@@ -1,6 +1,6 @@
 # 程序建模与航路网衔接：ARINC 424 / CIFP
 
-> 这是 BravoFinder 工作量最大、也最能体现「真实」的部分：解析真实的 SID/STAR/进近程序，并把机场正确接入航路网。面向想理解「机场是怎么连上航路的」的读者。相关代码： `libs/engine/io/loaders/xplane12/cifp/`（解析器 + 衔接器）、`libs/engine/core/domain/procedure.h`。
+> 这是 BravoFinder 工作量最大、也最能体现「真实」的部分：解析真实的 SID/STAR/进近程序，并把机场正确接入航路网。面向想理解「机场是怎么连上航路的」的读者。相关代码： CIFP 解析器 `libs/engine/io/loaders/xplane12/cifp_parser.{h,cc}`、程序衔接器 `libs/engine/io/build/procedure_connector.{h,cc}`、`libs/engine/core/domain/procedure.h`。
 
 ## 1. 为什么机场不能「直连最近航路点」
 
@@ -89,11 +89,21 @@ DESIGN §4.4 最初设想：非定点 leg 会挡住程序接入，需要用航�
 
 CLI/JSON 会显式标注「RADAR VECTORS」或「APCH PROC」等，把「雷达引导 / 终端过渡 / 缺数据」分开——这是语义诚实，而非假装有一条 STAR。判断依据是该侧是否发布了程序、以及本次是否真的用了 STAR 或 approach。
 
-## 8. 单文件部署：CIFP 分段缓存
+## 8. DCT 回退如何高效找到最近在网 fix：DegreeGrid 空间索引
+
+前面几节讲到，当某侧没有可用程序（或程序全脱网）时，机场会**纯 DCT 回退**到航路网（`kDirect`，见 §7）：引擎必须把机场坐标连到「最近的在网 fix」。朴素做法是逐个顶点扫一遍全图取最近——每条查询都 O(V)，对一次性 CLI 也不可接受。BravoFinder 用一张 **`DegreeGrid` 经纬度网格索引**（`graph_builder.cc` 里的 `GraphBuilder::DegreeGrid`）把这一步降到接近 O(1)，它是 §6 里「按大圆取最近 on-network fix」那种回退在工程上的真正落点。
+
+**网格结构**。建图时把图里的航点（顶点区间中机场之前的航点）按「整度经纬度格」分桶：`KeyForCoord` 对纬度、经度各 `floor` 到整数度，打包成一个 64 位定宽格键 `(lat+90)*1000 + (lon+180)`——定宽类型保证 x86/ARM 上格键逐位一致（跨平台可移植，呼应 [binary-cache](binary-cache.zh-CN.md) 那篇的定宽取舍）。索引本身不是哈希表，而是三组排序/连续数组：`keys_`（排序去重后的格键）、`starts_`（每个格在 `ids_` 里的偏移）、`ids_`（按格归集的顶点号展平成一串）。这跟 `ident_index_` 等其它查找索引同构，比 `unordered_map` 省内存（~1.5 MB vs ~3.9 MB，无每格 vector 控制块、无哈希节点、无桶数组），且 `Near` 二分定位一个格、扫一段连续顶点号，零每格分配、cache 友好。
+
+**查询：先小半径、不够再扩**。`NearestOnNetwork(coord, count, inbound)` 用 `DegreeGrid::Near` 取候选，并按 `has_inbound_`/`has_outbound_` 掩码只留「在网」顶点（`inbound` 决定要入边还是出边，与 §4 的 on-network 判定同语义）。关键是它**不一次性扫全图**，而是按半径 `{2,4,8,16,32,64,128,180}` 度几何扩张：实际数据里半径 2–4 度已经远多于 `count` 个候选，循环提前退出、绝大多数顶点根本不被碰到；只有两极/远洋这类稀疏区才会扩到 180 度（全图扫描）兜底。扩张序列以 180 度（整球）封顶，保证稀疏区也能返回全局最近集——**与早期的 O(V) 全扫逐字节一致**，所以换了索引后航路输出不变。经度跨 ±180° 反子午线处做了 wrap，避免机场刚过 +180° 漏掉西边 −180° 附近的更近 fix。
+
+> 这条索引只服务「查最近在网 fix」这种几何查询，不参与 A* 搜索本身（A* 在 CSR 上跑，不碰网格）。它让 `kDirect` 这种纯 DCT 回退、以及种子端点的在网判定，都能在亚毫秒到几毫秒内完成，而不是每次查询扫一遍全图。
+
+## 9. 单文件部署：CIFP 分段缓存
 
 14838 个 CIFP 散文件不便部署。引擎把它们打包成统一 `.bfdb` 里的一个**分段 CIFP 段**（与 graph、 detail 同处一个文件、共用全局字符串池），按需加载单机场程序段，启动仍是毫秒级。这属于缓存工程，单独成文见 [binary-cache.zh-CN.md](binary-cache.zh-CN.md)。
 
-## 9. 小结
+## 10. 小结
 
 机场接入航路网这条链，环环相扣：
 

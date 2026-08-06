@@ -126,7 +126,7 @@ Lawler 之后再做一轮 profile（gprof，KJFK→KLAX k=10、400 轮、`-pg -O
 
 - 峰值 RSS 含图（lookup 排序数组 ~4MB + CSR 数组）、进程基线、以及程序段部分。
 - 内存紧凑化（2026-07）：per-vertex ident 与 ProcedureLeg.fix 改 12B `FixedIdent`、lookup 哈希表改排序数组 + 二分、WaypointKind 收窄 U8——on-demand 约省 ~27MB、eager 再省 ~41MB（fix 字段是 eager 的大头）。
-- CIFP 三字段（2026-07-14，`format_version` 6）：每条 leg 增补 RNP / 转向 / 速度限制（紧凑 u16/u16/char），整文件 +~3.6MB、eager RSS +~1MB；on-demand 不物化全 leg 故基本不变。
+- CIFP 三字段（2026-07-14，bump 容器 `format_version`）：每条 leg 增补 RNP / 转向 / 速度限制（紧凑 u16/u16/char），整文件 +~3.6MB、eager RSS +~1MB；on-demand 不物化全 leg 故基本不变。
 - on-demand 适合一次性 CLI 查询（启动省、只加载查到的机场）；eager 适合长驻服务/批量并发（全量常驻、之后无锁读），见 [thread-safety.zh-CN.md](thread-safety.zh-CN.md)。
 
 ## 6. 缓存文件大小
