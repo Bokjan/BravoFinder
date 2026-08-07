@@ -194,7 +194,7 @@ Result<CifpData> DeserializeSegment(std::span<const uint8_t> data, std::span<con
       const std::string fix_arinc424_icao_code = read_ref();
       Result<FixedIdent> fixed = FixedIdent::FromParts(fix_ident, fix_arinc424_icao_code);
       if (!fixed) {
-        return Result<CifpData>::Err(std::move(fixed).error());
+        return bad(std::format("invalid procedure fix ident: {}", fixed.error().message));
       }
       leg.fix = std::move(fixed).value();
       const uint8_t path_byte = br.U8();

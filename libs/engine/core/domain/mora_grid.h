@@ -49,17 +49,18 @@ class MoraGrid {
   }
 
   // The MORA flight level at a position, or 0 if unknown / out of range.
-  // Lon is wrapped so +180 maps onto the -180 column (the antimeridian seam of
-  // the 1-degree grid). Lat +90 is clamped into the +89 row (the north-pole cell
-  // has no separate row). Without this, MoraAt returned unknown at those exact
-  // boundaries and safety constraints would silently allow the edge.
+  // The antimeridian (+180) maps onto the -180 column and the north pole (+90)
+  // onto the +89 row (those exact grid seams have no own cell), so safety
+  // constraints do not silently treat the boundary as unknown. Only the exact
+  // boundary is remapped; coordinates beyond it (e.g. a corrupt 180.5) stay out
+  // of range and return 0.
   int16_t MoraAt(const Coordinate& c) const {
     int lat = FloorToInt(c.latitude);
     int lon = FloorToInt(c.longitude);
-    if (lat == 90) {
+    if (c.latitude == 90.0) {
       lat = 89;
     }
-    if (lon == 180) {
+    if (c.longitude == 180.0) {
       lon = -180;
     }
     const int idx = Index(lat, lon);

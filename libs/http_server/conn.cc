@@ -147,25 +147,28 @@ std::string HttpDate() {
   return std::string(buf, n);
 }
 
+// ASCII case-insensitive equality (HTTP header names are case-insensitive per
+// RFC 9110). Shared by the reserved-framing guard and request header lookup.
+bool AsciiIeq(std::string_view a, std::string_view b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    const auto ca = static_cast<unsigned char>(a[i]);
+    const auto cb = static_cast<unsigned char>(b[i]);
+    if (std::tolower(ca) != std::tolower(cb)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // True when `name` is a framing header the core always writes itself. Extra
 // headers must not override these (duplicate/conflicting framing breaks clients).
 bool IsReservedFramingHeader(std::string_view name) {
-  auto ascii_ieq = [](std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) {
-      return false;
-    }
-    for (size_t i = 0; i < a.size(); ++i) {
-      const auto ca = static_cast<unsigned char>(a[i]);
-      const auto cb = static_cast<unsigned char>(b[i]);
-      if (std::tolower(ca) != std::tolower(cb)) {
-        return false;
-      }
-    }
-    return true;
-  };
-  return ascii_ieq(name, "Content-Length") || ascii_ieq(name, "Content-Type") ||
-         ascii_ieq(name, "Connection") || ascii_ieq(name, "Date") ||
-         ascii_ieq(name, "Transfer-Encoding");
+  return AsciiIeq(name, "Content-Length") || AsciiIeq(name, "Content-Type") ||
+         AsciiIeq(name, "Connection") || AsciiIeq(name, "Date") ||
+         AsciiIeq(name, "Transfer-Encoding");
 }
 
 // Append the extra (name: value) headers after the framing headers. Reserved
@@ -254,21 +257,8 @@ std::string JsonError(const std::string& message) {
 }
 
 std::string HttpRequest::Header(const std::string& name) const {
-  auto ascii_ieq = [](std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) {
-      return false;
-    }
-    for (size_t i = 0; i < a.size(); ++i) {
-      const auto ca = static_cast<unsigned char>(a[i]);
-      const auto cb = static_cast<unsigned char>(b[i]);
-      if (std::tolower(ca) != std::tolower(cb)) {
-        return false;
-      }
-    }
-    return true;
-  };
   for (const auto& [hdr_name, value] : headers) {
-    if (ascii_ieq(hdr_name, name)) {
+    if (AsciiIeq(hdr_name, name)) {
       return value;
     }
   }

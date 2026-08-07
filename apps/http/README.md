@@ -67,7 +67,7 @@ Request body (`departure` and `arrival` required, the rest optional):
 
 - `departure` / `arrival`: airport ICAO or waypoint ident (case-insensitive).
 - `min_fl` / `max_fl`: inclusive cruise flight-level range (hundreds of feet); give only one for a single level. Setting either enables altitude-band / MORA filtering.
-- `level`: `none` (default) | `low` (prefer Victor low airways) | `high` (prefer Jet high airways).
+- `level`: `none` (default) | `low` (prefer Victor low airways) | `high` (prefer Jet high airways); matched case-sensitively, and any other value (including mixed case such as `Low`) is rejected with a 400. An empty string is treated as `none`.
 - `k`: number of candidate routes (Yen K-shortest), default 1, must be ≥ 1.
 - `departure_runway` / `arrival_runway`: restrict the SID / STAR to this runway (e.g. `RW31L`); empty = any.
 - `departure_sid` / `arrival_star`: pin a SID / STAR by name (e.g. `DEEZZ5`, or `DEEZZ5.TOWIN` to pin the transition); empty = auto.
