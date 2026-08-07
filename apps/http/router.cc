@@ -13,6 +13,7 @@
 
 #include "api_keys.h"
 #include "conn.h"  // http_server::Connection
+#include "core/version.h"
 #include "io/cache/bfdb_inventory.h"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -92,6 +93,19 @@ std::string StatusJson(const char* value) {
   return buffer.GetString();
 }
 
+// Program version for consumers (display / compatibility checks). Loop-thread
+// only — no database touch. Machine-readable semver only; the multi-line LGPL
+// banner stays on --version (see bf::service::VersionBanner).
+std::string VersionJson() {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("version");
+  writer.String(bf::kBravoFinderVersion);
+  writer.EndObject();
+  return buffer.GetString();
+}
+
 // Readiness handler: reached only when registry.Get(latest) succeeded, so the
 // server can open and serve the newest cycle. A resolve failure is turned into
 // 503 by the cycle_error_status below, never reaching this handler.
@@ -154,6 +168,11 @@ void Router::Handle(std::shared_ptr<http_server::Connection> conn,
   // Liveness: the process is up, so always 200 -- no database touched.
   if (req.method == "GET" && req.path == "/healthz") {
     conn->WriteResponse(http_server::kStatusOk, StatusJson("ok"), req.keep_alive);
+    return;
+  }
+  // Program version for consumers — loop-thread, no database.
+  if (req.method == "GET" && req.path == "/v1/version") {
+    conn->WriteResponse(http_server::kStatusOk, VersionJson(), req.keep_alive);
     return;
   }
   // The cycle list is an in-memory read of the (immutable) inventory.

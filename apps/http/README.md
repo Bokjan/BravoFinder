@@ -5,7 +5,7 @@ BravoFinder's HTTP query server: it exposes the `bf route` and `bf query` capabi
 ## What it is
 
 - Transport: **HTTP/1.1 + JSON** over a hand-rolled [libuv](https://github.com/libuv/libuv) (async I/O + worker threadpool) and [llhttp](https://github.com/nodejs/llhttp) (request parser) stack. One event-loop thread does all I/O; each route computation is offloaded to the threadpool, so one loop scales.
-- Capabilities: the nine query endpoints below (mirroring the CLI `route` / `query` subcommands), plus `/v1/cycles` and the `/healthz` / `/readyz` probes.
+- Capabilities: the nine query endpoints below (mirroring the CLI `route` / `query` subcommands), plus `/v1/cycles`, `/v1/version`, and the `/healthz` / `/readyz` probes.
 - Data: pointed at a **directory** of prebuilt `.bfdb` caches; serves one or more AIRAC cycles from it. It never parses raw data or writes files.
 
 ## Build and run
@@ -42,6 +42,7 @@ Flags: `--db-dir DIR`, `--host` (default `0.0.0.0`), `--port` (default `8080`), 
 | POST | `/v1/navaid-detail` | batch navaid detail (grouped) | 200 |
 | POST | `/v1/holds` | batch holding-pattern lookup (grouped) | 200 |
 | GET | `/v1/cycles` | list servable AIRAC cycles | 200 |
+| GET | `/v1/version` | program version (semver) | 200 |
 | GET | `/healthz` | liveness (process is up) | 200 |
 | GET | `/readyz` | readiness (newest cycle opens) | 200 / 503 |
 
@@ -147,6 +148,10 @@ Optional leg fields (`alt`, `rnp_nm`, `turn_dir`, `speed_limit_kt`) are omitted 
 
 Response `200`: `{"cycles": [{"cycle": 2601}, ...]}`, newest first.
 
+### GET `/v1/version`
+
+Response `200`: `{"version": "3.x.y"}` — the program semver (`kBravoFinderVersion`). Loop-thread only, no database. For display / compatibility checks by gateways; the multi-line LGPL copyright banner stays on `bf-http --version`.
+
 ### GET `/healthz` / `/readyz`
 
 - `/healthz` → always `200 {"status":"ok"}` (the process is up).
@@ -183,9 +188,10 @@ curl -s -X POST localhost:8080/v1/airports -d '{"ids":["KJFK","ZZZZ"]}'
 curl -s -X POST 'localhost:8080/v1/routes?cycle=2601' \
   -d '{"departure":"EGLL","arrival":"LFPG"}'
 
-# Probes and cycle list.
+# Probes, version, and cycle list.
 curl -s localhost:8080/healthz
 curl -s localhost:8080/readyz
+curl -s localhost:8080/v1/version
 curl -s localhost:8080/v1/cycles
 ```
 

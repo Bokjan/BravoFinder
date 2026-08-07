@@ -76,7 +76,7 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 
 区分「你传错了」（400）与「你没传错但无解」（422），是错误模型的核心。
 
-探针：`/healthz` 恒 200（进程存活）；`/readyz` 最新周期可打开才 200，否则 503（且开库可能有磁盘 I/O，故 readyz 也走 offload）。
+探针：`/healthz` 恒 200（进程存活）；`/readyz` 最新周期可打开才 200，否则 503（且开库可能有磁盘 I/O，故 readyz 也走 offload）。`GET /v1/version` 返回 `{"version":"<semver>"}`（程序版本，loop 线程即时回、不碰库），供网关展示 / 兼容判断；多行 LGPL 版权横幅仍只在 `bf-http --version`。
 
 ## MCP-over-HTTP 传输（`bf-mcp --transport http`）
 

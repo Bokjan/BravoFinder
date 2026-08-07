@@ -4,7 +4,8 @@
 # JSON body plus an HTTP-style status. None of the consumers depend on each
 # other; all depend here. This is an app-tier library (it pulls in rapidjson for
 # JSON rendering), kept out of libs/engine/ so the engine stays JSON-/network-free.
-add_library(bf_service_lib STATIC handlers.cc queries.cc render.cc registry.cc)
+add_library(bf_service_lib STATIC handlers.cc queries.cc render.cc registry.cc
+            version_banner.cc)
 # bf::http_status is header-only (http_status.h) — shares status codes with the
 # transport without linking bf_http_server / libuv into CLI consumers.
 target_link_libraries(bf_service_lib PUBLIC bf::bravofinder rapidjson::rapidjson

@@ -35,6 +35,7 @@ TEST_CASE("http server e2e: skipped on Windows", "[integration][http]") {
 #include <thread>
 
 #include "conn.h"
+#include "core/version.h"
 #include "io/cache/bfdb_inventory.h"
 #include "rapidjson/document.h"
 #include "registry.h"
@@ -280,6 +281,16 @@ TEST_CASE("http server end-to-end over a loopback socket", "[integration][http]"
     const std::string cycles = RoundTrip(port, Get("/v1/cycles", false));
     CHECK(StatusOf(cycles) == 200);
     CHECK(BodyOf(cycles).find("\"cycles\"") != std::string::npos);
+
+    const std::string version = RoundTrip(port, Get("/v1/version", false));
+    CHECK(StatusOf(version) == 200);
+    rapidjson::Document ver_doc;
+    ver_doc.Parse(BodyOf(version).c_str());
+    REQUIRE_FALSE(ver_doc.HasParseError());
+    REQUIRE(ver_doc.IsObject());
+    REQUIRE(ver_doc.HasMember("version"));
+    REQUIRE(ver_doc["version"].IsString());
+    CHECK(std::string(ver_doc["version"].GetString()) == bf::kBravoFinderVersion);
   }
 
   SECTION("find_routes success shape") {
