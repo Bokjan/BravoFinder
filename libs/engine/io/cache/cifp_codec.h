@@ -36,14 +36,16 @@ class CifpArchive {
   CifpArchive() = default;
 
   // Deserialize the segment for `icao` (case-sensitive; callers upper-case).
-  // Returns std::nullopt if the airport is not in the archive or its segment is
-  // corrupt. Reads only that segment, at its offset, from the shared handle;
+  // Ok(nullopt) = airport not in the archive (no procedures). Err(kCacheCorrupt)
+  // = I/O failure, CRC mismatch, or segment deserialize failure -- never conflated
+  // with "missing". Reads only that segment, at its offset, from the shared handle;
   // resolves string references against the in-memory global pool.
-  std::optional<CifpData> Fetch(const std::string& icao) const;
+  Result<std::optional<CifpData>> Fetch(const std::string& icao) const;
 
-  // Deserialize every airport's segment, returning an ICAO -> data map. Used for
-  // eager loading. Segments that fail to deserialize are skipped.
-  std::unordered_map<std::string, CifpData> FetchAll() const;
+  // Deserialize every airport's segment. Any single corrupt/unreadable segment
+  // fails the whole call with kCacheCorrupt (eager Open must not silently drop
+  // airports and pretend the cache is complete).
+  Result<std::unordered_map<std::string, CifpData>> FetchAll() const;
 
   // Whether the archive contains a segment for `icao`.
   bool Has(const std::string& icao) const { return Find(icao) != nullptr; }

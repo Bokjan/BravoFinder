@@ -73,10 +73,11 @@ TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integ
   bf::Result<bf::CifpData> direct = bf::CifpParser::Parse(EnsureXPlane12() + "/CIFP/KJFK.dat");
   REQUIRE(direct);
   auto fetched = u.value().cifp->Fetch("KJFK");
-  REQUIRE(fetched.has_value());
+  REQUIRE(fetched);
+  REQUIRE(fetched.value().has_value());
 
   const bf::CifpData& a = direct.value();
-  const bf::CifpData& b = fetched.value();
+  const bf::CifpData& b = *fetched.value();
   REQUIRE(a.procedures.size() == b.procedures.size());
   REQUIRE(a.runways.size() == b.runways.size());
   for (size_t i = 0; i < a.procedures.size(); ++i) {
@@ -227,7 +228,7 @@ TEST_CASE("cifp section: concurrent fetches on one archive are race-free", "[int
     threads.emplace_back([&, t]() {
       for (int rep = 0; rep < 20; ++rep) {
         auto data = archive.Fetch(icaos[(t + rep) % icaos.size()]);
-        if (data.has_value() && !data->procedures.empty()) {
+        if (data && data.value().has_value() && !data.value()->procedures.empty()) {
           found.fetch_add(1, std::memory_order_relaxed);
         }
       }
@@ -290,18 +291,26 @@ TEST_CASE("cifp codec: a byte-corrupted segment is rejected by its CRC", "[unit]
   bf::Result<bf::CifpArchive> ok_arch =
       bf::CifpCodec::OpenSection(ok_path, 0, body.size(), section_crc, pool_blob);
   REQUIRE(ok_arch);
-  REQUIRE(ok_arch.value().Fetch("KTTT").has_value());
+  {
+    auto ok_fetch = ok_arch.value().Fetch("KTTT");
+    REQUIRE(ok_fetch);
+    REQUIRE(ok_fetch.value().has_value());
+  }
 
   // Flip a byte inside the segment body. The directory prefix is untouched, so
   // OpenSection still passes; the segment's own CRC now mismatches and Fetch
-  // rejects it.
+  // returns kCacheCorrupt (not a silent "missing airport").
   body[kFirstProcTypeOffset] ^= 0x01;
   const std::string bad_path = TempPath("bad");
   write_body(bad_path);
   bf::Result<bf::CifpArchive> bad_arch =
       bf::CifpCodec::OpenSection(bad_path, 0, body.size(), section_crc, pool_blob);
   REQUIRE(bad_arch);
-  CHECK_FALSE(bad_arch.value().Fetch("KTTT").has_value());
+  {
+    auto bad_fetch = bad_arch.value().Fetch("KTTT");
+    REQUIRE_FALSE(bad_fetch);
+    CHECK(bad_fetch.error().code == bf::ErrorCode::kCacheCorrupt);
+  }
   std::remove(ok_path.c_str());
   std::remove(bad_path.c_str());
 }

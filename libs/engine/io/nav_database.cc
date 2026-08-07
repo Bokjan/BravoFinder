@@ -87,9 +87,14 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLo
       // Deserialize every airport up front into the procedure cache, then freeze
       // it: subsequent ProceduresFor calls only read existing entries, so they
       // need no lock (thread-safety contract holds with no shared mutable state).
-      std::unordered_map<std::string, CifpData> all = u.cifp->FetchAll();
-      db.procedure_cache_.reserve(all.size());
-      for (auto& entry : all) {
+      // A single corrupt segment fails the whole Open -- never drop airports and
+      // pretend the cache is complete (that would silently DCT-fallback).
+      Result<std::unordered_map<std::string, CifpData>> all = u.cifp->FetchAll();
+      if (!all) {
+        return Result<NavDatabase>::Err(std::move(all).error());
+      }
+      db.procedure_cache_.reserve(all.value().size());
+      for (auto& entry : all.value()) {
         db.procedure_cache_.emplace(entry.first,
                                     std::make_unique<CifpData>(std::move(entry.second)));
       }
@@ -152,20 +157,20 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
   return Result<uint32_t>::Ok(static_cast<uint32_t>(cifp_procedures.size()));
 }
 
-const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
+Result<const CifpData*> NavDatabase::ProceduresFor(const std::string& icao) const {
   // Moved-from instances have a null cache_mutex_ (the move ops are = default).
   // They are never meant to be queried (see the class comment), but unlike
   // LookupWaypoints/LookupAirports this path has no !builder_ early return, so
   // guard the lock explicitly: return "no procedures" rather than null-deref.
   if (!cache_mutex_) {
-    return nullptr;
+    return Result<const CifpData*>::Ok(nullptr);
   }
   // Eager mode: the cache was fully populated at Open and is now frozen, so a
   // plain read needs no lock (no concurrent insert can rehash it). A miss means
   // the airport simply has no procedures.
   if (cifp_eager_) {
     auto it = procedure_cache_.find(icao);
-    return it != procedure_cache_.end() ? it->second.get() : nullptr;
+    return Result<const CifpData*>::Ok(it != procedure_cache_.end() ? it->second.get() : nullptr);
   }
   // Fast path: return a cached result (including a cached "no procedures"
   // nullptr) under a brief lock.
@@ -173,20 +178,26 @@ const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
     std::lock_guard<std::mutex> guard(*cache_mutex_);
     auto it = procedure_cache_.find(icao);
     if (it != procedure_cache_.end()) {
-      return it->second.get();
+      return Result<const CifpData*>::Ok(it->second.get());
     }
   }
   // Parse outside the lock so concurrent queries for different airports do not
   // serialize on disk I/O. Two threads racing on the same airport will both
   // parse (harmless, redundant work). Source: the CIFP cache archive if one is
-  // loaded (an independent ifstream per fetch, thread-safety contract safe), else the loader
-  // parsing a source .dat on demand (Open path). With neither, the airport has
-  // no procedures.
+  // loaded (positional read on a shared handle, thread-safety contract safe),
+  // else the loader parsing a source .dat on demand (Open path). With neither,
+  // the airport has no procedures. Corrupt archive segments return Err and are
+  // NOT inserted as nullptr (that would permanently mask cache damage as
+  // "no SID/STAR").
   std::unique_ptr<CifpData> stored;
   if (cifp_archive_.has_value()) {
-    std::optional<CifpData> fetched = cifp_archive_->Fetch(icao);
-    if (fetched.has_value()) {
-      stored = std::make_unique<CifpData>(std::move(fetched).value());
+    Result<std::optional<CifpData>> fetched = cifp_archive_->Fetch(icao);
+    if (!fetched) {
+      BF_LOG_ERROR("CIFP fetch failed for {}: {}", icao, fetched.error().message);
+      return Result<const CifpData*>::Err(std::move(fetched).error());
+    }
+    if (fetched.value().has_value()) {
+      stored = std::make_unique<CifpData>(std::move(fetched.value()).value());
     }
   } else if (loader_) {
     std::optional<CifpData> parsed = loader_->LoadProcedure(source_dir_, icao);
@@ -200,7 +211,7 @@ const CifpData* NavDatabase::ProceduresFor(const std::string& icao) const {
   // actually lives in the cache.
   std::lock_guard<std::mutex> guard(*cache_mutex_);
   auto it = procedure_cache_.try_emplace(icao, std::move(stored)).first;
-  return it->second.get();
+  return Result<const CifpData*>::Ok(it->second.get());
 }
 
 void NavDatabase::BuildAirwayIndex() {

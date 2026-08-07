@@ -184,13 +184,15 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   REQUIRE(u.cifp.has_value());
   CHECK(u.cifp->Has("KTST"));
   auto fetched = u.cifp->Fetch("KTST");
-  REQUIRE(fetched.has_value());
-  REQUIRE(fetched->procedures.size() == 1);
-  CHECK(fetched->procedures[0].name == "TESTSID");
-  REQUIRE(fetched->procedures[0].legs.size() == 1);
-  CHECK(fetched->procedures[0].legs[0].fix.IdentView() == "WAYPT");
-  REQUIRE(fetched->runways.size() == 1);
-  CHECK(fetched->runways[0].ident == "04L");
+  REQUIRE(fetched);
+  REQUIRE(fetched.value().has_value());
+  const bf::CifpData& fetched_data = *fetched.value();
+  REQUIRE(fetched_data.procedures.size() == 1);
+  CHECK(fetched_data.procedures[0].name == "TESTSID");
+  REQUIRE(fetched_data.procedures[0].legs.size() == 1);
+  CHECK(fetched_data.procedures[0].legs[0].fix.IdentView() == "WAYPT");
+  REQUIRE(fetched_data.runways.size() == 1);
+  CHECK(fetched_data.runways[0].ident == "04L");
 
   // Detail section
   REQUIRE(u.detail.has_value());

@@ -158,19 +158,21 @@ class NavDatabase {
   std::vector<std::vector<HoldInfo>> LookupHolds(const std::vector<std::string>& fix_idents) const;
 
  private:
-  // Load (and cache) an airport's CIFP procedures on demand. Returns nullptr if
-  // the airport has no procedures. The cache accumulates across queries so a
-  // session of related queries pays each airport's parse cost only once. The
-  // source is the loaded CIFP archive if one is present (OpenCached path), else
-  // the loader parsing a source `.dat` on demand (Open path); if neither is
-  // available the airport simply has no procedures.
+  // Load (and cache) an airport's CIFP procedures on demand. Ok(nullptr) if the
+  // airport has no procedures. Err(kCacheCorrupt) if a cached segment is present
+  // but unreadable/corrupt -- never cached as "no procedures". The cache
+  // accumulates across queries so a session of related queries pays each
+  // airport's parse cost only once. The source is the loaded CIFP archive if one
+  // is present (OpenCached path), else the loader parsing a source `.dat` on
+  // demand (Open path); if neither is available the airport simply has no
+  // procedures.
   //
   // Thread-safe: cache_mutex_ guards only the map lookup/insert, never the disk
   // parse, so concurrent queries for different airports parse in parallel. The
   // returned pointer stays valid for the database's lifetime: the cache is
   // append-only (no erase) and stores unique_ptr values, so a CifpData's heap
   // address is stable even when a concurrent insert rehashes the map.
-  const CifpData* ProceduresFor(const std::string& icao) const BF_LIFETIMEBOUND;
+  Result<const CifpData*> ProceduresFor(const std::string& icao) const BF_LIFETIMEBOUND;
 
   // Build the airway-name -> segments index by scanning every graph edge once.
   // Called at the end of Open/OpenCached; the index is then frozen (read-only),

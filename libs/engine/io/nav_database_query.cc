@@ -57,8 +57,12 @@ std::vector<std::optional<AirportInfo>> NavDatabase::LookupAirports(
       continue;
     }
     const Ident& id = builder_->IdentOf(v);
+    Result<const CifpData*> cifp = ProceduresFor(up);
+    // Corrupt CIFP: still report the airport; has_procedures stays false rather
+    // than inventing SID/STAR presence. Route queries surface kCacheCorrupt.
+    const bool has_procedures = cifp && cifp.value() != nullptr;
     out[i] = AirportInfo{id.ident, id.arinc424_icao_code, builder_->graph().CoordOf(v),
-                         builder_->ElevationOf(v), ProceduresFor(up) != nullptr};
+                         builder_->ElevationOf(v), has_procedures};
   }
   return out;
 }
@@ -68,10 +72,11 @@ std::vector<std::optional<AirportProcedures>> NavDatabase::LookupProcedures(
   std::vector<std::optional<AirportProcedures>> out(icaos.size());
   for (size_t i = 0; i < icaos.size(); ++i) {
     const std::string up = ToUpper(icaos[i]);
-    const CifpData* cifp = ProceduresFor(up);
-    if (cifp == nullptr) {
+    Result<const CifpData*> cifp_r = ProceduresFor(up);
+    if (!cifp_r || cifp_r.value() == nullptr) {
       continue;
     }
+    const CifpData* cifp = cifp_r.value();
     AirportProcedures ap;
     ap.icao = up;
     ap.procedures.reserve(cifp->procedures.size());
@@ -108,10 +113,11 @@ std::optional<AirportProcedureDetail> NavDatabase::LookupProcedureDetail(
     const std::string& icao, const std::string& procedure_name) const {
   const std::string up_icao = ToUpper(icao);
   const std::string up_name = ToUpper(procedure_name);
-  const CifpData* cifp = ProceduresFor(up_icao);
-  if (cifp == nullptr) {
+  Result<const CifpData*> cifp_r = ProceduresFor(up_icao);
+  if (!cifp_r || cifp_r.value() == nullptr) {
     return std::nullopt;
   }
+  const CifpData* cifp = cifp_r.value();
   AirportProcedureDetail out;
   out.icao = up_icao;
   out.procedure = up_name;

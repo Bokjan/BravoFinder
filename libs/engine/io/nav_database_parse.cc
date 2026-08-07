@@ -225,20 +225,24 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // accept a hand-filed procedure name adjacent to its airport (the literal
   // "SID"/"STAR" keyword is handled separately below).
   auto airport_has_procedure = [&](const std::string& icao, const std::string& proc_name,
-                                   ProcedureType type) -> bool {
+                                   ProcedureType type) -> Result<bool> {
     if (icao.empty()) {
-      return false;
+      return Result<bool>::Ok(false);
     }
-    const CifpData* cifp = ProceduresFor(icao);
+    Result<const CifpData*> cifp_r = ProceduresFor(icao);
+    if (!cifp_r) {
+      return Result<bool>::Err(std::move(cifp_r).error());
+    }
+    const CifpData* cifp = cifp_r.value();
     if (cifp == nullptr) {
-      return false;
+      return Result<bool>::Ok(false);
     }
     for (const Procedure& p : cifp->procedures) {
       if (p.type == type && p.name == proc_name) {
-        return true;
+        return Result<bool>::Ok(true);
       }
     }
-    return false;
+    return Result<bool>::Ok(false);
   };
 
   // A procedure connector is recognized adjacent to its airport in either form:
@@ -249,14 +253,21 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // carries the literal keyword, matching FindRoutes output.
   std::string sid_name;
   bool dep_via_sid = false;
-  if (i < end && !dep_airport.empty() &&
-      (tokens[i] == kSidToken ||
-       airport_has_procedure(dep_airport, tokens[i], ProcedureType::kSid))) {
-    if (tokens[i] != kSidToken) {
-      sid_name = tokens[i];
+  if (i < end && !dep_airport.empty()) {
+    if (tokens[i] == kSidToken) {
+      dep_via_sid = true;
+      ++i;
+    } else {
+      Result<bool> has_sid = airport_has_procedure(dep_airport, tokens[i], ProcedureType::kSid);
+      if (!has_sid) {
+        return Result<Route>::Err(std::move(has_sid).error());
+      }
+      if (has_sid.value()) {
+        sid_name = tokens[i];
+        dep_via_sid = true;
+        ++i;
+      }
     }
-    dep_via_sid = true;
-    ++i;
   }
   // The airport-prepend step below emits the first leg, so a leading "AIRPORT
   // DCT" is redundant -- consume it. dep_explicit tracks that a SID or DCT
@@ -269,15 +280,24 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   }
   std::string star_name;
   bool arr_via_star = false;
-  if (end > i && !arr_airport.empty() &&
-      (tokens[end - 1] == kStarToken ||
-       airport_has_procedure(arr_airport, tokens[end - 1], ProcedureType::kStar))) {
-    if (tokens[end - 1] != kStarToken) {
-      star_name = tokens[end - 1];
+  if (end > i && !arr_airport.empty()) {
+    if (tokens[end - 1] == kStarToken) {
+      arr_via_star = true;
+      --end;
+      arr_explicit = true;
+    } else {
+      Result<bool> has_star =
+          airport_has_procedure(arr_airport, tokens[end - 1], ProcedureType::kStar);
+      if (!has_star) {
+        return Result<Route>::Err(std::move(has_star).error());
+      }
+      if (has_star.value()) {
+        star_name = tokens[end - 1];
+        arr_via_star = true;
+        --end;
+        arr_explicit = true;
+      }
     }
-    arr_via_star = true;
-    --end;
-    arr_explicit = true;
   }
 
   // Pure direct airport-to-airport link: "DEP DCT ARR" with no enroute fix -- the

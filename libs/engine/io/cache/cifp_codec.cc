@@ -208,7 +208,12 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
       leg.rnp_centinm = br.U16();
       leg.turn_dir = static_cast<char>(br.U8());
       leg.speed_limit_kt = br.U16();
-      leg.is_mapt = br.U8() != 0;
+      // Wire is_mapt is 0/1 only; any other byte is corrupt (not "truthy").
+      const uint8_t mapt = br.U8();
+      if (mapt > 1) {
+        return std::nullopt;
+      }
+      leg.is_mapt = mapt != 0;
     }
   }
   const uint32_t rwy_count = br.U32();
@@ -392,24 +397,31 @@ size_t CifpCodec::DirectoryPrefixLen(uint32_t airport_count) {
   return 4 + static_cast<size_t>(airport_count) * kDirEntrySize;
 }
 
-std::unordered_map<std::string, CifpData> CifpArchive::FetchAll() const {
+Result<std::unordered_map<std::string, CifpData>> CifpArchive::FetchAll() const {
   std::unordered_map<std::string, CifpData> out;
   out.reserve(index_.size());
   for (const auto& entry : index_) {
     const SegmentLoc& loc = entry.second;
     std::vector<uint8_t> bytes(loc.len);
     if (loc.len > 0 && !file_.ReadAt(bytes, loc.abs_off)) {
-      continue;
+      return Result<std::unordered_map<std::string, CifpData>>::Err(Error(
+          ErrorCode::kCacheCorrupt,
+          WithRebuildHint(std::format("CIFP segment read failed for {}", entry.first.View()))));
     }
     if (Crc32C::Compute(bytes) != loc.crc) {
-      continue;
+      return Result<std::unordered_map<std::string, CifpData>>::Err(Error(
+          ErrorCode::kCacheCorrupt,
+          WithRebuildHint(std::format("CIFP segment CRC mismatch for {}", entry.first.View()))));
     }
     std::optional<CifpData> data = DeserializeSegment(bytes, pool_);
-    if (data.has_value()) {
-      out.emplace(std::string(entry.first.View()), std::move(*data));
+    if (!data.has_value()) {
+      return Result<std::unordered_map<std::string, CifpData>>::Err(Error(
+          ErrorCode::kCacheCorrupt,
+          WithRebuildHint(std::format("CIFP segment decode failed for {}", entry.first.View()))));
     }
+    out.emplace(std::string(entry.first.View()), std::move(*data));
   }
-  return out;
+  return Result<std::unordered_map<std::string, CifpData>>::Ok(std::move(out));
 }
 
 const CifpArchive::SegmentLoc* CifpArchive::Find(const std::string& icao) const {
@@ -426,24 +438,34 @@ const CifpArchive::SegmentLoc* CifpArchive::Find(const std::string& icao) const 
   return nullptr;
 }
 
-std::optional<CifpData> CifpArchive::Fetch(const std::string& icao) const {
+Result<std::optional<CifpData>> CifpArchive::Fetch(const std::string& icao) const {
   const SegmentLoc* loc = Find(icao);
   if (loc == nullptr) {
-    return std::nullopt;
+    return Result<std::optional<CifpData>>::Ok(std::nullopt);
   }
   // Positional read on the shared handle: pread/ReadFile take an explicit offset
   // and touch no shared cursor, so concurrent fetches for different airports are
   // race-free without a lock (thread-safety contract). Bounds were validated at OpenSection.
   std::vector<uint8_t> bytes(loc->len);
   if (loc->len > 0 && !file_.ReadAt(bytes, loc->abs_off)) {
-    return std::nullopt;
+    return Result<std::optional<CifpData>>::Err(
+        Error(ErrorCode::kCacheCorrupt,
+              WithRebuildHint(std::format("CIFP segment read failed for {}", icao))));
   }
   // Verify the segment body before deserializing -- a bit flip into another valid
   // value silently corrupts a procedure/leg field that the decode fuses accept.
   if (Crc32C::Compute(bytes) != loc->crc) {
-    return std::nullopt;
+    return Result<std::optional<CifpData>>::Err(
+        Error(ErrorCode::kCacheCorrupt,
+              WithRebuildHint(std::format("CIFP segment CRC mismatch for {}", icao))));
   }
-  return DeserializeSegment(bytes, pool_);
+  std::optional<CifpData> data = DeserializeSegment(bytes, pool_);
+  if (!data.has_value()) {
+    return Result<std::optional<CifpData>>::Err(
+        Error(ErrorCode::kCacheCorrupt,
+              WithRebuildHint(std::format("CIFP segment decode failed for {}", icao))));
+  }
+  return Result<std::optional<CifpData>>::Ok(std::move(data));
 }
 
 }  // namespace bf

@@ -572,14 +572,18 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   // CIFP procedures connects through them (procedure-first); without CIFP it
   // falls back to DCT links to the nearest on-network waypoints (M1 behavior);
   // a plain waypoint connects as itself.
-  auto plan_endpoint = [&](const std::string& name, bool departure) -> EndpointPlan {
+  auto plan_endpoint = [&](const std::string& name, bool departure) -> Result<EndpointPlan> {
     const std::string up = ToUpper(name);
     EndpointPlan plan;
     const int airport = builder_->VertexByAirport(up);
     if (airport >= 0) {
       plan.airport_icao = up;
       const Coordinate apt = builder_->graph().CoordOf(airport);
-      const CifpData* cifp = ProceduresFor(up);
+      Result<const CifpData*> cifp_r = ProceduresFor(up);
+      if (!cifp_r) {
+        return Result<EndpointPlan>::Err(std::move(cifp_r).error());
+      }
+      const CifpData* cifp = cifp_r.value();
       if (cifp != nullptr) {
         for (const Procedure& p : cifp->procedures) {
           if (departure) {
@@ -599,7 +603,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
           if (!sel.empty() && !FilterConnectionsByName(plan.connections, sel)) {
             plan.connections.clear();
             plan.named_procedure_unmatched = true;
-            return plan;
+            return Result<EndpointPlan>::Ok(std::move(plan));
           }
         } else {
           plan.connections = ProcedureConnector::BuildArrival(*cifp, apt, *builder_, rwy);
@@ -609,7 +613,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
             if (!FilterConnectionsByName(plan.connections, sel)) {
               plan.connections.clear();
               plan.named_procedure_unmatched = true;
-              return plan;
+              return Result<EndpointPlan>::Ok(std::move(plan));
             }
           } else if (plan.connections.empty()) {
             plan.connections = ProcedureConnector::BuildApproachArrival(*cifp, apt, *builder_, rwy);
@@ -620,7 +624,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
       } else if (!(departure ? request.departure_sid : request.arrival_star).empty()) {
         // A procedure was named but the airport has no CIFP data at all.
         plan.named_procedure_unmatched = true;
-        return plan;
+        return Result<EndpointPlan>::Ok(std::move(plan));
       }
       if (plan.connections.empty()) {
         // No usable procedures: fall back to DCT links to the nearest
@@ -631,17 +635,21 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         plan.connections =
             ProcedureConnector::BuildDctFallback(apt, *builder_, 5, /*arrival=*/!departure);
       }
-      return plan;
+      return Result<EndpointPlan>::Ok(std::move(plan));
     }
     // A bare ident is no longer accepted as a route endpoint: idents are not
     // globally unique, and silently picking one region's match would put the
     // whole route on the wrong endpoint. The caller must use an airport ICAO or
     // a (ident, region) pair. With no airport and no ident hit, plan.connections
     // stays empty, so the caller reports an "unknown endpoint" error.
-    return plan;
+    return Result<EndpointPlan>::Ok(std::move(plan));
   };
 
-  EndpointPlan dep = plan_endpoint(request.departure, /*departure=*/true);
+  Result<EndpointPlan> dep_r = plan_endpoint(request.departure, /*departure=*/true);
+  if (!dep_r) {
+    return Result<Routes>::Err(std::move(dep_r).error());
+  }
+  EndpointPlan dep = std::move(dep_r).value();
   if (dep.named_procedure_unmatched) {
     return Result<Routes>::Err(Error(ErrorCode::kProcedureNotFound,
                                      "departure airport " + request.departure +
@@ -652,7 +660,11 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         ErrorCode::kAirportNotFound,
         "unknown departure: " + request.departure + " (use an airport ICAO code, e.g. KLAX)"));
   }
-  EndpointPlan arr = plan_endpoint(request.arrival, /*departure=*/false);
+  Result<EndpointPlan> arr_r = plan_endpoint(request.arrival, /*departure=*/false);
+  if (!arr_r) {
+    return Result<Routes>::Err(std::move(arr_r).error());
+  }
+  EndpointPlan arr = std::move(arr_r).value();
   if (arr.named_procedure_unmatched) {
     return Result<Routes>::Err(Error(ErrorCode::kProcedureNotFound,
                                      "arrival airport " + request.arrival +
