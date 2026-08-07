@@ -280,18 +280,15 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
       have_current = true;
     }
 
-    // FixedIdent::kIdentCap = 7; skip legs whose fix ident is too long
-    // (matches dfd1/dfd2 — do not silently truncate via FromParts in release).
     const std::string fix_ident = FieldStr(f, kFixIdent);
-    if (fix_ident.size() > FixedIdent::kIdentCap) {
-      BF_LOG_WARN(
-          "xplane12 cifp: skipping procedure leg with ident '{}' (too long for FixedIdent, {} > "
-          "{})",
-          fix_ident, fix_ident.size(), FixedIdent::kIdentCap);
+    Result<FixedIdent> fixed = FixedIdent::FromParts(fix_ident, FieldStr(f, kFixRegion));
+    if (!fixed) {
+      BF_LOG_WARN("xplane12 cifp: skipping procedure leg with ident '{}': {}", fix_ident,
+                  fixed.error().message);
       continue;
     }
     ProcedureLeg leg;
-    leg.fix = FixedIdent::FromParts(fix_ident, FieldStr(f, kFixRegion));
+    leg.fix = std::move(fixed).value();
     leg.path_term = ParsePathTerminator(FieldStr(f, kPathTerm));
     leg.course_deg = static_cast<float>(FieldInt(f, kCourse) / 10.0);
     leg.distance_nm = static_cast<float>(FieldInt(f, kDistance) / 10.0);

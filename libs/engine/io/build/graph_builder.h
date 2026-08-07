@@ -11,6 +11,7 @@
 #include "core/domain/fixed_string.h"
 #include "core/domain/waypoint.h"
 #include "core/graph/nav_graph.h"
+#include "core/result.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/nav_data.h"
 
@@ -29,7 +30,9 @@ class GraphBuilder {
   // Build the graph from `data`. Airport connectivity is not baked into the CSR
   // (those static DCT edges were dead weight -- airport vertices are never
   // traversed); airports connect per-route via NearestOnNetwork at query time.
-  explicit GraphBuilder(const NavData& data);
+  // Invalid fixed-width ident fields reject the whole build rather than being
+  // silently truncated into unreachable or colliding graph keys.
+  static Result<GraphBuilder> Build(const NavData& data);
 
   // Assemble a builder directly from a deserialized cache snapshot (the `bf
   // route --db` path): the graph arrays and vertex metadata are moved in, and
@@ -164,6 +167,9 @@ class GraphBuilder {
   // Rebuild the three lookup indices from idents_ / first_airport_vertex_. Used
   // after the vertex metadata is in place (both build paths converge here).
   void RebuildIndices();
+
+  // Populate this initially empty builder from parsed source data.
+  Result<void> Populate(const NavData& data);
 
   // Rebuild grid_ from coords_ over the waypoint range [0, first_airport_vertex_).
   // Called by both build paths so NearestOnNetwork has an index regardless of

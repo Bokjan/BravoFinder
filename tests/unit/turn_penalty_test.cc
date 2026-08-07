@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <utility>
 
 #include "core/domain/coordinate.h"
 #include "core/graph/astar.h"
@@ -36,7 +37,9 @@ bf::GraphBuilder MakeReversalGraph() {
       {bf::Ident("S1", "ZZ"), bf::Ident("G", "ZZ"), seg},
       {bf::Ident("S2", "ZZ"), bf::Ident("G", "ZZ"), seg},
   };
-  return bf::GraphBuilder(d);
+  auto result = bf::GraphBuilder::Build(d);
+  REQUIRE(result);
+  return std::move(result).value();
 }
 
 }  // namespace

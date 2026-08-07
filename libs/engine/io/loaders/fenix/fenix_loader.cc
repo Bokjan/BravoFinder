@@ -672,9 +672,13 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
         if (wit != wp_info.end()) {
           const std::string& ident = wit->second.first;
           const std::string& icao_code = wit->second.second;
-          if (ident.size() <= FixedIdent::kIdentCap) {
-            leg.fix = FixedIdent::FromParts(ident, icao_code);
+          Result<FixedIdent> fixed = FixedIdent::FromParts(ident, icao_code);
+          if (!fixed) {
+            BF_LOG_WARN("fenix: skipping procedure leg with ident '{}': {}", ident,
+                        fixed.error().message);
+            return;
           }
+          leg.fix = std::move(fixed).value();
         }
       }
 

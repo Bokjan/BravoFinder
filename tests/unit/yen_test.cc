@@ -14,6 +14,12 @@
 
 namespace {
 
+bf::GraphBuilder MakeBuilder(const bf::NavData& data) {
+  auto result = bf::GraphBuilder::Build(data);
+  REQUIRE(result);
+  return std::move(result).value();
+}
+
 // Build a small network offering several distinct A->D paths so Yen has real
 // alternatives. Coordinates are spread along the equator; airways are two-way.
 //
@@ -46,7 +52,7 @@ bf::NavData MakeDiamondData() {
 }
 
 TEST_CASE("Yen returns K distinct paths ordered by cost", "[unit][yen]") {
-  bf::GraphBuilder builder(MakeDiamondData());
+  bf::GraphBuilder builder = MakeBuilder(MakeDiamondData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int dd = builder.VerticesByIdent("DDD")[0];
   REQUIRE(a >= 0);
@@ -68,7 +74,7 @@ TEST_CASE("Yen returns K distinct paths ordered by cost", "[unit][yen]") {
 }
 
 TEST_CASE("Yen with k=1 returns just the best path", "[unit][yen]") {
-  bf::GraphBuilder builder(MakeDiamondData());
+  bf::GraphBuilder builder = MakeBuilder(MakeDiamondData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int dd = builder.VerticesByIdent("DDD")[0];
   std::vector<bf::ShortestPath> paths =
@@ -80,7 +86,7 @@ TEST_CASE("Yen on unreachable goal returns empty", "[unit][yen]") {
   bf::NavData d;
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{0, 5}, {}}};
-  bf::GraphBuilder builder(d);
+  bf::GraphBuilder builder = MakeBuilder(d);
   const int a = builder.VerticesByIdent("AAA")[0];
   const int b = builder.VerticesByIdent("BBB")[0];
   std::vector<bf::ShortestPath> paths =
@@ -117,7 +123,7 @@ bf::NavData MakeTwoEntryData() {
 }
 
 TEST_CASE("multi-endpoint Yen yields candidates through different entry fixes", "[unit][yen]") {
-  bf::GraphBuilder builder(MakeTwoEntryData());
+  bf::GraphBuilder builder = MakeBuilder(MakeTwoEntryData());
   const int s1 = builder.VerticesByIdent("S1")[0];
   const int s2 = builder.VerticesByIdent("S2")[0];
   const int g = builder.VerticesByIdent("GGG")[0];
@@ -208,7 +214,7 @@ TEST_CASE("Yen golden candidate sequence on a lattice (Lawler regression guard)"
   // A 4-column, 3-row lattice: enough parallel paths that k=8 exercises spur
   // deviations at every position. If this signature changes, the k-shortest
   // result set or its order changed -- which the Lawler optimization must NOT do.
-  bf::GraphBuilder builder(MakeLatticeData(/*cols=*/4, /*rows=*/3));
+  bf::GraphBuilder builder = MakeBuilder(MakeLatticeData(/*cols=*/4, /*rows=*/3));
   const int start = builder.VerticesByIdent("L0r1")[0];
   const int goal = builder.VerticesByIdent("L3r1")[0];
   REQUIRE(start >= 0);
@@ -250,7 +256,7 @@ TEST_CASE("multi-source Yen golden sequence on a lattice (Lawler regression guar
   // Same lattice, but as a multi-source/multi-goal search with two seeded entry
   // columns and two seeded goal rows -- exercising the super-source spur (index
   // -1) path that Lawler's deviation index must represent.
-  bf::GraphBuilder builder(MakeLatticeData(/*cols=*/4, /*rows=*/3));
+  bf::GraphBuilder builder = MakeBuilder(MakeLatticeData(/*cols=*/4, /*rows=*/3));
   const std::vector<bf::SeededEndpoint> sources = {{builder.VerticesByIdent("L0r0")[0], 5.0},
                                                    {builder.VerticesByIdent("L0r1")[0], 5.0}};
   const std::vector<bf::SeededEndpoint> goals = {{builder.VerticesByIdent("L3r0")[0], 3.0},
@@ -550,7 +556,7 @@ TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (single-source)
   int checked = 0;
   for (int trial = 0; trial < 200; ++trial) {
     const int n = n_dist(rng);
-    bf::GraphBuilder builder(MakeRandomData(rng, n, n));
+    bf::GraphBuilder builder = MakeBuilder(MakeRandomData(rng, n, n));
     std::uniform_int_distribution<int> vpick(0, n - 1);
     const int start = vpick(rng);
     const int goal = vpick(rng);
@@ -577,7 +583,7 @@ TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (multi-source)"
   int checked = 0;
   for (int trial = 0; trial < 200; ++trial) {
     const int n = n_dist(rng);
-    bf::GraphBuilder builder(MakeRandomData(rng, n, n));
+    bf::GraphBuilder builder = MakeBuilder(MakeRandomData(rng, n, n));
     std::uniform_int_distribution<int> vpick(0, n - 1);
     std::uniform_real_distribution<double> seed(0.0, 20.0);
     // Two random sources and two random goals with random seeds.

@@ -131,9 +131,11 @@ std::vector<uint8_t> SerializeSegment(const CifpData& data, StringPool& pool) {
 
 // Deserialize a bare segment body, resolving string references against the
 // global pool blob (`pool`).
-std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
-                                           std::span<const uint8_t> pool) {
+Result<CifpData> DeserializeSegment(std::span<const uint8_t> data, std::span<const uint8_t> pool) {
   ByteReader br(data);
+  auto bad = [](std::string_view message) {
+    return Result<CifpData>::Err(Error(ErrorCode::kCacheCorrupt, std::string(message)));
+  };
 
   bool refs_ok = true;
   auto ref = [&](std::string& s) {
@@ -163,7 +165,7 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
   CifpData data_out;
   const uint32_t proc_count = br.U32();
   if (!br.ok() || !count_fits(proc_count, kProcedureHeaderSize)) {
-    return std::nullopt;
+    return bad("invalid procedure count");
   }
   data_out.procedures.resize(proc_count);
   for (uint32_t i = 0; i < proc_count; ++i) {
@@ -173,7 +175,7 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
     // or half-written same-version file could otherwise inject an invalid
     // ProcedureType that downstream switches handle as a silent wrong branch.
     if (type_byte > static_cast<uint8_t>(ProcedureType::kApproach)) {
-      return std::nullopt;
+      return bad("invalid procedure type");
     }
     p.type = static_cast<ProcedureType>(type_byte);
     p.route_type = br.I32();
@@ -182,7 +184,7 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
     ref(p.runway);
     const uint32_t leg_count = br.U32();
     if (!br.ok() || !count_fits(leg_count, kProcedureLegSize)) {
-      return std::nullopt;
+      return bad("invalid procedure leg count");
     }
     p.legs.resize(leg_count);
     for (uint32_t j = 0; j < leg_count; ++j) {
@@ -190,17 +192,21 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
       // Two pool refs (ident, region) -> FixedIdent, order matching Encode.
       const std::string fix_ident = read_ref();
       const std::string fix_arinc424_icao_code = read_ref();
-      leg.fix = FixedIdent::FromParts(fix_ident, fix_arinc424_icao_code);
+      Result<FixedIdent> fixed = FixedIdent::FromParts(fix_ident, fix_arinc424_icao_code);
+      if (!fixed) {
+        return Result<CifpData>::Err(std::move(fixed).error());
+      }
+      leg.fix = std::move(fixed).value();
       const uint8_t path_byte = br.U8();
       if (path_byte > static_cast<uint8_t>(PathTerminator::kUnknown)) {
-        return std::nullopt;
+        return bad("invalid procedure path terminator");
       }
       leg.path_term = static_cast<PathTerminator>(path_byte);
       leg.course_deg = static_cast<float>(br.F64());
       leg.distance_nm = static_cast<float>(br.F64());
       const uint8_t alt_byte = br.U8();
       if (alt_byte > static_cast<uint8_t>(AltConstraintKind::kBetween)) {
-        return std::nullopt;
+        return bad("invalid procedure altitude constraint");
       }
       leg.alt_kind = static_cast<AltConstraintKind>(alt_byte);
       leg.alt1_ft = br.I32();
@@ -211,14 +217,14 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
       // Wire is_mapt is 0/1 only; any other byte is corrupt (not "truthy").
       const uint8_t mapt = br.U8();
       if (mapt > 1) {
-        return std::nullopt;
+        return bad("invalid procedure MAPT flag");
       }
       leg.is_mapt = mapt != 0;
     }
   }
   const uint32_t rwy_count = br.U32();
   if (!br.ok() || !count_fits(rwy_count, kRunwaySize)) {
-    return std::nullopt;
+    return bad("invalid runway count");
   }
   data_out.runways.resize(rwy_count);
   for (uint32_t i = 0; i < rwy_count; ++i) {
@@ -230,15 +236,15 @@ std::optional<CifpData> DeserializeSegment(std::span<const uint8_t> data,
   }
 
   if (!br.ok() || !refs_ok) {
-    return std::nullopt;
+    return bad("invalid field or string reference");
   }
   // A well-formed segment body is consumed exactly; leftover bytes mean a count
   // was under-read (a corrupt/half-written same-version file), so reject it
   // (mirrors the graph / nav-detail section trailing-byte guards).
   if (br.remaining() != 0) {
-    return std::nullopt;
+    return bad("trailing bytes");
   }
-  return data_out;
+  return Result<CifpData>::Ok(std::move(data_out));
 }
 
 }  // namespace
@@ -295,7 +301,7 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
 Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t section_offset,
                                            uint64_t section_length, uint32_t section_crc,
                                            std::vector<uint8_t> pool_blob) {
-  auto bad = [&](const char* why) {
+  auto bad = [&](std::string_view why) {
     return Result<CifpArchive>::Err(Error(ErrorCode::kCacheCorrupt, WithRebuildHint(why)));
   };
 
@@ -377,15 +383,15 @@ Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t sec
       return bad("corrupt CIFP section: segment overlaps directory");
     }
     const uint64_t abs_off = section_offset + seg_rel;
-    // ICAO bounds were validated above, so the slice is in range. Real ICAOs
-    // are <=4 chars; an over-cap pool string cannot be a valid key and would
-    // trip FixedName8::From's assert -- reject as corrupt instead.
-    if (icao_len > FixedName8::kCap) {
-      return bad("corrupt CIFP section: ICAO longer than FixedName8::kCap");
-    }
+    // ICAO bounds were validated above, so the slice is in range. An over-cap
+    // pool string cannot form a valid fixed-width lookup key.
     const std::string_view icao_sv(reinterpret_cast<const char*>(archive.pool_.data() + icao_off),
                                    icao_len);
-    archive.index_.emplace_back(FixedName8::From(icao_sv),
+    Result<FixedName8> key = FixedName8::From(icao_sv);
+    if (!key) {
+      return bad(std::format("corrupt CIFP section: invalid ICAO key: {}", key.error().message));
+    }
+    archive.index_.emplace_back(std::move(key).value(),
                                 CifpArchive::SegmentLoc{abs_off, seg_len, seg_crc});
   }
   std::sort(archive.index_.begin(), archive.index_.end(),
@@ -413,22 +419,24 @@ Result<std::unordered_map<std::string, CifpData>> CifpArchive::FetchAll() const 
           ErrorCode::kCacheCorrupt,
           WithRebuildHint(std::format("CIFP segment CRC mismatch for {}", entry.first.View()))));
     }
-    std::optional<CifpData> data = DeserializeSegment(bytes, pool_);
-    if (!data.has_value()) {
-      return Result<std::unordered_map<std::string, CifpData>>::Err(Error(
-          ErrorCode::kCacheCorrupt,
-          WithRebuildHint(std::format("CIFP segment decode failed for {}", entry.first.View()))));
+    Result<CifpData> data = DeserializeSegment(bytes, pool_);
+    if (!data) {
+      return Result<std::unordered_map<std::string, CifpData>>::Err(
+          Error(ErrorCode::kCacheCorrupt,
+                WithRebuildHint(std::format("CIFP segment decode failed for {}: {}",
+                                            entry.first.View(), data.error().message))));
     }
-    out.emplace(std::string(entry.first.View()), std::move(*data));
+    out.emplace(std::string(entry.first.View()), std::move(data).value());
   }
   return Result<std::unordered_map<std::string, CifpData>>::Ok(std::move(out));
 }
 
 const CifpArchive::SegmentLoc* CifpArchive::Find(const std::string& icao) const {
-  if (icao.size() > FixedName8::kCap) {
+  Result<FixedName8> key_result = FixedName8::From(icao);
+  if (!key_result) {
     return nullptr;
   }
-  const FixedName8 key = FixedName8::From(icao);
+  const FixedName8& key = key_result.value();
   auto it = std::lower_bound(
       index_.begin(), index_.end(), key,
       [](const std::pair<FixedName8, SegmentLoc>& e, const FixedName8& k) { return e.first < k; });
@@ -459,13 +467,14 @@ Result<std::optional<CifpData>> CifpArchive::Fetch(const std::string& icao) cons
         Error(ErrorCode::kCacheCorrupt,
               WithRebuildHint(std::format("CIFP segment CRC mismatch for {}", icao))));
   }
-  std::optional<CifpData> data = DeserializeSegment(bytes, pool_);
-  if (!data.has_value()) {
+  Result<CifpData> data = DeserializeSegment(bytes, pool_);
+  if (!data) {
     return Result<std::optional<CifpData>>::Err(
         Error(ErrorCode::kCacheCorrupt,
-              WithRebuildHint(std::format("CIFP segment decode failed for {}", icao))));
+              WithRebuildHint(std::format("CIFP segment decode failed for {}: {}", icao,
+                                          data.error().message))));
   }
-  return Result<std::optional<CifpData>>::Ok(std::move(data));
+  return Result<std::optional<CifpData>>::Ok(std::move(data).value());
 }
 
 }  // namespace bf

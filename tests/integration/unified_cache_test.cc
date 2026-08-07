@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -16,6 +17,12 @@
 #include "io/nav_data.h"
 
 namespace {
+
+bf::FixedIdent Fixed(std::string_view ident, std::string_view region) {
+  auto result = bf::FixedIdent::FromParts(ident, region);
+  REQUIRE(result);
+  return std::move(result).value();
+}
 
 // A unique temp path so parallel cases do not collide. Uses the platform temp
 // dir so the test runs on Windows (where /tmp is absent).
@@ -30,7 +37,7 @@ bf::GraphSnapshot MakeGraph() {
   bf::GraphSnapshot g;
   g.first_airport_vertex = 1;  // vertex 0 waypoint, vertex 1 airport
   g.coords = {{40.0, -73.0}, {41.0, -74.0}};
-  g.idents = {bf::FixedIdent::FromParts("WAYPT", "K6"), bf::FixedIdent::FromParts("KTST", "K6")};
+  g.idents = {Fixed("WAYPT", "K6"), Fixed("KTST", "K6")};
   g.kinds = {bf::WaypointKind::kFix, bf::WaypointKind::kOther};
   g.has_outbound = {1, 0};  // vertex 0 has an out-edge, vertex 1 has none
   g.has_inbound = {0, 1};   // vertex 1 is the edge's destination, vertex 0 is not
@@ -48,7 +55,7 @@ bf::GraphSnapshot MakeGraph() {
 bf::CifpData MakeCifp() {
   bf::CifpData d{};
   bf::ProcedureLeg leg{};
-  leg.fix = bf::FixedIdent::FromParts("WAYPT", "K6");  // same string as a graph ident
+  leg.fix = Fixed("WAYPT", "K6");  // same string as a graph ident
   leg.path_term = bf::PathTerminator::kTF;
   bf::Procedure p{
       .type = bf::ProcedureType::kSid,

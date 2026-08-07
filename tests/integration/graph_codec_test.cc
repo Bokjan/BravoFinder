@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/base/env.h"
@@ -27,6 +29,12 @@ namespace {
 
 using bf::test::EnsureXPlane12;
 using bf::test::NavDataDir;
+
+bf::FixedIdent Fixed(std::string_view ident, std::string_view region) {
+  auto result = bf::FixedIdent::FromParts(ident, region);
+  REQUIRE(result);
+  return std::move(result).value();
+}
 
 // A unique temp path for a .bfdb produced by a test. Uses the test name so
 // parallel cases do not collide. Uses the platform temp dir so the test runs on
@@ -74,7 +82,7 @@ bf::GraphSnapshot MakeValidSnapshot() {
   s.edges = {edge};
   s.has_outbound = {1, 0};
   s.has_inbound = {0, 1};
-  s.idents = {bf::FixedIdent::FromParts("AAAAA", "K1"), bf::FixedIdent::FromParts("BBBBB", "K2")};
+  s.idents = {Fixed("AAAAA", "K1"), Fixed("BBBBB", "K2")};
   s.kinds = {bf::WaypointKind::kFix, bf::WaypointKind::kFix};
   s.airway_names = {"DCT"};
   return s;
@@ -125,8 +133,7 @@ bf::GraphSnapshot MakeFullFieldSnapshot() {
   s.edges = {e1, e2};
   s.has_outbound = {1, 0, 0};
   s.has_inbound = {0, 1, 1};
-  s.idents = {bf::FixedIdent::FromParts("AAAAA", "K1"), bf::FixedIdent::FromParts("BBBBB", "K2"),
-              bf::FixedIdent::FromParts("EGLL", "EG")};
+  s.idents = {Fixed("AAAAA", "K1"), Fixed("BBBBB", "K2"), Fixed("EGLL", "EG")};
   s.kinds = {bf::WaypointKind::kFix, bf::WaypointKind::kVor, bf::WaypointKind::kDme};
   s.airway_names = {"DCT", "J80"};
   // One airport elevation for vertex 2.

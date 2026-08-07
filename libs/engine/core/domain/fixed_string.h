@@ -2,13 +2,14 @@
 #pragma once
 
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <string_view>
 
 #include "core/base/attributes.h"
 #include "core/domain/ident.h"
+#include "core/result.h"
 
 namespace bf {
 
@@ -25,7 +26,7 @@ namespace bf {
 //
 // Capacities are sized from real AIRAC data (cycle 2601): fix/nav idents max 5
 // chars, ICAO region codes max 2. The caps below carry margin; overflow means
-// corrupt source data and trips an assert (debug) rather than truncating.
+// corrupt source data and is reported as an error rather than truncating.
 //
 // Layout: character payloads first (so `ident` starts at offset 0 / natural
 // alignment within an aligned element), trailing length bytes. NOT
@@ -71,24 +72,32 @@ struct alignas(1) FixedIdent {
   }
 
   // Pack an Ident into the fixed form. Overflow (a field longer than its cap)
-  // asserts in debug and is impossible on real data; in release the copy is
-  // clamped to the cap so a corrupt oversized field cannot overrun the buffer.
-  static FixedIdent FromIdent(const Ident& id) {
+  // is an error; callers must choose whether their context should reject or
+  // skip the invalid source record.
+  static Result<FixedIdent> FromIdent(const Ident& id) {
     return FromParts(id.ident, id.arinc424_icao_code);
   }
 
-  static FixedIdent FromParts(std::string_view id, std::string_view arinc424_icao_code) {
-    assert(id.size() <= kIdentCap && "ident overflows FixedIdent::kIdentCap");
-    assert(arinc424_icao_code.size() <= kArinc424IcaoCodeCap &&
-           "arinc424_icao_code overflows FixedIdent::kArinc424IcaoCodeCap");
+  static Result<FixedIdent> FromParts(std::string_view id, std::string_view arinc424_icao_code) {
+    if (id.size() > kIdentCap) {
+      return Result<FixedIdent>::Err(
+          Error(ErrorCode::kInvalidArgument,
+                std::format("ident '{}' exceeds FixedIdent::kIdentCap ({} > {})", id, id.size(),
+                            kIdentCap)));
+    }
+    if (arinc424_icao_code.size() > kArinc424IcaoCodeCap) {
+      return Result<FixedIdent>::Err(
+          Error(ErrorCode::kInvalidArgument,
+                std::format("ARINC 424 ICAO code '{}' exceeds FixedIdent::kArinc424IcaoCodeCap "
+                            "({} > {})",
+                            arinc424_icao_code, arinc424_icao_code.size(), kArinc424IcaoCodeCap)));
+    }
     FixedIdent f;
-    f.ident_len_ = static_cast<uint8_t>(id.size() < kIdentCap ? id.size() : kIdentCap);
-    f.arinc424_icao_code_len_ = static_cast<uint8_t>(
-        arinc424_icao_code.size() < kArinc424IcaoCodeCap ? arinc424_icao_code.size()
-                                                         : kArinc424IcaoCodeCap);
+    f.ident_len_ = static_cast<uint8_t>(id.size());
+    f.arinc424_icao_code_len_ = static_cast<uint8_t>(arinc424_icao_code.size());
     std::memcpy(f.ident_, id.data(), f.ident_len_);
     std::memcpy(f.arinc424_icao_code_, arinc424_icao_code.data(), f.arinc424_icao_code_len_);
-    return f;
+    return Result<FixedIdent>::Ok(std::move(f));
   }
 
   // Materialize back to an owned Ident. Both fields fit libstdc++'s SSO (15B),
@@ -141,12 +150,17 @@ struct alignas(1) FixedName {
     return len_ == o.len_ && std::memcmp(text_, o.text_, len_) == 0;
   }
 
-  static FixedName From(std::string_view s) {
-    assert(s.size() <= kCap && "name overflows FixedName::kCap");
+  // Pack a short lookup key. Overflow is an error rather than truncation.
+  static Result<FixedName> From(std::string_view s) {
+    if (s.size() > kCap) {
+      return Result<FixedName>::Err(
+          Error(ErrorCode::kInvalidArgument,
+                std::format("name '{}' exceeds FixedName::kCap ({} > {})", s, s.size(), kCap)));
+    }
     FixedName f;
-    f.len_ = static_cast<uint8_t>(s.size() < kCap ? s.size() : kCap);
+    f.len_ = static_cast<uint8_t>(s.size());
     std::memcpy(f.text_, s.data(), f.len_);
-    return f;
+    return Result<FixedName>::Ok(std::move(f));
   }
 
  private:

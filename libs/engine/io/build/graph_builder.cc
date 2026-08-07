@@ -99,7 +99,16 @@ class GraphBuilder::DegreeGrid {
   std::vector<int> ids_;       // flattened vertex ids, grouped by cell in key order
 };
 
-GraphBuilder::GraphBuilder(const NavData& data) {
+Result<GraphBuilder> GraphBuilder::Build(const NavData& data) {
+  GraphBuilder builder;
+  Result<void> populated = builder.Populate(data);
+  if (!populated) {
+    return Result<GraphBuilder>::Err(std::move(populated).error());
+  }
+  return Result<GraphBuilder>::Ok(std::move(builder));
+}
+
+Result<void> GraphBuilder::Populate(const NavData& data) {
   const int waypoint_count = static_cast<int>(data.waypoints.size());
   const int airport_count = static_cast<int>(data.airports.size());
   const int total = waypoint_count + airport_count;
@@ -111,14 +120,22 @@ GraphBuilder::GraphBuilder(const NavData& data) {
   airport_elevations_ft_.reserve(airport_count);
   for (int i = 0; i < waypoint_count; ++i) {
     const Waypoint& w = data.waypoints[i];
+    Result<FixedIdent> fixed = FixedIdent::FromIdent(w.ident);
+    if (!fixed) {
+      return Result<void>::Err(std::move(fixed).error());
+    }
     graph_.coords_.push_back(w.coord);
-    idents_.push_back(FixedIdent::FromIdent(w.ident));
+    idents_.push_back(std::move(fixed).value());
     kinds_.push_back(w.kind);
   }
   for (int i = 0; i < airport_count; ++i) {
     const Airport& a = data.airports[i];
+    Result<FixedIdent> fixed = FixedIdent::FromParts(a.icao, a.arinc424_icao_code);
+    if (!fixed) {
+      return Result<void>::Err(std::move(fixed).error());
+    }
     graph_.coords_.push_back(a.coord);
-    idents_.push_back(FixedIdent::FromParts(a.icao, a.arinc424_icao_code));
+    idents_.push_back(std::move(fixed).value());
     kinds_.push_back(WaypointKind::kFix);  // airports have no navaid kind
     airport_elevations_ft_.push_back(a.elevation_ft);
   }
@@ -219,6 +236,7 @@ GraphBuilder::GraphBuilder(const NavData& data) {
   // Build the resident spatial index over waypoints so NearestOnNetwork (the
   // per-route DCT fallback) is ~O(candidates) instead of an O(V) scan.
   RebuildGrid();
+  return Result<void>::Ok();
 }
 
 GraphBuilder::~GraphBuilder() = default;  // DegreeGrid is complete only in this TU.
@@ -247,14 +265,11 @@ int GraphBuilder::VertexByIdent(const FixedIdent& key) const {
 }
 
 int GraphBuilder::VertexByIdent(const Ident& ident) const {
-  // A query string longer than the fixed caps cannot match any stored key
-  // (real idents are <= 5 / regions <= 2). Short-circuit so FromIdent's
-  // build-side overflow assert never fires on a legitimate over-long query.
-  if (ident.ident.size() > FixedIdent::kIdentCap ||
-      ident.arinc424_icao_code.size() > FixedIdent::kArinc424IcaoCodeCap) {
+  Result<FixedIdent> key = FixedIdent::FromIdent(ident);
+  if (!key) {
     return -1;
   }
-  return VertexByIdent(FixedIdent::FromIdent(ident));
+  return VertexByIdent(key.value());
 }
 
 bool GraphBuilder::OnNetwork(int vertex) const { return HasOutbound(vertex) || HasInbound(vertex); }
@@ -323,10 +338,11 @@ std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int cou
 }
 
 std::vector<int> GraphBuilder::VerticesByIdent(const std::string& ident) const {
-  if (ident.size() > FixedName8::kCap) {
+  Result<FixedName8> key_result = FixedName8::From(ident);
+  if (!key_result) {
     return {};  // longer than any stored ident -> no match (see VertexByIdent)
   }
-  const FixedName8 key = FixedName8::From(ident);
+  const FixedName8& key = key_result.value();
   auto lo = std::lower_bound(
       ident_all_.begin(), ident_all_.end(), key,
       [](const std::pair<FixedName8, int>& e, const FixedName8& k) { return e.first < k; });
@@ -338,10 +354,11 @@ std::vector<int> GraphBuilder::VerticesByIdent(const std::string& ident) const {
 }
 
 int GraphBuilder::VertexByAirport(const std::string& icao) const {
-  if (icao.size() > FixedName8::kCap) {
+  Result<FixedName8> key_result = FixedName8::From(icao);
+  if (!key_result) {
     return -1;  // longer than any stored ICAO -> no match (see VertexByIdent)
   }
-  const FixedName8 key = FixedName8::From(icao);
+  const FixedName8& key = key_result.value();
   auto it = std::lower_bound(
       airport_index_.begin(), airport_index_.end(), key,
       [](const std::pair<FixedName8, int>& e, const FixedName8& k) { return e.first < k; });
@@ -373,10 +390,14 @@ void GraphBuilder::RebuildIndices() {
   // vertex order, then sorted once for binary-search lookup.
   for (int i = 0; i < first_airport_vertex_; ++i) {
     ident_index_.emplace_back(idents_[i], i);
-    ident_all_.emplace_back(FixedName8::From(idents_[i].IdentView()), i);
+    Result<FixedName8> key = FixedName8::From(idents_[i].IdentView());
+    assert(key.has_value());
+    ident_all_.emplace_back(std::move(key).value(), i);
   }
   for (int v = first_airport_vertex_; v < v_count; ++v) {
-    airport_index_.emplace_back(FixedName8::From(idents_[v].IdentView()), v);
+    Result<FixedName8> key = FixedName8::From(idents_[v].IdentView());
+    assert(key.has_value());
+    airport_index_.emplace_back(std::move(key).value(), v);
   }
   auto by_key = [](const auto& a, const auto& b) {
     if (a.first < b.first) {

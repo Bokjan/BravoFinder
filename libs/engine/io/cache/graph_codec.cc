@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <string_view>
 
 #include "io/cache/byte_io.h"
 #include "io/cache/cache_messages.h"
@@ -224,7 +225,7 @@ Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
                                          std::span<const uint8_t> pool) {
   ByteReader r(body);
 
-  auto bad = [](const char* why) {
+  auto bad = [](std::string_view why) {
     return Result<GraphSnapshot>::Err(Error(ErrorCode::kCacheCorrupt, WithRebuildHint(why)));
   };
 
@@ -426,7 +427,12 @@ Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
     const IdentRef& ir = ident_refs[i];
     const std::string id = ResolveRef(pool, ir.io, ir.il, refs_ok);
     const std::string reg = ResolveRef(pool, ir.ro, ir.rl, refs_ok);
-    snapshot.idents[i] = FixedIdent::FromParts(id, reg);
+    Result<FixedIdent> fixed = FixedIdent::FromParts(id, reg);
+    if (!fixed) {
+      return bad(
+          std::format("corrupt .bfdb: vertex ident {} is invalid: {}", i, fixed.error().message));
+    }
+    snapshot.idents[i] = std::move(fixed).value();
   }
   snapshot.airway_names.resize(airway_count);
   for (uint32_t i = 0; i < airway_count; ++i) {

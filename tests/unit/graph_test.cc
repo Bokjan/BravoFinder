@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <string_view>
+#include <utility>
 
 #include "core/constraints/altitude_constraints.h"
 #include "core/domain/fixed_string.h"
@@ -19,6 +21,18 @@ TEST_CASE("GraphEdge stays compact (16 bytes)", "[unit][graph]") {
 }
 
 namespace {
+
+bf::FixedIdent Fixed(std::string_view ident, std::string_view region) {
+  auto result = bf::FixedIdent::FromParts(ident, region);
+  REQUIRE(result);
+  return std::move(result).value();
+}
+
+bf::GraphBuilder MakeBuilder(const bf::NavData& data) {
+  auto result = bf::GraphBuilder::Build(data);
+  REQUIRE(result);
+  return std::move(result).value();
+}
 
 // Build a tiny dataset by hand: four waypoints in a line A-B-C-D connected by a
 // single two-way airway, plus a one-way airway used to test directionality.
@@ -47,7 +61,7 @@ bf::NavData MakeLineData() {
 }
 
 TEST_CASE("A* finds path along a linear airway", "[unit][graph]") {
-  bf::GraphBuilder builder(MakeLineData());
+  bf::GraphBuilder builder = MakeBuilder(MakeLineData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int d = builder.VerticesByIdent("DDD")[0];
   REQUIRE(a >= 0);
@@ -72,7 +86,7 @@ TEST_CASE("one-way airway is not traversable backward", "[unit][graph]") {
   fwd.direction = bf::AirwayDirection::kForward;  // AAA -> BBB only
   d.airways = {{bf::Ident("AAA", "ZZ"), bf::Ident("BBB", "ZZ"), fwd}};
 
-  bf::GraphBuilder builder(d);
+  bf::GraphBuilder builder = MakeBuilder(d);
   const int a = builder.VerticesByIdent("AAA")[0];
   const int b = builder.VerticesByIdent("BBB")[0];
 
@@ -96,7 +110,7 @@ TEST_CASE("a forward-only airway leaves its destination inbound-only", "[unit][g
   fwd.direction = bf::AirwayDirection::kForward;  // AAA -> BBB only
   d.airways = {{bf::Ident("AAA", "ZZ"), bf::Ident("BBB", "ZZ"), fwd}};
 
-  bf::GraphBuilder builder(d);
+  bf::GraphBuilder builder = MakeBuilder(d);
   const int a = builder.VerticesByIdent("AAA")[0];
   const int b = builder.VerticesByIdent("BBB")[0];
 
@@ -114,7 +128,7 @@ TEST_CASE("unreachable vertices report no path", "[unit][graph]") {
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{10, 10}, {}}};
   // No airways: the two points are disconnected.
-  bf::GraphBuilder builder(d);
+  bf::GraphBuilder builder = MakeBuilder(d);
   const int a = builder.VerticesByIdent("AAA")[0];
   const int b = builder.VerticesByIdent("BBB")[0];
   CHECK_FALSE(bf::FindShortestPath(builder.graph(), a, b).found);
@@ -124,7 +138,7 @@ TEST_CASE("multi-source/goal A* picks the cheapest seeded combination", "[unit][
   // A-B-C-D in a line (~60 NM per degree-step at the equator). Sources seed at
   // A and B; goals seed at C and D. The search must weigh seed costs against
   // enroute distance to choose the best end-to-end combination.
-  bf::GraphBuilder builder(MakeLineData());
+  bf::GraphBuilder builder = MakeBuilder(MakeLineData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int b = builder.VerticesByIdent("BBB")[0];
   const int c = builder.VerticesByIdent("CCC")[0];
@@ -172,7 +186,7 @@ TEST_CASE("multi-source/goal A* reports no path when disconnected", "[unit][grap
   bf::NavData d;
   d.waypoints = {bf::Waypoint{bf::Ident("AAA", "ZZ"), bf::Coordinate{0, 0}, {}},
                  bf::Waypoint{bf::Ident("BBB", "ZZ"), bf::Coordinate{10, 10}, {}}};
-  bf::GraphBuilder builder(d);  // no airways
+  bf::GraphBuilder builder = MakeBuilder(d);  // no airways
   const int a = builder.VerticesByIdent("AAA")[0];
   const int b = builder.VerticesByIdent("BBB")[0];
   bf::ShortestPath p =
@@ -190,7 +204,7 @@ TEST_CASE("VerticesByIdent returns every region match for a reused ident", "[uni
       bf::Waypoint{bf::Ident("SHARED", "LF"), bf::Coordinate{48.0, 3.0}, bf::WaypointKind::kFix},
       bf::Waypoint{bf::Ident("LONE", "K6"), bf::Coordinate{49.0, 2.0}, bf::WaypointKind::kFix},
   };
-  bf::GraphBuilder builder(d);
+  bf::GraphBuilder builder = MakeBuilder(d);
 
   // The reused ident resolves to all three regions, in insertion order.
   const std::vector<int> shared = builder.VerticesByIdent("SHARED");
@@ -232,7 +246,7 @@ TEST_CASE("SelectEdge returns the cost-model edge among parallel airways", "[uni
       {bf::Ident("AAA", "ZZ"), bf::Ident("BBB", "ZZ"), seg("V1", bf::AirwayLevel::kLow)},
       {bf::Ident("AAA", "ZZ"), bf::Ident("BBB", "ZZ"), seg("J1", bf::AirwayLevel::kHigh)},
   };
-  bf::GraphBuilder builder(d);
+  bf::GraphBuilder builder = MakeBuilder(d);
   const int a = builder.VerticesByIdent("AAA")[0];
   const int b = builder.VerticesByIdent("BBB")[0];
   REQUIRE(a >= 0);
@@ -278,7 +292,7 @@ TEST_CASE("constraints with a null request refuse edges, not UB", "[unit][graph]
   // A null request must not dereference null in release (NDEBUG) builds; the
   // guard refuses the edge so the search reports no path rather than crashing.
   // Regression for M8: the old bare assert let release dereference null here.
-  bf::GraphBuilder builder(MakeLineData());
+  bf::GraphBuilder builder = MakeBuilder(MakeLineData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int b = builder.VerticesByIdent("BBB")[0];
   const int d = builder.VerticesByIdent("DDD")[0];
@@ -301,7 +315,7 @@ TEST_CASE("procedure seed counts each leg span once, not twice", "[unit][graph]"
   // WalkOnNetworkFixes added the first leg's distance on top of the runway
   // bridge (runway->first-fix counted twice) AND added both the no-fix leg's
   // distance and the great-circle to the next fix (the between-fix span twice).
-  bf::GraphBuilder builder(MakeLineData());
+  bf::GraphBuilder builder = MakeBuilder(MakeLineData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int c = builder.VerticesByIdent("CCC")[0];
   // Airport half a degree off AAA, so the runway bridge is a measurable ~30 NM.
@@ -313,7 +327,7 @@ TEST_CASE("procedure seed counts each leg span once, not twice", "[unit][graph]"
   // already covers, so it must not enter the seed.
   bf::ProcedureLeg to_aaa;
   to_aaa.path_term = bf::PathTerminator::kTF;
-  to_aaa.fix = bf::FixedIdent::FromParts("AAA", "ZZ");
+  to_aaa.fix = Fixed("AAA", "ZZ");
   to_aaa.distance_nm = 5.0;
   // A no-fix heading leg whose distance stands in for the AAA->CCC span.
   bf::ProcedureLeg heading;
@@ -321,7 +335,7 @@ TEST_CASE("procedure seed counts each leg span once, not twice", "[unit][graph]"
   heading.distance_nm = 7.0;
   bf::ProcedureLeg to_ccc;
   to_ccc.path_term = bf::PathTerminator::kTF;
-  to_ccc.fix = bf::FixedIdent::FromParts("CCC", "ZZ");
+  to_ccc.fix = Fixed("CCC", "ZZ");
 
   bf::Procedure short_sid;
   short_sid.type = bf::ProcedureType::kSid;
@@ -352,7 +366,7 @@ TEST_CASE("connections are restricted to a procedure's published handoff fix", "
   // a STAR at its Initial Fix, a SID at its last fix-bearing leg. The fixes in
   // between are flown through, not joined at -- letting an airway join one of
   // them a mile off the threshold is what reduces a procedure to a stub.
-  bf::GraphBuilder builder(MakeLineData());
+  bf::GraphBuilder builder = MakeBuilder(MakeLineData());
   const int a = builder.VerticesByIdent("AAA")[0];
   const int c = builder.VerticesByIdent("CCC")[0];
   const bf::Coordinate airport{0.5, 0.0};
@@ -360,7 +374,7 @@ TEST_CASE("connections are restricted to a procedure's published handoff fix", "
   auto leg = [](bf::PathTerminator term, const char* ident) {
     bf::ProcedureLeg l;
     l.path_term = term;
-    l.fix = bf::FixedIdent::FromParts(ident, "ZZ");
+    l.fix = Fixed(ident, "ZZ");
     return l;
   };
 

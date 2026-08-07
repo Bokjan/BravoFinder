@@ -77,8 +77,13 @@ int main(int argc, char** argv) {
     const auto t0 = Clock::now();
     vec_index.reserve(V);
     for (size_t i = 0; i < V; ++i) {
-      vec_index.emplace_back(bf::FixedIdent::FromParts(keys[i].first, keys[i].second),
-                             static_cast<int>(i));
+      bf::Result<bf::FixedIdent> fixed = bf::FixedIdent::FromParts(keys[i].first, keys[i].second);
+      if (!fixed) {
+        std::fprintf(stderr, "invalid fixed ident in benchmark input: %s\n",
+                     fixed.error().message.c_str());
+        return 1;
+      }
+      vec_index.emplace_back(std::move(fixed).value(), static_cast<int>(i));
     }
     std::sort(vec_index.begin(), vec_index.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -94,7 +99,11 @@ int main(int argc, char** argv) {
   std::shuffle(order.begin(), order.end(), rng);
 
   auto vec_find = [&](const bf::Ident& q) -> int {
-    const bf::FixedIdent fq = bf::FixedIdent::FromParts(q.ident, q.arinc424_icao_code);
+    bf::Result<bf::FixedIdent> fixed = bf::FixedIdent::FromParts(q.ident, q.arinc424_icao_code);
+    if (!fixed) {
+      return -1;
+    }
+    const bf::FixedIdent& fq = fixed.value();
     auto it = std::lower_bound(vec_index.begin(), vec_index.end(), fq,
                                [](const std::pair<bf::FixedIdent, int>& e,
                                   const bf::FixedIdent& k) { return e.first < k; });

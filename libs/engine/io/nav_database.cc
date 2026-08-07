@@ -50,7 +50,11 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   db.cycle_ = data.value().cycle;
   db.mora_ = std::move(data.value().mora);
   db.msa_ = std::move(data.value().msa);
-  db.builder_ = std::make_unique<GraphBuilder>(data.value());
+  Result<GraphBuilder> builder = GraphBuilder::Build(data.value());
+  if (!builder) {
+    return Result<NavDatabase>::Err(std::move(builder).error());
+  }
+  db.builder_ = std::make_unique<GraphBuilder>(std::move(builder).value());
   // Reject a build that overflowed the uint16 airway_id space (see
   // GraphBuilder::airway_overflow); real AIRAC data never triggers this.
   if (db.builder_->airway_overflow()) {
@@ -246,8 +250,15 @@ void NavDatabase::BuildAirwayIndex() {
         continue;  // synthetic DCT edge, not a named airway
       }
       const std::string& name = builder_->AirwayName(e->airway_id);
-      const AirwayLeg leg{FixedName8::From(builder_->IdentOf(u).ident),
-                          FixedName8::From(builder_->IdentOf(e->to).ident),
+      Result<FixedName8> from = FixedName8::From(builder_->IdentOf(u).ident);
+      Result<FixedName8> to = FixedName8::From(builder_->IdentOf(e->to).ident);
+      if (!from || !to) {
+        BF_LOG_WARN("airway index: skipping edge with invalid endpoint name: {}",
+                    !from ? from.error().message : to.error().message);
+        continue;
+      }
+      const AirwayLeg leg{std::move(from).value(),
+                          std::move(to).value(),
                           e->distance_nm,
                           e->level == AirwayLevel::kHigh,
                           e->base_fl,
@@ -272,27 +283,23 @@ void NavDatabase::BuildAirwayIndex() {
   for (auto& entry : built) {
     const std::string& designator = entry.first;
     // Designators are <=5 chars in real AIRAC data; FixedName8 caps at 7. An
-    // over-cap name can never be looked up (FindAirway guards size > kCap),
-    // so skip it rather than storing a truncated, unresolvable key. Assert in
-    // debug, warn + skip in release.
-    if (designator.size() > FixedName8::kCap) {
-      assert(designator.size() <= FixedName8::kCap &&
-             "airway designator overflows FixedName8::kCap");
-      BF_LOG_WARN("airway index: skipping designator '{}' (too long for FixedName8, {} > {})",
-                  designator, designator.size(), FixedName8::kCap);
+    Result<FixedName8> key = FixedName8::From(designator);
+    if (!key) {
+      BF_LOG_WARN("airway index: skipping designator '{}': {}", designator, key.error().message);
       continue;
     }
-    airway_index_.emplace_back(FixedName8::From(designator), std::move(entry.second));
+    airway_index_.emplace_back(std::move(key).value(), std::move(entry.second));
   }
   std::sort(airway_index_.begin(), airway_index_.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
 }
 
 const AirwayInfo* NavDatabase::FindAirway(std::string_view name) const {
-  if (name.size() > FixedName8::kCap) {
+  Result<FixedName8> key_result = FixedName8::From(name);
+  if (!key_result) {
     return nullptr;
   }
-  const FixedName8 key = FixedName8::From(name);
+  const FixedName8& key = key_result.value();
   auto it = std::lower_bound(
       airway_index_.begin(), airway_index_.end(), key,
       [](const std::pair<FixedName8, AirwayInfo>& e, const FixedName8& k) { return e.first < k; });

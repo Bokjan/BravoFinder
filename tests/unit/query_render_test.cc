@@ -12,6 +12,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/domain/coordinate.h"
@@ -23,6 +25,12 @@ namespace {
 
 bf::service::OutputFormat Json() { return bf::service::OutputFormat::kJson; }
 bf::service::OutputFormat Text() { return bf::service::OutputFormat::kText; }
+
+bf::FixedName8 FixedName(std::string_view name) {
+  auto result = bf::FixedName8::From(name);
+  REQUIRE(result);
+  return std::move(result).value();
+}
 
 }  // namespace
 
@@ -117,8 +125,8 @@ TEST_CASE("RenderAirways: directed segment line", "[unit][render]") {
   bf::AirwayInfo a;
   a.name = "Y28";
   bf::AirwayLeg s;
-  s.from = bf::FixedName8::From("ABC");
-  s.to = bf::FixedName8::From("DEF");
+  s.from = FixedName("ABC");
+  s.to = FixedName("DEF");
   s.distance_nm = 12.5;
   s.high = false;
   s.base_fl = 120;
