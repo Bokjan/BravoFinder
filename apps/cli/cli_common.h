@@ -56,8 +56,9 @@ std::optional<FlRange> ParseAltSpec(const std::string& spec);
 std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string& error);
 
 // User-facing CLI failure line: "error: <message>\n" on stderr. Keeps the
-// stable kTextErrorPrefix contract (scripts/tests grep it); does not go through
-// BF_LOG_* (default-silent engine log, and [ERROR] file:line is a different shape).
+// stable kTextErrorPrefix contract (scripts/tests grep it). Deliberately not
+// BF_LOG_*: the CLI installs a stderr logger for engine diagnostics
+// ([LEVEL] file:line), while this channel stays a separate, greppable shape.
 // Two overloads: a single-argument form for an already-formatted string, and a
 // variadic template for a compile-time format string + args. Overload resolution
 // picks the template only for a literal format string (std::format_string's
