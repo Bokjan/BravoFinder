@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 
 #include "core/constraints/constraint.h"
@@ -27,7 +28,11 @@ class RandomizeConstraint : public Constraint {
   // Default relative jitter: 5% of each edge's length times a hash in [0, 1).
   static constexpr double kDefaultEps = 0.05;
 
-  explicit RandomizeConstraint(uint32_t seed, double eps = kDefaultEps) : seed_(seed), eps_(eps) {}
+  explicit RandomizeConstraint(uint32_t seed, double eps = kDefaultEps)
+      : seed_(seed), eps_(eps < 0.0 ? 0.0 : eps) {
+    // Negative eps would break A* admissibility; clamp rather than accept.
+    assert(eps >= 0.0);
+  }
 
   EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest&) const override {
     const double jitter = Hash01(seed_, ctx.edge.to, ctx.edge.airway_id);

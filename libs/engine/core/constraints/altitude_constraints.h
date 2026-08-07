@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
+#include <cassert>
+
 #include "core/constraints/constraint.h"
 
 namespace bf {
@@ -42,7 +44,9 @@ class AltitudeBandConstraint : public Constraint {
 class LevelPreferenceConstraint : public Constraint {
  public:
   explicit LevelPreferenceConstraint(double penalty_fraction = kDefaultPenaltyFraction)
-      : penalty_fraction_(penalty_fraction) {}
+      : penalty_fraction_(penalty_fraction < 0.0 ? 0.0 : penalty_fraction) {
+    assert(penalty_fraction >= 0.0);
+  }
 
   EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest& request) const override {
     if (request.level == LevelPreference::kNone) {

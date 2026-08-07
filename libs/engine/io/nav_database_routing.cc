@@ -306,7 +306,10 @@ AirwayRuleConstraint ResolveAirwayRules(const GraphBuilder& builder,
     if (rules[i].action == AirwayRule::Action::kBlock) {
       block_bits |= uint32_t{1} << i;
     } else {
-      fractions[i] = rules[i].penalty_fraction;
+      // Negative soft penalties break A* admissibility; clamp at the assembly
+      // boundary so a hand-built RouteRequest cannot inject them.
+      const double frac = rules[i].penalty_fraction;
+      fractions[i] = frac < 0.0 ? 0.0 : frac;
     }
   }
 

@@ -319,9 +319,50 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
 
 Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
   // Navigraph NavaidDetail, persisted for display and lookup-only queries.
-  // 0=Ident 1=Type 2=Elevation 3=Freq 4=Range
-  Result<SqliteStmt> s =
-      Prepare(conn, std::format("SELECT Ident, Type, Elevation, Freq, Range FROM {}", kTblNavaids));
+  // Region comes from Waypoints.NavaidID → WaypointLookup.Country (real Fenix
+  // data is 1:1 per NavaidID). Conflicting Countries for one NavaidID leave the
+  // region empty rather than inventing one.
+  std::unordered_map<int, std::string> region_by_navaid;
+  std::unordered_set<int> region_conflict;
+  {
+    Result<SqliteStmt> s = Prepare(
+        conn,
+        std::format(
+            "SELECT w.NavaidID, COALESCE(l.Country,'') FROM {} w LEFT JOIN {} l ON w.ID = l.ID "
+            "WHERE w.NavaidID IS NOT NULL AND w.NavaidID > 0",
+            kTblWaypoints, kTblWaypointLookup));
+    if (!s) {
+      return Result<void>::Err(s.error());
+    }
+    sqlite3_stmt* stmt = s.value().get();
+    Result<void> rows = ForEachRow(stmt, [&] {
+      const int nav_id = ColumnInt(stmt, 0);
+      const std::string country = ColumnText(stmt, 1);
+      if (region_conflict.count(nav_id) != 0) {
+        return;
+      }
+      auto it = region_by_navaid.find(nav_id);
+      if (it == region_by_navaid.end()) {
+        region_by_navaid.emplace(nav_id, country);
+        return;
+      }
+      if (it->second != country) {
+        BF_LOG_WARN(
+            "fenix: NavaidID {} has conflicting WaypointLookup.Country values ('{}' vs '{}'); "
+            "navaid detail region left empty",
+            nav_id, it->second, country);
+        region_by_navaid.erase(it);
+        region_conflict.insert(nav_id);
+      }
+    });
+    if (!rows) {
+      return Result<void>::Err(rows.error());
+    }
+  }
+
+  // 0=ID 1=Ident 2=Type 3=Elevation 4=Freq 5=Range
+  Result<SqliteStmt> s = Prepare(
+      conn, std::format("SELECT ID, Ident, Type, Elevation, Freq, Range FROM {}", kTblNavaids));
   if (!s) {
     return Result<void>::Err(s.error());
   }
@@ -329,13 +370,19 @@ Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
   sqlite3_stmt* stmt = s.value().get();
   Result<void> rows = ForEachRow(stmt, [&] {
     NavaidDetail detail;
-    detail.ident = Ident{ColumnText(stmt, 0), ""};
-    detail.kind = NavaidKindFromType(ColumnInt(stmt, 1));
-    detail.elev_ft = ColumnInt(stmt, 2);
+    const int nav_id = ColumnInt(stmt, 0);
+    std::string region;
+    auto rit = region_by_navaid.find(nav_id);
+    if (rit != region_by_navaid.end()) {
+      region = rit->second;
+    }
+    detail.ident = Ident{ColumnText(stmt, 1), region};
+    detail.kind = NavaidKindFromType(ColumnInt(stmt, 2));
+    detail.elev_ft = ColumnInt(stmt, 3);
     // Fenix Freq is packed BCD of freq*10000; decode to the natural unit (MHz for
     // VOR/DME/ILS, kHz for NDB) then scale to the freq_raw contract (kHz as-is
     // for NDBs, MHz*100 otherwise), matching DFD1/DFD2. Invalid BCD -> 0.
-    const double freq_value = DecodeFenixBcdFreq(ColumnInt(stmt, 3));
+    const double freq_value = DecodeFenixBcdFreq(ColumnInt(stmt, 4));
     if (freq_value < 0.0) {
       detail.freq_raw = 0;
     } else if (detail.kind == WaypointKind::kNdb) {
@@ -343,7 +390,7 @@ Result<void> LoadNavaidDetails(sqlite3* conn, NavData& data) {
     } else {
       detail.freq_raw = static_cast<int>(std::lround(freq_value * kCentiScale));
     }
-    detail.range_nm = ColumnDouble(stmt, 4);
+    detail.range_nm = ColumnDouble(stmt, 5);
     data.navaid_details.push_back(detail);
   });
   if (!rows) {

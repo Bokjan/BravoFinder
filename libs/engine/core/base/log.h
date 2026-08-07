@@ -247,14 +247,17 @@ AbortFn GetAbortHandler();
 // ostream buffer would otherwise be dropped by std::abort (it does not flush C++
 // streams). Abort goes through internal::InvokeFatalAbort (an injectable hook:
 // default std::abort, tests inject a throw stand-in).
-#define BF_LOG_FATAL(...)                                             \
-  do {                                                                \
-    ::bf::LogImpl(std::source_location::current(),                    \
-                  ::bf::LogLevel::kFatal __VA_OPT__(, ) __VA_ARGS__); \
-    if (auto _bf_l = ::bf::DefaultLogger()) {                         \
-      _bf_l->Flush();                                                 \
-    }                                                                 \
-    ::bf::internal::InvokeFatalAbort();                               \
+#define BF_LOG_FATAL(...)                                                                   \
+  do {                                                                                      \
+    ::std::shared_ptr<::bf::Logger> _bf_fatal_logger = ::bf::DefaultLogger();               \
+    if (_bf_fatal_logger && _bf_fatal_logger->Enabled(::bf::LogLevel::kFatal)) {            \
+      const ::std::source_location _bf_loc = ::std::source_location::current();             \
+      _bf_fatal_logger->Emit(::bf::LogLevel::kFatal,                                        \
+                             ::bf::FormatLine(::bf::LogLevel::kFatal, _bf_loc.file_name(),  \
+                                              _bf_loc.line(), ::std::format(__VA_ARGS__))); \
+      _bf_fatal_logger->Flush();                                                            \
+    }                                                                                       \
+    ::bf::internal::InvokeFatalAbort();                                                     \
   } while (false)
 
 }  // namespace bf

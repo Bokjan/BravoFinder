@@ -35,12 +35,16 @@ TEST_CASE("MoraGrid: negative coordinates floor toward -inf", "[unit][mora_grid]
 
 TEST_CASE("MoraGrid: out-of-range indices are rejected", "[unit][mora_grid]") {
   MoraGrid g;
-  // The grid is unwrapped: lat +90 and lon +180 have no row/column.
+  // SetCell still rejects lat +90 / lon +180 as write indices (no such cell).
   g.SetCell(90, 0, 300);   // ignored (lat out of range)
   g.SetCell(0, 180, 300);  // ignored (lon out of range)
   CHECK(g.Empty());
-  CHECK(g.MoraAt(Coordinate{90.0, 0.0}) == 0);
-  CHECK(g.MoraAt(Coordinate{0.0, 180.0}) == 0);
+  // MoraAt normalizes those exact query coordinates onto the adjacent in-range
+  // cell so safety constraints do not silently treat the seam as unknown.
+  g.SetCell(89, 0, 111);
+  g.SetCell(0, -180, 222);
+  CHECK(g.MoraAt(Coordinate{90.0, 0.0}) == 111);   // lat +90 -> row 89
+  CHECK(g.MoraAt(Coordinate{0.0, 180.0}) == 222);  // lon +180 -> col -180
   // The extreme valid corners do work.
   g.SetCell(89, 179, 210);
   g.SetCell(-90, -180, 220);

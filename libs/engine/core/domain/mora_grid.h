@@ -49,9 +49,19 @@ class MoraGrid {
   }
 
   // The MORA flight level at a position, or 0 if unknown / out of range.
+  // Lon is wrapped so +180 maps onto the -180 column (the antimeridian seam of
+  // the 1-degree grid). Lat +90 is clamped into the +89 row (the north-pole cell
+  // has no separate row). Without this, MoraAt returned unknown at those exact
+  // boundaries and safety constraints would silently allow the edge.
   int16_t MoraAt(const Coordinate& c) const {
-    const int lat = FloorToInt(c.latitude);
-    const int lon = FloorToInt(c.longitude);
+    int lat = FloorToInt(c.latitude);
+    int lon = FloorToInt(c.longitude);
+    if (lat == 90) {
+      lat = 89;
+    }
+    if (lon == 180) {
+      lon = -180;
+    }
     const int idx = Index(lat, lon);
     return idx >= 0 ? cells_[idx] : 0;
   }
@@ -95,11 +105,9 @@ class MoraGrid {
   }
 
   int Index(int lat, int lon) const {
-    // Longitudes are not wrapped: a cell at exactly +180 (or lat +90) has no
-    // column/row and is reported out of range, so MoraAt returns 0 (no lower
-    // bound) there. This is a known blind spot for antimeridian/polar legs,
-    // which sit at the extreme edge of the 1-degree grid; real ATS routes
-    // essentially never reach it, so the logic is left unwrapped by design.
+    // After MoraAt's +180/+90 normalization, lon is in [-180, 179] and lat in
+    // [-90, 89] for in-range coordinates. Values outside that (corrupt coords)
+    // still return unknown.
     if (lat < -90 || lat > 89 || lon < -180 || lon > 179) {
       return -1;
     }
