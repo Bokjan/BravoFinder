@@ -15,6 +15,8 @@ Server::Server(uv_loop_t* loop, RequestHandler& handler, const Limits& limits)
   handle_.data = this;
 }
 
+Server::~Server() { Close(); }
+
 int Server::Listen(const std::string& host, int port) {
   struct sockaddr_in addr;
   int rc = uv_ip4_addr(host.c_str(), port, &addr);

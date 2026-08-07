@@ -67,9 +67,11 @@ struct HttpRequest {
   Headers headers;
   bool keep_alive = false;
 
-  // The first value of a request header by (case-insensitive) name, or "" if
-  // absent. Linear scan: the header set is tiny and bounded by kMaxHeaderCount.
-  std::string Header(const std::string& lower_name) const;
+  // The first value of a request header by name, or "" if absent. Comparison is
+  // ASCII case-insensitive (request header names are stored lower-cased by the
+  // parser, but callers may pass mixed case). Linear scan: the header set is
+  // tiny and bounded by kMaxHeaderCount.
+  std::string Header(const std::string& name) const;
 };
 
 // The result of an offloaded unit of work, produced on a worker thread and
@@ -77,8 +79,11 @@ struct HttpRequest {
 // (already-serialized) response body; elapsed_ms is the compute cost surfaced as
 // an X-Elapsed-Ms header (0 => header omitted). content_type overrides the
 // response Content-Type (empty => the default "application/json", used by REST);
-// extra_headers are appended verbatim (e.g. an MCP Mcp-Session-Id). Transport-
-// local by design so the core does not depend on bf_service_lib.
+// extra_headers are appended after framing (e.g. an MCP Mcp-Session-Id). Framing
+// names (Content-Length / Content-Type / Connection / Date / Transfer-Encoding)
+// in extra_headers are dropped by the transport so handlers cannot override them.
+// WorkResult is transport-local by design so the core does not depend on
+// bf_service_lib.
 struct WorkResult {
   int status = kStatusOk;
   std::string body;

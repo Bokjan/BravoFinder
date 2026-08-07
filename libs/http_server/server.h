@@ -22,6 +22,12 @@ class Server {
   // Serve connections routed by `handler`, applying `limits` to each. Both must
   // outlive the Server. Does no I/O until Listen().
   Server(uv_loop_t* loop, RequestHandler& handler, const Limits& limits);
+  ~Server();
+
+  Server(const Server&) = delete;
+  Server& operator=(const Server&) = delete;
+  Server(Server&&) = delete;
+  Server& operator=(Server&&) = delete;
 
   // Bind `host:port` and start listening. Returns 0 on success or a libuv error
   // code. Pass port 0 to let the OS choose a free port (see BoundPort).
@@ -36,6 +42,8 @@ class Server {
   // In-flight connections and queued work are untouched and drain on their own;
   // once they finish, a loop running UV_RUN_DEFAULT has no active handles left
   // and returns — enabling a graceful shutdown with no fixed-delay settle.
+  // The destructor also calls Close() so a forgotten Close cannot leak the
+  // listening handle; prefer an explicit Close before destroying the loop.
   void Close();
 
  private:

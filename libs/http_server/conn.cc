@@ -147,9 +147,34 @@ std::string HttpDate() {
   return std::string(buf, n);
 }
 
-// Append the extra (name: value) headers verbatim after the framing headers.
+// True when `name` is a framing header the core always writes itself. Extra
+// headers must not override these (duplicate/conflicting framing breaks clients).
+bool IsReservedFramingHeader(std::string_view name) {
+  auto ascii_ieq = [](std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+      const auto ca = static_cast<unsigned char>(a[i]);
+      const auto cb = static_cast<unsigned char>(b[i]);
+      if (std::tolower(ca) != std::tolower(cb)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return ascii_ieq(name, "Content-Length") || ascii_ieq(name, "Content-Type") ||
+         ascii_ieq(name, "Connection") || ascii_ieq(name, "Date") ||
+         ascii_ieq(name, "Transfer-Encoding");
+}
+
+// Append the extra (name: value) headers after the framing headers. Reserved
+// framing names are dropped so a handler cannot forge Content-Length etc.
 void AppendExtraHeaders(std::vector<uint8_t>& out, const Headers& extra_headers) {
   for (const auto& [name, value] : extra_headers) {
+    if (IsReservedFramingHeader(name)) {
+      continue;
+    }
     AppendBytes(out, "\r\n");
     AppendHeaderNameSafe(out, name);
     AppendBytes(out, ": ");
@@ -228,9 +253,22 @@ std::string JsonError(const std::string& message) {
   return buffer.GetString();
 }
 
-std::string HttpRequest::Header(const std::string& lower_name) const {
-  for (const auto& [name, value] : headers) {
-    if (name == lower_name) {
+std::string HttpRequest::Header(const std::string& name) const {
+  auto ascii_ieq = [](std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+      const auto ca = static_cast<unsigned char>(a[i]);
+      const auto cb = static_cast<unsigned char>(b[i]);
+      if (std::tolower(ca) != std::tolower(cb)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  for (const auto& [hdr_name, value] : headers) {
+    if (ascii_ieq(hdr_name, name)) {
       return value;
     }
   }
@@ -393,15 +431,22 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
 
 void Connection::OnTimeout(uv_timer_t* t) {
   auto* conn = static_cast<Connection*>(t->data);
+  if (conn->streaming_) {
+    // An open SSE stream has been idle for io_timeout_ms with no WriteEvent.
+    // Close it so a forgotten placeholder stream cannot hold the connection
+    // (and its read buffer) forever.
+    conn->StartClose();
+    return;
+  }
   if (conn->awaiting_response_) {
     // A request is already dispatched: an offloaded route computation is running
-    // on the threadpool, or an SSE stream is open. The read phase is over, so the
-    // idle timer no longer applies -- it bounds slow/idle READS and keep-alive
-    // idle, NOT compute. The route computation is bounded (k is capped, the graph
-    // is fixed), so the worker will finish and its completion callback writes the
-    // response on the loop thread; the in-flight work holds a strong self-
-    // reference, so the connection cannot leak meanwhile. Closing here would race
-    // that write and silently drop a valid-but-slow response, so leave it be.
+    // on the threadpool. The read phase is over, so the idle timer no longer
+    // applies -- it bounds slow/idle READS and keep-alive idle, NOT compute. The
+    // route computation is bounded (k is capped, the graph is fixed), so the
+    // worker will finish and its completion callback writes the response on the
+    // loop thread; the in-flight work holds a strong self-reference, so the
+    // connection cannot leak meanwhile. Closing here would race that write and
+    // silently drop a valid-but-slow response, so leave it be.
     return;
   }
   if (!conn->closing_) {
@@ -600,8 +645,11 @@ void Connection::BeginStream(int status, const std::string& content_type,
     return;
   }
   // Mark streaming before the write so OnWriteDone leaves the connection open
-  // for subsequent events rather than resetting/closing.
+  // for subsequent events rather than resetting/closing. Re-arm the idle timer:
+  // open SSE streams are bounded by io_timeout_ms of inactivity (OnTimeout
+  // closes when streaming_ is set).
   streaming_ = true;
+  RestartTimer();
   WriteRaw(BuildStreamHeader(status, content_type, extra_headers), WriteMode::kStream);
 }
 
@@ -609,6 +657,8 @@ void Connection::WriteEvent(const std::string& chunk) {
   if (closing_ || !streaming_) {
     return;
   }
+  // Activity on the stream resets the idle clock.
+  RestartTimer();
   // SSE chunk is JSON text from the consumer; the wire payload is opaque bytes,
   // so move it into a vector here. Chunks are small ("data: ...\n\n").
   std::vector<uint8_t> payload(chunk.begin(), chunk.end());

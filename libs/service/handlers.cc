@@ -204,15 +204,22 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   request.arrival = args[kKeyArrival.data()].GetString();
   // Altitude is an inclusive flight-level range. min_fl/max_fl may be given
   // together for a band, or either alone (the other defaults to it) for a
-  // single level. Absent => no altitude/MORA filtering.
+  // single level. Absent => no altitude/MORA filtering. Present-but-wrong-type
+  // is a 400 (not a silent default) so clients cannot think a constraint stuck.
   {
-    const bool has_min = HasKey(args, kKeyMinFl) && args[kKeyMinFl.data()].IsInt();
-    const bool has_max = HasKey(args, kKeyMaxFl) && args[kKeyMaxFl.data()].IsInt();
-    if (has_min || has_max) {
+    const bool has_min_key = HasKey(args, kKeyMinFl);
+    const bool has_max_key = HasKey(args, kKeyMaxFl);
+    if (has_min_key && !args[kKeyMinFl.data()].IsInt()) {
+      return {JsonError(std::format("{} must be an integer", kKeyMinFl)), kStatusBadRequest};
+    }
+    if (has_max_key && !args[kKeyMaxFl.data()].IsInt()) {
+      return {JsonError(std::format("{} must be an integer", kKeyMaxFl)), kStatusBadRequest};
+    }
+    if (has_min_key || has_max_key) {
       const int min_fl =
-          has_min ? args[kKeyMinFl.data()].GetInt() : args[kKeyMaxFl.data()].GetInt();
+          has_min_key ? args[kKeyMinFl.data()].GetInt() : args[kKeyMaxFl.data()].GetInt();
       const int max_fl =
-          has_max ? args[kKeyMaxFl.data()].GetInt() : args[kKeyMinFl.data()].GetInt();
+          has_max_key ? args[kKeyMaxFl.data()].GetInt() : args[kKeyMinFl.data()].GetInt();
       if (min_fl > max_fl) {
         return {JsonError(std::format("{} must not exceed {}", kKeyMinFl, kKeyMaxFl)),
                 kStatusBadRequest};
@@ -237,18 +244,22 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
       request.altitude = bf::FlRange{min_fl, max_fl};
     }
   }
-  if (HasKey(args, kKeyLevel) && args[kKeyLevel.data()].IsString()) {
+  if (HasKey(args, kKeyLevel)) {
+    if (!args[kKeyLevel.data()].IsString()) {
+      return {JsonError(std::format("{} must be a string", kKeyLevel)), kStatusBadRequest};
+    }
     const std::string_view level = args[kKeyLevel.data()].GetString();
     if (level == kLevelLow) {
       request.level = bf::LevelPreference::kLow;
     } else if (level == kLevelHigh) {
       request.level = bf::LevelPreference::kHigh;
+    } else if (level == kLevelNone || level.empty()) {
+      request.level = bf::LevelPreference::kNone;
+    } else {
+      return {JsonError(std::format("{} must be one of '{}', '{}', or '{}'", kKeyLevel, kLevelLow,
+                                    kLevelHigh, kLevelNone)),
+              kStatusBadRequest};
     }
-    // Any other string (including "none", or an invalid "medium"/miscased value)
-    // intentionally leaves request.level at its kNone default. MCP clients get a
-    // first line of defense from the schema enum; HTTP has none, so silently
-    // mapping an unknown level to the no-preference default is the accepted
-    // fallback rather than a hard error.
   }
   if (HasKey(args, kKeyK)) {
     // A present-but-non-integer k (e.g. 3.5, or the string "3") must be rejected,
@@ -273,17 +284,28 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   if (request.k > kMaxK) {
     return {JsonError(std::format("{} must not exceed {}", kKeyK, kMaxK)), kStatusBadRequest};
   }
-  if (HasKey(args, kKeyDepartureRunway) && args[kKeyDepartureRunway.data()].IsString()) {
-    request.departure_runway = args[kKeyDepartureRunway.data()].GetString();
+  auto require_string = [&](std::string_view key,
+                            std::string& out) -> std::optional<HandlerResult> {
+    if (!HasKey(args, key)) {
+      return std::nullopt;
+    }
+    if (!args[key.data()].IsString()) {
+      return HandlerResult{JsonError(std::format("{} must be a string", key)), kStatusBadRequest};
+    }
+    out = args[key.data()].GetString();
+    return std::nullopt;
+  };
+  if (auto err = require_string(kKeyDepartureRunway, request.departure_runway)) {
+    return *err;
   }
-  if (HasKey(args, kKeyArrivalRunway) && args[kKeyArrivalRunway.data()].IsString()) {
-    request.arrival_runway = args[kKeyArrivalRunway.data()].GetString();
+  if (auto err = require_string(kKeyArrivalRunway, request.arrival_runway)) {
+    return *err;
   }
-  if (HasKey(args, kKeyDepartureSid) && args[kKeyDepartureSid.data()].IsString()) {
-    request.departure_sid = args[kKeyDepartureSid.data()].GetString();
+  if (auto err = require_string(kKeyDepartureSid, request.departure_sid)) {
+    return *err;
   }
-  if (HasKey(args, kKeyArrivalStar) && args[kKeyArrivalStar.data()].IsString()) {
-    request.arrival_star = args[kKeyArrivalStar.data()].GetString();
+  if (auto err = require_string(kKeyArrivalStar, request.arrival_star)) {
+    return *err;
   }
   // For the optional ID lists, tell "absent" (skip) from "present but bad"
   // (reject): a present list that is malformed or over the kMaxIdListSize cap is
@@ -300,7 +322,11 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   if (std::optional<std::string> err = ParseAirwayRules(args, request.airway_rules)) {
     return {JsonError(*err), kStatusBadRequest};
   }
-  if (HasKey(args, kKeyRandomSeed) && args[kKeyRandomSeed.data()].IsUint()) {
+  if (HasKey(args, kKeyRandomSeed)) {
+    if (!args[kKeyRandomSeed.data()].IsUint()) {
+      return {JsonError(std::format("{} must be an unsigned integer", kKeyRandomSeed)),
+              kStatusBadRequest};
+    }
     request.random_seed = args[kKeyRandomSeed.data()].GetUint();
   }
   if (HasKey(args, kKeyForcedPoints)) {
