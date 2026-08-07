@@ -380,11 +380,13 @@ std::vector<double> BuildBearingTable(const std::vector<SeededEndpoint>& endpoin
 // table (constant across all spur searches over the same goals) and a workspace
 // whose arrays are reused across searches (cleared in O(1) via its generation
 // stamp). This is the hot path -- the plain overloads above delegate here after
-// building a throwaway seed table and workspace. `goal_seed` must match `graph`
-// (size == VertexCount, built by BuildSeedTable from the goal set).
-// `source_bearing`/`goal_bearing` (size == VertexCount, from BuildBearingTable)
-// supply the procedure headings at the endpoints for the turn-angle penalty;
-// pass all--1 tables to disable endpoint turn penalties (e.g. unit-test seams).
+// building a throwaway seed table and workspace.
+//
+// Preconditions (debug-asserted): `goal_seed`, `source_bearing`, and
+// `goal_bearing` each have size == graph.VertexCount() (from BuildSeedTable /
+// BuildBearingTable). `source_bearing`/`goal_bearing` supply procedure headings
+// at the endpoints for the turn-angle penalty; pass all-kNoBearing tables to
+// disable endpoint turn penalties (e.g. unit-test seams).
 ShortestPath FindShortestPathMulti(const NavGraph& graph,
                                    const std::vector<SeededEndpoint>& sources,
                                    const std::vector<double>& goal_seed,

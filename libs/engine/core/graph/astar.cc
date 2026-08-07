@@ -2,6 +2,7 @@
 #include "core/graph/astar.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -223,6 +224,11 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
   if (sources.empty()) {
     return result;
   }
+  // Parallel tables must match the graph; a size mismatch is a caller bug that
+  // would otherwise become an out-of-bounds read on the hot path.
+  assert(static_cast<int>(goal_seed.size()) == n);
+  assert(static_cast<int>(source_bearing.size()) == n);
+  assert(static_cast<int>(goal_bearing.size()) == n);
 
   ws.Reset(n);
   ws.NextGeneration();

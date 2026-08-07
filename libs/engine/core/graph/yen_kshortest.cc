@@ -7,19 +7,37 @@
 #include <utility>
 #include <vector>
 
+#include "core/domain/sentinels.h"
+
 namespace bf {
 
 namespace {
 
+// Union of a caller-supplied sorted banned set with Yen's per-spur bans.
+// Result is sorted and unique for NodeFilter/EdgeFilter binary_search.
+template <typename T>
+std::vector<T> MergeBanned(const std::vector<T>* caller, const std::vector<T>& yen) {
+  std::vector<T> out;
+  const size_t caller_n = caller != nullptr ? caller->size() : 0;
+  out.reserve(caller_n + yen.size());
+  if (caller != nullptr) {
+    out.insert(out.end(), caller->begin(), caller->end());
+  }
+  out.insert(out.end(), yen.begin(), yen.end());
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
+}
+
 // Compute the effective cost (geographic distance + soft penalties) of a fully
 // specified path, and its geographic distance. Returns false if any step has no
-// usable edge to the next vertex, or is blocked by a constraint on every
-// parallel edge. For each step, when several parallel edges connect u->v (the
-// same airway over different flight-level bands, or two airways sharing both
-// endpoints), SelectEdge picks the cheapest allowed one by (distance_nm + soft
-// penalty) -- the SAME routine A* relaxation and route-leg labeling use, so this
-// re-costing cannot drift from the search's own edge choice (a hand-rolled copy
-// of that selection previously risked exactly that drift).
+// usable edge to the next vertex, is blocked by a node/edge filter, or is blocked
+// by a constraint on every parallel edge. For each step, when several parallel
+// edges connect u->v (the same airway over different flight-level bands, or two
+// airways sharing both endpoints), SelectEdge picks the cheapest allowed one by
+// (distance_nm + soft penalty) -- the SAME routine A* relaxation and route-leg
+// labeling use, so this re-costing cannot drift from the search's own edge choice
+// (a hand-rolled copy of that selection previously risked exactly that drift).
 //
 // `src_bearing`/`goal_bearing` are the procedure headings at the path's
 // endpoints (inbound at the source fix, outbound at the goal fix), or -1 when
@@ -36,6 +54,13 @@ bool CostOfPath(const NavGraph& graph, const std::vector<int>& path, const Searc
   if (m < 2) {
     return true;  // no edges; CostOfPathMulti handles the endpoint seeds
   }
+  // Honor caller/Yen node and edge bans the same way the A* hot loop does, so a
+  // re-cost cannot accept a path the search would have refused (or vice versa).
+  for (size_t i = 0; i < m; ++i) {
+    if (options.node_filter.Blocks(path[i])) {
+      return false;
+    }
+  }
   const TurnPenalty& turn = options.turn_penalty;
   // Per-edge outbound bearings, computed only when the turn penalty is active so
   // the re-costing hot path stays trig-free when the penalty is disabled.
@@ -46,6 +71,9 @@ bool CostOfPath(const NavGraph& graph, const std::vector<int>& path, const Searc
   for (size_t i = 0; i + 1 < m; ++i) {
     const int u = path[i];
     const int v = path[i + 1];
+    if (options.edge_filter.Blocks(u, v)) {
+      return false;
+    }
     // Delegate the parallel-edge choice to SelectEdge -- the SAME routine A*
     // relaxation and route-leg labeling use -- so this re-costing can never
     // drift from the search's own edge selection. SelectEdge hands back the
@@ -150,11 +178,14 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   const std::vector<double> source_seed = BuildSeedTable(sources, n);
   const std::vector<double> goal_seed = BuildSeedTable(goals, n);
   // Per-vertex procedure headings at the endpoints, for the turn-angle penalty.
-  // `no_source_bearing` is an all-kNoBearing table for mid-path spur searches whose
-  // spur node is not a real SID source (it has no procedure inbound heading).
   const std::vector<double> source_bearing = BuildBearingTable(sources, n);
   const std::vector<double> goal_bearing = BuildBearingTable(goals, n);
-  const std::vector<double> no_source_bearing(n, kNoBearing);
+  // Mid-path spur searches seed only the spur node with the inbound heading
+  // along the accepted root (procedure bearing at i==0, else the previous edge's
+  // outbound). One reusable table keeps a single live entry so we never O(V)-fill
+  // per spur; clearing the previous spur index restores kNoBearing.
+  std::vector<double> spur_source_bearing(n, kNoBearing);
+  int spur_bearing_vertex = kNoVertex;
 
   // The goal set is fixed for the whole run, so h(v) is constant per vertex.
   // Build one memoized heuristic and share it across the first search and every
@@ -251,7 +282,7 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
       // root, so the spur search must diverge here. Built as a const sorted
       // vector (the IIFE sorts in place, then binds to const) so binary_search
       // is valid by construction -- the type system prevents any later write.
-      const std::vector<int64_t> banned_edges = [&] {
+      const std::vector<int64_t> yen_banned_edges = [&] {
         std::vector<int64_t> v;
         v.reserve(result.size());
         for (const ShortestPath& p : result) {
@@ -264,33 +295,43 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
         return v;
       }();
       // Root nodes (except the spur node) are off-limits to keep paths loopless.
-      const std::vector<int> banned_nodes = [&] {
+      const std::vector<int> yen_banned_nodes = [&] {
         std::vector<int> v(root.begin(), root.end() - 1);
         std::sort(v.begin(), v.end());
         return v;
       }();
 
+      // Merge Yen's spur bans with any caller-supplied banned sets. Airport range
+      // on node_filter is inherited via the base_options copy. Merged vectors are
+      // stack-local and outlive the spur search (same loop iteration).
+      const std::vector<int> banned_nodes =
+          MergeBanned(base_options.node_filter.banned, yen_banned_nodes);
+      const std::vector<int64_t> banned_edges =
+          MergeBanned(base_options.edge_filter.banned, yen_banned_edges);
+
       SearchOptions spur_opts = base_options;
-      // Compose Yen's bans with any caller-supplied filter (e.g. the "no transit
-      // through airports" rule): spur_opts starts as a copy of base_options (so
-      // the base node_filter's airport range is inherited), then this spur's
-      // banned nodes/edges are layered on as sorted vectors the filters
-      // binary_search. The const vectors outlive the spur search -- same loop
-      // iteration, stack-local. No std::function is stored, so there is no
-      // self-contained-copy concern and no shared mutable state (concurrency
-      // contract intact).
       spur_opts.node_filter.banned = &banned_nodes;
       spur_opts.edge_filter.banned = &banned_edges;
 
+      // Seed the spur node with the inbound heading along the accepted root so
+      // turn_penalty in the spur A* matches CostOfPath on the stitched path:
+      // i==0 uses the procedure source bearing; i>0 uses the previous edge's
+      // outbound bearing. Clearing the previous spur index keeps this O(1).
+      if (spur_bearing_vertex >= 0) {
+        spur_source_bearing[spur_bearing_vertex] = kNoBearing;
+      }
+      const double inbound_at_spur =
+          (i == 0) ? source_bearing[spur_node]
+                   : graph.CoordOf(prev_path[i - 1]).BearingTo(graph.CoordOf(spur_node));
+      spur_source_bearing[spur_node] = inbound_at_spur;
+      spur_bearing_vertex = spur_node;
+
       // Single-source (the spur node) -> any goal. The spur node's own seed is
       // irrelevant here; CostOfPathMulti re-applies the true source seed from the
-      // stitched path's first vertex. The spur node has no procedure inbound
-      // heading, so pass the all-kNoBearing source bearing table -- no SID-exit turn
-      // penalty is applied at the spur node during the search (the re-cost still
-      // applies the real source bearing at the stitched path's true front fix).
+      // stitched path's first vertex.
       const ShortestPath spur =
           FindShortestPathMulti(graph, {SeededEndpoint{spur_node, 0.0}}, goal_seed,
-                                no_source_bearing, goal_bearing, spur_opts, heuristic, ws);
+                                spur_source_bearing, goal_bearing, spur_opts, heuristic, ws);
       add_candidate(root, spur, /*deviation=*/i);
     }
 

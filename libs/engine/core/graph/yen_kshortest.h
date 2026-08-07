@@ -8,30 +8,28 @@
 
 namespace bf {
 
-// Find up to `k` shortest loopless paths from `start` to `goal` using Yen's
-// algorithm on top of the constrained A* search. Results are ordered by
-// effective cost ascending; the first is the optimal path. Returns fewer than
-// `k` paths when the graph offers fewer alternatives, or an empty vector when
-// the goal is unreachable.
+// Find up to `k` loopless paths from `start` to `goal` using Yen's algorithm on
+// top of the constrained A* search. Results are ordered by effective cost
+// ascending; the first is the cheapest under the search's cost model. Returns
+// fewer than `k` paths when the graph offers fewer alternatives, or an empty
+// vector when the goal is unreachable.
 //
-// `base_options` carries the constraints/request applied to every search; Yen
-// adds its own node/edge bans internally, so callers should not set the
-// node_filter / edge_filter fields.
+// With turn_penalty disabled this is classical K-shortest. With turn_penalty
+// enabled, A* uses the greedy single-state inbound heading (see TurnPenalty), so
+// the K paths are the best under that approximation -- not a guarantee of
+// globally penalized-optimal K paths.
+//
+// `base_options` carries constraints/request and any caller node/edge bans.
+// Yen merges its per-spur bans with caller `node_filter.banned` /
+// `edge_filter.banned` (airport range on NodeFilter is inherited by copy). Do
+// not put Yen-specific bans into base_options yourself.
 std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, int goal, int k,
                                              const SearchOptions& base_options);
 
-// Find up to `k` shortest loopless paths over a multi-source / multi-goal search,
-// where each candidate may start at a different source fix (paying its seed) and
-// end at a different goal fix (paying its seed). This is the procedure-aware form
-// used for routing: different candidates can join the network through different
-// SID/STAR connection fixes, not just diverge between a single fixed fix pair.
-//
-// Results are ordered by effective cost ascending (seed + enroute + seed); the
-// first equals FindShortestPathMulti. Each path's distance_nm includes both seed
-// costs, matching FindShortestPathMulti. `base_options` carries the
-// constraints/request and any caller node/edge bans (e.g. "no transit through
-// airports"); Yen composes its own bans on top, so callers should not preset the
-// node_filter / edge_filter fields with Yen-specific bans.
+// Multi-source / multi-goal Yen (procedure-aware routing form). Same ordering
+// and turn-penalty approximation notes as FindKShortestPaths. The first path
+// equals FindShortestPathMulti; distance_nm includes both endpoint seeds.
+// Caller bans are merged with Yen's per-spur bans as in FindKShortestPaths.
 std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
                                                   const std::vector<SeededEndpoint>& sources,
                                                   const std::vector<SeededEndpoint>& goals, int k,
