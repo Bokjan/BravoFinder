@@ -48,15 +48,16 @@ ProcedureRef MakeApproachRef(const Procedure& p, std::string_view iaf) {
   return ref;
 }
 
-// Merge a (fix_vertex, seed, bearing, ref) finding into the connection list,
-// keeping the smallest seed distance per fix (and its matching bearing) and
-// collecting every procedure ref. When the seed wins, the winning ref is moved
-// to procedures.front() so SelectProcedures / metadata pick the priced option.
-// A vector is enough: real airports expose at most a few dozen distinct handoff
-// fixes per side (p99 ~14, max 35 in cycle 2601), so a linear scan beats a hash
-// map and avoids per-airport bucket allocation.
+// Merge a (fix_vertex, seed, bearing, ref[, splice]) finding into the connection
+// list, keeping the smallest seed distance per fix (and its matching bearing /
+// splice metadata) and collecting every procedure ref. When the seed wins, the
+// winning ref is moved to procedures.front() so SelectProcedures / metadata pick
+// the priced option. A vector is enough: real airports expose at most a few dozen
+// distinct handoff fixes per side (p99 ~14, max 35 in cycle 2601), so a linear
+// scan beats a hash map and avoids per-airport bucket allocation.
 void Accumulate(std::vector<Connection>& by_fix, int fix_vertex, double seed, double bearing,
-                const ProcedureRef& ref, double approach_bearing = kNoBearing) {
+                const ProcedureRef& ref, double approach_bearing = kNoBearing,
+                int splice_vertex = kNoVertex, double splice_leg_nm = 0.0) {
   for (Connection& c : by_fix) {
     if (c.fix_vertex != fix_vertex) {
       continue;
@@ -66,6 +67,8 @@ void Accumulate(std::vector<Connection>& by_fix, int fix_vertex, double seed, do
       c.seed_distance_nm = seed;
       c.bearing = bearing;
       c.approach_bearing = approach_bearing;
+      c.splice_vertex = splice_vertex;
+      c.splice_leg_nm = splice_leg_nm;
       std::swap(c.procedures.front(), c.procedures.back());
     }
     return;
@@ -75,6 +78,8 @@ void Accumulate(std::vector<Connection>& by_fix, int fix_vertex, double seed, do
   c.seed_distance_nm = seed;
   c.bearing = bearing;
   c.approach_bearing = approach_bearing;
+  c.splice_vertex = splice_vertex;
+  c.splice_leg_nm = splice_leg_nm;
   c.procedures.push_back(ref);
   by_fix.push_back(std::move(c));
 }
@@ -194,9 +199,9 @@ std::vector<Connection> Finalize(std::vector<Connection> by_fix) {
 
 // Collect one side's connections: walk every matching procedure record and
 // accumulate its handoff fixes. `gate_only` keeps only the published handoff
-// points (the STAR's Initial Fix / the SID's last fix-bearing leg); false
-// reproduces the legacy "any on-network fix the record passes" model, which
-// serves as the airport-level fallback.
+// points (the STAR's Initial Fix / the SID's last fix-bearing leg). Callers
+// that need the legacy "any on-network fix" model pass false; BuildSide always
+// uses gate_only=true (issue #30 removed the airport-level mid-join fallback).
 //
 // Bearings are computed from the FULL hit list even when only gates survive: a
 // gate's procedure heading is set by the fix that precedes/follows it along the
@@ -250,28 +255,15 @@ std::vector<Connection> CollectSide(const CifpData& cifp, ProcedureType want, Wa
   return by_fix;
 }
 
-// Collect one side, gates first, falling back to the legacy all-on-network model
-// for the whole airport when it exposes no on-network gate at all.
-//
-// The fallback is deliberately AIRPORT-level rather than per-procedure. Scoped
-// per procedure it would re-admit near-field terminal fixes at 19 more STAR and
-// 17 more SID airports across cycle 2601 (22 vs 3 doorstep airports) -- exactly
-// the degeneracy the gate rule exists to prevent. Scoped to the airport it fires
-// at only 30 STAR / 6 SID airports, whose procedures have no on-network gate on
-// any transition, and whose alternative would be a bare DCT link that discards
-// the published procedure entirely. The cost is that a named procedure with no
-// on-network gate cannot be selected by name (--star / --sid) at an airport
-// where some OTHER procedure does have one.
+// Collect one side's published on-network gates only. Airports whose STAR/SID
+// gates are all off-network are handled by BuildStarSpliceArrival /
+// BuildSidSpliceDeparture (issue #30) rather than the former airport-level
+// mid-join fallback (joining at an on-network fix the procedure merely passes).
 std::vector<Connection> BuildSide(const CifpData& cifp, ProcedureType want, WalkDir dir,
                                   const Coordinate& airport_coord, const GraphBuilder& builder,
                                   const std::string& runway_filter) {
-  std::vector<Connection> by_fix =
-      CollectSide(cifp, want, dir, airport_coord, builder, runway_filter, /*gate_only=*/true);
-  if (by_fix.empty()) {
-    by_fix =
-        CollectSide(cifp, want, dir, airport_coord, builder, runway_filter, /*gate_only=*/false);
-  }
-  return Finalize(std::move(by_fix));
+  return Finalize(CollectSide(cifp, want, dir, airport_coord, builder, runway_filter,
+                              /*gate_only=*/true));
 }
 
 // Polyline distance along a procedure's definite fixes, optionally starting at
@@ -417,6 +409,124 @@ double ApproachBodyAndStubNm(const Procedure& gate_proc, int gate_v, const CifpD
 }
 
 constexpr int kApproachProxyK = 5;
+// Same K as approach proxies: nearest on-network fixes around an off-net
+// published STAR IF / SID exit (issue #30 DCT-splice).
+constexpr int kSpliceProxyK = 5;
+
+// STAR body from a published IF through the record's last definite fix, plus
+// the last-fix→airport stub. No MAPT cutoff — STARs are not approaches.
+double StarBodyAndStubNm(const Procedure& p, int gate_v, const Coordinate& airport_coord,
+                         const GraphBuilder& builder) {
+  ApproachWalk from_gate;
+  if (!WalkApproachSegment(p, builder, gate_v, /*stop_at_mapt=*/false, from_gate)) {
+    return airport_coord.DistanceTo(builder.graph().CoordOf(gate_v));
+  }
+  const Coordinate end = from_gate.have_end ? from_gate.end_coord : builder.graph().CoordOf(gate_v);
+  return from_gate.nm + end.DistanceTo(airport_coord);
+}
+
+// SID body from the airport to the published exit: runway→first-fix bridge plus
+// the first→exit polyline (exit is the last definite fix).
+double SidBodyToExitNm(const Procedure& p, int exit_v, const Coordinate& airport_coord,
+                       const GraphBuilder& builder) {
+  ApproachWalk body;
+  if (!WalkApproachSegment(p, builder, /*start_vertex=*/kNoVertex, /*stop_at_mapt=*/false, body) ||
+      !body.have_end) {
+    return airport_coord.DistanceTo(builder.graph().CoordOf(exit_v));
+  }
+  // Recover the first definite fix for the runway bridge (WalkApproachSegment
+  // from the start measures first→last with the first contributing 0 nm).
+  Coordinate first = builder.graph().CoordOf(exit_v);
+  for (const ProcedureLeg& leg : p.legs) {
+    if (!leg.fix_is_definite()) {
+      continue;
+    }
+    const int v = ResolveFix(leg, builder);
+    if (v >= 0) {
+      first = builder.graph().CoordOf(v);
+      break;
+    }
+  }
+  return airport_coord.DistanceTo(first) + body.nm;
+}
+
+// Off-network published STAR IFs → proxy goals (splice_vertex = IF).
+std::vector<Connection> CollectStarSpliceArrivals(const CifpData& cifp,
+                                                  const Coordinate& airport_coord,
+                                                  const GraphBuilder& builder,
+                                                  const std::string& runway_filter) {
+  std::vector<Connection> by_fix;
+  for (const Procedure& p : cifp.procedures) {
+    if (p.type != ProcedureType::kStar || !RunwayMatches(p, runway_filter)) {
+      continue;
+    }
+    for (const ProcedureLeg& leg : p.legs) {
+      if (leg.path_term != PathTerminator::kIF || !leg.fix_is_definite()) {
+        continue;
+      }
+      const int gate = ResolveFix(leg, builder);
+      if (gate < 0) {
+        continue;  // no vertex — cannot proxy (same as approach)
+      }
+      if (builder.HasInbound(gate)) {
+        continue;  // on-network gate — BuildArrival owns it
+      }
+      const double body_stub = StarBodyAndStubNm(p, gate, airport_coord, builder);
+      const ProcedureRef pref = MakeRef(p);
+      const Coordinate gate_coord = builder.graph().CoordOf(gate);
+      for (int f : builder.NearestOnNetwork(gate_coord, kSpliceProxyK, /*inbound=*/true)) {
+        if (f == gate) {
+          continue;
+        }
+        const Coordinate f_coord = builder.graph().CoordOf(f);
+        const double splice_leg = f_coord.DistanceTo(gate_coord);
+        const double seed = splice_leg + body_stub;
+        const double bearing = f_coord.BearingTo(gate_coord);
+        Accumulate(by_fix, f, seed, bearing, pref, kNoBearing, gate, splice_leg);
+      }
+    }
+  }
+  return by_fix;
+}
+
+// Off-network published SID exits → proxy goals (splice_vertex = exit).
+std::vector<Connection> CollectSidSpliceDepartures(const CifpData& cifp,
+                                                   const Coordinate& airport_coord,
+                                                   const GraphBuilder& builder,
+                                                   const std::string& runway_filter) {
+  std::vector<Connection> by_fix;
+  for (const Procedure& p : cifp.procedures) {
+    if (p.type != ProcedureType::kSid || !RunwayMatches(p, runway_filter)) {
+      continue;
+    }
+    const size_t exit_leg = LastFixBearingLeg(p);
+    if (exit_leg >= p.legs.size()) {
+      continue;  // radar-vector / no fix-bearing exit — no splice candidate
+    }
+    const int exit_v = ResolveFix(p.legs[exit_leg], builder);
+    if (exit_v < 0) {
+      continue;
+    }
+    if (builder.HasOutbound(exit_v)) {
+      continue;  // on-network gate — BuildDeparture owns it
+    }
+    const double body = SidBodyToExitNm(p, exit_v, airport_coord, builder);
+    const ProcedureRef pref = MakeRef(p);
+    const Coordinate exit_coord = builder.graph().CoordOf(exit_v);
+    for (int f : builder.NearestOnNetwork(exit_coord, kSpliceProxyK, /*inbound=*/false)) {
+      if (f == exit_v) {
+        continue;
+      }
+      const Coordinate f_coord = builder.graph().CoordOf(f);
+      const double splice_leg = exit_coord.DistanceTo(f_coord);
+      const double seed = body + splice_leg;
+      // Inbound heading at the proxy: arriving from the exit along the DCT splice.
+      const double bearing = exit_coord.BearingTo(f_coord);
+      Accumulate(by_fix, f, seed, bearing, pref, kNoBearing, exit_v, splice_leg);
+    }
+  }
+  return by_fix;
+}
 
 // Approach IAF connections for airports with no STAR: gate-only (path_term IF).
 // On-network inbound IAFs become search goals directly; off-network IAFs that
@@ -513,6 +623,22 @@ std::vector<Connection> ProcedureConnector::BuildApproachArrival(const CifpData&
   // and concurrently safe; any such cache must pass the tsan preset.
   std::vector<Connection> by_fix =
       CollectApproachArrivals(cifp, airport_coord, builder, runway_filter);
+  return Finalize(std::move(by_fix));
+}
+
+std::vector<Connection> ProcedureConnector::BuildStarSpliceArrival(
+    const CifpData& cifp, const Coordinate& airport_coord, const GraphBuilder& builder,
+    const std::string& runway_filter) {
+  std::vector<Connection> by_fix =
+      CollectStarSpliceArrivals(cifp, airport_coord, builder, runway_filter);
+  return Finalize(std::move(by_fix));
+}
+
+std::vector<Connection> ProcedureConnector::BuildSidSpliceDeparture(
+    const CifpData& cifp, const Coordinate& airport_coord, const GraphBuilder& builder,
+    const std::string& runway_filter) {
+  std::vector<Connection> by_fix =
+      CollectSidSpliceDepartures(cifp, airport_coord, builder, runway_filter);
   return Finalize(std::move(by_fix));
 }
 

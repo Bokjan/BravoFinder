@@ -407,9 +407,11 @@ TEST_CASE("connections are restricted to a procedure's published handoff fix", "
     CHECK(conns[0].fix_vertex == c);
   }
 
-  SECTION("an airport with no on-network handoff fix falls back to the fixes it passes") {
+  SECTION("an airport with no resolvable handoff fix yields no STAR connections") {
     // The STAR's published entry XXX is not in the graph at all, so this airport
-    // exposes no on-network gate on any transition.
+    // exposes no on-network gate and no splice candidate (unresolvable IF).
+    // Issue #30 abolished the airport-level mid-join fallback that used to expose
+    // BBB/CCC here; routing then tries approach / DCT at plan_endpoint.
     bf::Procedure star;
     star.type = bf::ProcedureType::kStar;
     star.name = "TSTAR";
@@ -418,14 +420,87 @@ TEST_CASE("connections are restricted to a procedure's published handoff fix", "
     bf::CifpData cifp;
     cifp.procedures = {star};
     const auto conns = bf::ProcedureConnector::BuildArrival(cifp, airport, builder, "");
-    // Rather than strand the arrival on a bare DCT link, the connector falls back
-    // to the on-network fixes the STAR passes (BBB and CCC), ordered by seed --
-    // CCC is the STAR's last fix, so its remaining distance to the runway is the
-    // shortest and it sorts first.
-    REQUIRE(conns.size() == 2);
-    const int b = builder.VerticesByIdent("BBB")[0];
-    CHECK(conns[0].fix_vertex == c);
-    CHECK(conns[1].fix_vertex == b);
+    CHECK(conns.empty());
+    CHECK(bf::ProcedureConnector::BuildStarSpliceArrival(cifp, airport, builder, "").empty());
+  }
+}
+
+TEST_CASE("off-network published STAR/SID gates produce DCT-splice proxies", "[unit][graph]") {
+  // Line A-B-C-D on Q1, plus isolated EEE (in the graph, no airway edges) that
+  // stands in for a published gate with no inbound/outbound.
+  bf::NavData d = MakeLineData();
+  d.waypoints.push_back(
+      bf::Waypoint{bf::Ident("EEE", "ZZ"), bf::Coordinate{0.0, 1.5}, bf::WaypointKind::kFix});
+  bf::GraphBuilder builder = MakeBuilder(d);
+  const int e = builder.VerticesByIdent("EEE")[0];
+  REQUIRE(e >= 0);
+  CHECK_FALSE(builder.HasInbound(e));
+  CHECK_FALSE(builder.HasOutbound(e));
+  const bf::Coordinate airport{0.5, 0.0};
+
+  auto leg = [](bf::PathTerminator term, const char* ident) {
+    bf::ProcedureLeg l;
+    l.path_term = term;
+    l.fix = Fixed(ident, "ZZ");
+    return l;
+  };
+
+  SECTION("STAR IF off-network → splice proxies with splice_vertex = IF") {
+    bf::Procedure star;
+    star.type = bf::ProcedureType::kStar;
+    star.name = "TSTAR";
+    star.legs = {leg(bf::PathTerminator::kIF, "EEE"), leg(bf::PathTerminator::kTF, "CCC")};
+    bf::CifpData cifp;
+    cifp.procedures = {star};
+
+    // Gate-only BuildArrival sees no on-network IF (EEE is off-net).
+    CHECK(bf::ProcedureConnector::BuildArrival(cifp, airport, builder, "").empty());
+    const auto splice = bf::ProcedureConnector::BuildStarSpliceArrival(cifp, airport, builder, "");
+    REQUIRE_FALSE(splice.empty());
+    for (const bf::Connection& c : splice) {
+      CHECK(c.splice_vertex == e);
+      CHECK(c.splice_leg_nm > 0.0);
+      CHECK(c.fix_vertex != e);
+      CHECK(builder.HasInbound(c.fix_vertex));
+      REQUIRE_FALSE(c.procedures.empty());
+      CHECK(c.procedures.front().name == "TSTAR");
+      CHECK(c.procedures.front().type == bf::ProcedureType::kStar);
+      // seed = |F→EEE| + body(EEE→CCC + stub)
+      CHECK_THAT(c.seed_distance_nm,
+                 WithinRel(c.splice_leg_nm + (c.seed_distance_nm - c.splice_leg_nm), 1e-9));
+    }
+  }
+
+  SECTION("unresolvable STAR IF yields no splice candidates") {
+    bf::Procedure star;
+    star.type = bf::ProcedureType::kStar;
+    star.name = "TSTAR";
+    star.legs = {leg(bf::PathTerminator::kIF, "XXX"), leg(bf::PathTerminator::kTF, "CCC")};
+    bf::CifpData cifp;
+    cifp.procedures = {star};
+    const auto splice = bf::ProcedureConnector::BuildStarSpliceArrival(cifp, airport, builder, "");
+    CHECK(splice.empty());
+  }
+
+  SECTION("SID exit off-network → splice proxies with splice_vertex = exit") {
+    bf::Procedure sid;
+    sid.type = bf::ProcedureType::kSid;
+    sid.name = "TSID";
+    sid.legs = {leg(bf::PathTerminator::kIF, "AAA"), leg(bf::PathTerminator::kTF, "EEE")};
+    bf::CifpData cifp;
+    cifp.procedures = {sid};
+
+    const auto splice = bf::ProcedureConnector::BuildSidSpliceDeparture(cifp, airport, builder, "");
+    REQUIRE_FALSE(splice.empty());
+    for (const bf::Connection& c : splice) {
+      CHECK(c.splice_vertex == e);
+      CHECK(c.splice_leg_nm > 0.0);
+      CHECK(c.fix_vertex != e);
+      CHECK(builder.HasOutbound(c.fix_vertex));
+      REQUIRE_FALSE(c.procedures.empty());
+      CHECK(c.procedures.front().name == "TSID");
+      CHECK(c.procedures.front().type == bf::ProcedureType::kSid);
+    }
   }
 }
 

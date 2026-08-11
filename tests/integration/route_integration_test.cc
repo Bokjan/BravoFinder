@@ -1384,4 +1384,93 @@ TEST_CASE("real data: off-network approach IAF uses a proxy on-network goal", "[
   CHECK(r.arr_distance_nm > 5.0);
 }
 
+TEST_CASE("real data: off-network STAR gate DCT-splices into filed string", "[integration]") {
+  // Issue #30: RJFA's published STAR IFs are off-network. Default routing should
+  // file "… F DCT ENTRY STAR RJFA" with arr_connection=procedure (not
+  // terminal_transition), and arr phase = STAR body only (DCT splice in enroute).
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("RJTT", "RJFA"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK_FALSE(r.star.empty());
+  CHECK_FALSE(r.terminal_transition);
+  CHECK(r.arr_connection == bf::ConnectionKind::kProcedure);
+  REQUIRE(r.legs.size() >= 2);
+  const bf::RouteLeg& star_leg = r.legs.back();
+  const bf::RouteLeg& splice_leg = r.legs[r.legs.size() - 2];
+  CHECK(star_leg.to == "RJFA");
+  CHECK(star_leg.via == "STAR");
+  CHECK(splice_leg.via == "DCT");
+  CHECK(splice_leg.to == star_leg.from);  // F DCT ENTRY STAR ARR
+  CHECK(star_leg.from != "RJFA");
+  CHECK(r.arr_distance_nm == Catch::Approx(star_leg.distance_nm).margin(0.05));
+  CHECK(r.arr_distance_nm > 5.0);
+}
+
+TEST_CASE("real data: named --star works via off-network STAR splice", "[integration]") {
+  // Issue #30: KASE publishes HAREI1 but its IF is off-network. Before #30,
+  // BuildArrival was empty and --star failed with ProcedureNotFound.
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::RouteRequest req = MakeRequest("KDEN", "KASE");
+  req.arrival_star = "HAREI1";
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(req);
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK(r.star == "HAREI1");
+  CHECK(r.arr_connection == bf::ConnectionKind::kProcedure);
+  REQUIRE(r.legs.size() >= 2);
+  CHECK(r.legs.back().via == "STAR");
+  CHECK(r.legs[r.legs.size() - 2].via == "DCT");
+}
+
+TEST_CASE("real data: mid-only STAR airport is not a doorstep stub", "[integration]") {
+  // Issue #30 abolished mid-join. ESNZ previously doorsteped at ~0.5 NM via a
+  // mid-track on-network fix; arrival phase must now be a real procedure body
+  // (STAR splice or approach), not a sub-NM stub.
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("ENGM", "ESNZ"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK(r.arr_distance_nm > 5.0);
+  REQUIRE_FALSE(r.legs.empty());
+  CHECK(r.legs.back().to == "ESNZ");
+}
+
+TEST_CASE("real data: off-network SID exit DCT-splices into filed string", "[integration]") {
+  // Issue #30 SID symmetry: WBAK publishes SIDs whose exits are off-network.
+  // Filed shape is "WBAK SID EXIT DCT F …" with dep_connection=procedure and
+  // dep phase = SID body only (DCT splice counted in enroute).
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("prebuilt bfdb not found");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("WBAK", "WSSS"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK_FALSE(r.sid.empty());
+  CHECK(r.dep_connection == bf::ConnectionKind::kProcedure);
+  REQUIRE(r.legs.size() >= 2);
+  const bf::RouteLeg& sid_leg = r.legs.front();
+  const bf::RouteLeg& splice_leg = r.legs[1];
+  CHECK(sid_leg.from == "WBAK");
+  CHECK(sid_leg.via == "SID");
+  CHECK(splice_leg.via == "DCT");
+  CHECK(splice_leg.from == sid_leg.to);  // DEP SID EXIT DCT F
+  CHECK(r.dep_distance_nm == Catch::Approx(sid_leg.distance_nm).margin(0.05));
+  CHECK(r.dep_distance_nm > 1.0);
+}
+
 }  // namespace

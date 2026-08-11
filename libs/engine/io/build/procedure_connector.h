@@ -31,6 +31,12 @@ struct ProcedureRef {
 // procedure that uses this same fix. Routing searches one seeded endpoint per
 // Connection; the refs let the result list all equivalent SID/STAR(+runway)
 // choices without re-searching.
+//
+// When a published SID/STAR gate is off-network, `fix_vertex` is a nearby
+// on-network proxy F and `splice_vertex` holds the gate (ENTRY/EXIT) that
+// MakeRoute must insert into the filed string as `… F DCT ENTRY STAR ARR` /
+// `DEP SID EXIT DCT F …`. On-network gates and approach/DCT connections leave
+// `splice_vertex == kNoVertex` (no insertion).
 struct Connection {
   int fix_vertex = kNoVertex;
   double seed_distance_nm = 0.0;
@@ -38,12 +44,20 @@ struct Connection {
   // For a SID this is the INBOUND heading (direction the procedure arrives at
   // the fix from the runway side); for a STAR the OUTBOUND heading (direction
   // it leaves the fix toward the runway). Drives the turn-angle penalty at the
-  // SID-exit / STAR-entry handoff. For an approach proxy goal this is the
-  // outbound heading leaving the proxy toward the off-network IAF.
+  // SID-exit / STAR-entry handoff. For an approach or STAR/SID splice proxy
+  // goal this is the heading at F toward/from the off-network gate.
   double bearing = kNoBearing;
   // Approach IAF outbound heading [0, 360), or kNoBearing. Set for approach
   // connections (on-network or proxy); used for route metadata, not the turn penalty.
   double approach_bearing = kNoBearing;
+  // Off-network published gate to insert between the proxy fix and the airport
+  // in MakeRoute; kNoVertex when the search endpoint is already the gate (or
+  // there is no gate to file, e.g. approach DCT-to-IAF).
+  int splice_vertex = kNoVertex;
+  // Great-circle |F→gate| folded into seed_distance_nm when splice_vertex is
+  // set; 0 otherwise. Phase split reports procedure body only
+  // (seed − splice_leg) as dep/arr; the DCT splice falls into enroute.
+  double splice_leg_nm = 0.0;
   std::vector<ProcedureRef> procedures;
 };
 
@@ -65,12 +79,11 @@ struct Connection {
 //
 // The handoff point must additionally be ON the enroute network, tested by
 // direction (see WalkDir in the .cc): being published and being wired in are
-// independent conditions. An airport whose procedures expose no on-network
-// handoff point on either falls back to the fixes they pass, so procedures whose
-// gates are not wired in do not strand the search.
-//
-// When an airport has no usable procedures at all, BuildDctFallback synthesizes
-// connections to the nearest on-network waypoints, preserving M1 coverage.
+// independent conditions. When every published gate resolves but is off-network,
+// BuildStarSpliceArrival / BuildSidSpliceDeparture expose proxy on-network
+// goals and MakeRoute inserts the gate into the filed string (issue #30). An
+// unresolvable gate is skipped. Airports with no usable procedures at all use
+// BuildDctFallback.
 class ProcedureConnector {
  public:
   // Departure connections (from SIDs) for an airport at `airport_coord`.
@@ -93,6 +106,24 @@ class ProcedureConnector {
                                                       const Coordinate& airport_coord,
                                                       const GraphBuilder& builder,
                                                       const std::string& runway_filter);
+
+  // Arrival connections for published STAR IFs that resolve but are off-network
+  // (no inbound edge). Each IF contributes K nearest inbound proxy goals F with
+  // seed |F→IF| + STAR body (IF→last fix + stub); splice_vertex = IF. Call when
+  // BuildArrival's on-network gates are empty. Unresolvable IFs are skipped.
+  static std::vector<Connection> BuildStarSpliceArrival(const CifpData& cifp,
+                                                        const Coordinate& airport_coord,
+                                                        const GraphBuilder& builder,
+                                                        const std::string& runway_filter);
+
+  // Departure connections for published SID exits that resolve but are
+  // off-network (no outbound edge). Each exit contributes K nearest outbound
+  // proxy goals F with seed SID body (runway→exit) + |exit→F|; splice_vertex =
+  // exit. Call when BuildDeparture's on-network gates are empty.
+  static std::vector<Connection> BuildSidSpliceDeparture(const CifpData& cifp,
+                                                         const Coordinate& airport_coord,
+                                                         const GraphBuilder& builder,
+                                                         const std::string& runway_filter);
 
   // DCT fallback: connect to the nearest on-network waypoints by great-circle
   // distance. Used when no procedure connections are available. `arrival` picks

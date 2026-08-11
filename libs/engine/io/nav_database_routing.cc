@@ -41,7 +41,7 @@ struct EndpointPlan {
   std::vector<Connection> connections;
   std::string airport_icao;  // empty if the endpoint is a plain waypoint
   bool used_procedures = false;
-  bool used_approach = false;  // arrival joined via BuildApproachArrival
+  bool used_approach = false;
   bool has_procedures = false;
   // Set when the request named a SID/STAR that the airport does not publish (or
   // whose fixes reach no on-network vertex): the caller reports an Error instead
@@ -105,16 +105,68 @@ bool FilterConnectionsByName(std::vector<Connection>& connections, const std::st
   return any;
 }
 
-// Build a Route from a path of connection-fix vertices. `dep_label`/`arr_label`
-// are the airport ICAOs to show as the true endpoints (empty for waypoint
-// endpoints). When an airport endpoint connects through a procedure, `sid`/
-// `star` name it and `dep_seed`/`arr_seed` are the estimated procedure
-// distances; these become explicit first/last legs (airport <-> connection fix)
-// and are embedded in the route string like a filed flight plan.
+// Soft-prefer STAR splice over approach when both compete in the same arrival
+// pool (issue #30). Added to approach seeds only when at least one STAR splice
+// candidate exists; pure no-STAR (#24) airports must not pay this bump.
+constexpr double kProcedurePreferNm = 15.0;
+
+const Connection* FindConnection(const EndpointPlan& plan, int fix_vertex) {
+  for (const Connection& c : plan.connections) {
+    if (c.fix_vertex == fix_vertex) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+// Fold `incoming` into `by_fix` by fix_vertex (same semantics as the connector's
+// Accumulate: keep the cheaper seed and its splice/bearing metadata; append all
+// refs; on a seed win move the winner's primary ref to front).
+void MergeConnection(std::vector<Connection>& by_fix, Connection incoming) {
+  for (Connection& c : by_fix) {
+    if (c.fix_vertex != incoming.fix_vertex) {
+      continue;
+    }
+    const size_t first_incoming = c.procedures.size();
+    for (ProcedureRef& ref : incoming.procedures) {
+      c.procedures.push_back(std::move(ref));
+    }
+    if (incoming.seed_distance_nm < c.seed_distance_nm) {
+      c.seed_distance_nm = incoming.seed_distance_nm;
+      c.bearing = incoming.bearing;
+      c.approach_bearing = incoming.approach_bearing;
+      c.splice_vertex = incoming.splice_vertex;
+      c.splice_leg_nm = incoming.splice_leg_nm;
+      if (first_incoming < c.procedures.size()) {
+        std::swap(c.procedures.front(), c.procedures[first_incoming]);
+      }
+    }
+    return;
+  }
+  by_fix.push_back(std::move(incoming));
+}
+
+void MergeAll(std::vector<Connection>& dst, std::vector<Connection> src) {
+  for (Connection& c : src) {
+    MergeConnection(dst, std::move(c));
+  }
+}
+
+void SortConnectionsBySeed(std::vector<Connection>& by_fix) {
+  std::sort(by_fix.begin(), by_fix.end(), [](const Connection& a, const Connection& b) {
+    if (a.seed_distance_nm != b.seed_distance_nm) {
+      return a.seed_distance_nm < b.seed_distance_nm;
+    }
+    return a.fix_vertex < b.fix_vertex;
+  });
+}
+
 Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const ShortestPath& path,
                 const std::string& dep_label, const std::string& arr_label, const std::string& sid,
                 const std::string& star, double dep_seed, double arr_seed,
-                const SearchOptions& options) {
+                const SearchOptions& options, int dep_splice_vertex = kNoVertex,
+                double dep_splice_leg_nm = 0.0, int arr_splice_vertex = kNoVertex,
+                double arr_splice_leg_nm = 0.0) {
   Route route;
   route.total_distance_nm = path.distance_nm;
   if (path.vertices.empty()) {
@@ -122,55 +174,59 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
   }
   const std::string dep_fix_id = builder.IdentOf(path.vertices.front()).ident;
   const std::string arr_fix_id = builder.IdentOf(path.vertices.back()).ident;
+  const bool dep_splice = dep_splice_vertex >= 0 && !dep_label.empty();
+  const bool arr_splice = arr_splice_vertex >= 0 && !arr_label.empty();
+  const double dep_body_nm = dep_splice ? std::max(0.0, dep_seed - dep_splice_leg_nm) : dep_seed;
+  const double arr_body_nm = arr_splice ? std::max(0.0, arr_seed - arr_splice_leg_nm) : arr_seed;
+  const std::string dep_exit_id =
+      dep_splice ? builder.IdentOf(dep_splice_vertex).ident : std::string{};
+  const std::string arr_entry_id =
+      arr_splice ? builder.IdentOf(arr_splice_vertex).ident : std::string{};
 
-  // Points: optional departure airport, the connection fixes along the path,
-  // then the optional arrival airport.
+  // Points: optional departure airport, optional SID exit (splice), the
+  // connection fixes along the path, optional STAR entry (splice), then the
+  // optional arrival airport.
   if (!dep_label.empty()) {
-    // The departure airport is not a vertex on the path: the search is seeded
-    // from its connection fixes (the path starts at the first on-network fix),
-    // so path.vertices.front() is that fix, not the airport. Resolve the airport
-    // endpoint's own coordinate from the airport vertex instead of borrowing the
-    // connection fix's coordinate (which would render the airport at the fix).
     const int dep_apt = builder.VertexByAirport(ToUpper(dep_label));
     const Coordinate dep_coord =
         dep_apt >= 0 ? graph.CoordOf(dep_apt) : graph.CoordOf(path.vertices.front());
     route.points.push_back(RoutePoint{dep_label, dep_coord});
+    if (dep_splice) {
+      route.points.push_back(RoutePoint{dep_exit_id, graph.CoordOf(dep_splice_vertex)});
+    }
   }
   for (int v : path.vertices) {
     route.points.push_back(RoutePoint{builder.IdentOf(v).ident, graph.CoordOf(v)});
   }
   if (!arr_label.empty()) {
-    // Same reasoning as the departure endpoint above: the airport is not the last
-    // path vertex, so read its coordinate from the airport vertex, not the last
-    // connection fix (which previously made the airport render at the fix).
+    if (arr_splice) {
+      route.points.push_back(RoutePoint{arr_entry_id, graph.CoordOf(arr_splice_vertex)});
+    }
     const int arr_apt = builder.VertexByAirport(ToUpper(arr_label));
     const Coordinate arr_coord =
         arr_apt >= 0 ? graph.CoordOf(arr_apt) : graph.CoordOf(path.vertices.back());
     route.points.push_back(RoutePoint{arr_label, arr_coord});
   }
 
-  // Leading procedure leg: airport -> first connection fix. The leg's `via`
-  // carries the literal connector keyword "SID" (or "DCT" when the airport fell
-  // back to a direct link), not the procedure name -- the name lives in
-  // route.sid, so the compact route string stays airline/ICAO style.
+  // Leading procedure leg(s): airport -> [exit DCT] -> first connection fix.
   if (!dep_label.empty()) {
-    route.legs.push_back(RouteLeg{dep_label,
-                                  dep_fix_id,
-                                  sid.empty() ? std::string(kDctToken) : std::string(kSidToken),
-                                  dep_seed,
-                                  {}});
+    if (dep_splice) {
+      route.legs.push_back(
+          RouteLeg{dep_label, dep_exit_id, std::string(kSidToken), dep_body_nm, {}});
+      route.legs.push_back(
+          RouteLeg{dep_exit_id, dep_fix_id, std::string(kDctToken), dep_splice_leg_nm, {}});
+    } else {
+      route.legs.push_back(RouteLeg{dep_label,
+                                    dep_fix_id,
+                                    sid.empty() ? std::string(kDctToken) : std::string(kSidToken),
+                                    dep_seed,
+                                    {}});
+    }
   }
   // Enroute legs between consecutive on-network fixes.
   for (size_t i = 0; i + 1 < path.vertices.size(); ++i) {
     const int u = path.vertices[i];
     const int w = path.vertices[i + 1];
-    // u->w may have parallel edges (several airways, or an airway plus a DCT).
-    // Label the leg with the edge the search actually traversed -- the cheapest
-    // ALLOWED edge by effective cost (distance + soft penalties) -- via the shared
-    // SelectEdge helper, so the via name and distance match the path's cost and
-    // total_distance_nm. Picking the shortest-by-distance edge (the previous
-    // behavior) could show a via/distance the cost model did not choose when a
-    // constraint (level preference, randomization) made a longer edge cheaper.
     const GraphEdge* e = SelectEdge(graph, u, w, options);
     std::string via(kDctToken);
     double dist = 0.0;
@@ -181,30 +237,29 @@ Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const Shorte
     route.legs.push_back(
         RouteLeg{builder.IdentOf(u).ident, builder.IdentOf(w).ident, via, dist, {}});
   }
-  // Trailing procedure leg: last connection fix -> airport. `via` carries the
-  // literal "STAR" (or "DCT"); the STAR name lives in route.star.
+  // Trailing procedure leg(s): last connection fix -> [entry STAR] -> airport.
   if (!arr_label.empty()) {
-    route.legs.push_back(RouteLeg{arr_fix_id,
-                                  arr_label,
-                                  star.empty() ? std::string(kDctToken) : std::string(kStarToken),
-                                  arr_seed,
-                                  {}});
+    if (arr_splice) {
+      route.legs.push_back(
+          RouteLeg{arr_fix_id, arr_entry_id, std::string(kDctToken), arr_splice_leg_nm, {}});
+      route.legs.push_back(
+          RouteLeg{arr_entry_id, arr_label, std::string(kStarToken), arr_body_nm, {}});
+    } else {
+      route.legs.push_back(RouteLeg{arr_fix_id,
+                                    arr_label,
+                                    star.empty() ? std::string(kDctToken) : std::string(kStarToken),
+                                    arr_seed,
+                                    {}});
+    }
   }
 
-  // Phase split, computed here from the leg positions (not re-derived at print
-  // time). The dep/arr seeds are the procedure-leg distances when an airport
-  // endpoint exists; total already includes both, so enroute is the remainder.
-  route.dep_distance_nm = dep_label.empty() ? 0.0 : dep_seed;
-  route.arr_distance_nm = arr_label.empty() ? 0.0 : arr_seed;
+  // Phase split (D9): dep/arr are literal SID/STAR leg distances; DCT splice
+  // falls into enroute. Search seeds still priced the full |F→gate|+body.
+  route.dep_distance_nm = dep_label.empty() ? 0.0 : dep_body_nm;
+  route.arr_distance_nm = arr_label.empty() ? 0.0 : arr_body_nm;
   route.enroute_distance_nm =
       std::max(0.0, route.total_distance_nm - route.dep_distance_nm - route.arr_distance_nm);
 
-  // Route string in filed-flight-plan style: DEP SID FIX <airways> FIX STAR ARR,
-  // where "SID"/"STAR" are literal connector keywords (the procedure names are in
-  // route.sid/star). BuildRouteString folds consecutive legs on a shared airway
-  // (listing it only at the join/leave fixes) and, as a side effect, rewrites each
-  // leg's `via` to the single chosen designator and records any concurrency in
-  // `concurrent_airways`.
   const std::string first_point = route.points.empty() ? "" : route.points.front().ident;
   route.route_string = BuildRouteString(first_point, route.legs);
   return route;
@@ -603,27 +658,74 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         const std::string& sel = departure ? request.departure_sid : request.arrival_star;
         if (departure) {
           plan.connections = ProcedureConnector::BuildDeparture(*cifp, apt, *builder_, rwy);
-          if (!sel.empty() && !FilterConnectionsByName(plan.connections, sel)) {
-            plan.connections.clear();
-            plan.named_procedure_unmatched = true;
-            return Result<EndpointPlan>::Ok(std::move(plan));
-          }
-        } else {
-          plan.connections = ProcedureConnector::BuildArrival(*cifp, apt, *builder_, rwy);
-          // Named --star must match a STAR connection; never silently fall through
-          // to approach IAFs (D1).
           if (!sel.empty()) {
             if (!FilterConnectionsByName(plan.connections, sel)) {
-              plan.connections.clear();
-              plan.named_procedure_unmatched = true;
-              return Result<EndpointPlan>::Ok(std::move(plan));
+              // Named --sid: also try off-network exit splice candidates.
+              plan.connections =
+                  ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, *builder_, rwy);
+              if (!FilterConnectionsByName(plan.connections, sel)) {
+                plan.connections.clear();
+                plan.named_procedure_unmatched = true;
+                return Result<EndpointPlan>::Ok(std::move(plan));
+              }
             }
           } else if (plan.connections.empty()) {
-            plan.connections = ProcedureConnector::BuildApproachArrival(*cifp, apt, *builder_, rwy);
-            plan.used_approach = !plan.connections.empty();
+            plan.connections =
+                ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, *builder_, rwy);
+          }
+          plan.used_procedures = !plan.connections.empty();
+        } else {
+          plan.connections = ProcedureConnector::BuildArrival(*cifp, apt, *builder_, rwy);
+          // Named --star must match a STAR connection (on-net or splice); never
+          // silently fall through to approach IAFs (D1 / #30).
+          if (!sel.empty()) {
+            if (!FilterConnectionsByName(plan.connections, sel)) {
+              plan.connections =
+                  ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, *builder_, rwy);
+              if (!FilterConnectionsByName(plan.connections, sel)) {
+                plan.connections.clear();
+                plan.named_procedure_unmatched = true;
+                return Result<EndpointPlan>::Ok(std::move(plan));
+              }
+            }
+            plan.used_procedures = true;
+          } else if (!plan.connections.empty()) {
+            // On-network published STAR gates — today's path; do not mix approach.
+            plan.used_procedures = true;
+          } else {
+            // Off-network published gates (or no STAR): STAR splice ∪ approach
+            // in one pool. Soft-prefer STAR only when splice candidates exist.
+            std::vector<Connection> pool =
+                ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, *builder_, rwy);
+            std::vector<Connection> apch =
+                ProcedureConnector::BuildApproachArrival(*cifp, apt, *builder_, rwy);
+            const bool have_splice = !pool.empty();
+            if (have_splice) {
+              for (Connection& c : apch) {
+                c.seed_distance_nm += kProcedurePreferNm;
+              }
+            }
+            // STAR first, then approach: equal seeds keep STAR at procedures.front().
+            MergeAll(pool, std::move(apch));
+            SortConnectionsBySeed(pool);
+            plan.connections = std::move(pool);
+            // Plan-level flags are only meaningful for homogeneous pools; mixed
+            // STAR∪approach is classified per path from procedures.front().type.
+            bool any_star = false;
+            bool any_apch = false;
+            for (const Connection& c : plan.connections) {
+              for (const ProcedureRef& ref : c.procedures) {
+                if (ref.type == ProcedureType::kApproach) {
+                  any_apch = true;
+                } else if (ref.type == ProcedureType::kStar) {
+                  any_star = true;
+                }
+              }
+            }
+            plan.used_procedures = any_star && !any_apch;
+            plan.used_approach = any_apch && !any_star;
           }
         }
-        plan.used_procedures = !plan.connections.empty() && !plan.used_approach;
       } else if (!(departure ? request.departure_sid : request.arrival_star).empty()) {
         // A procedure was named but the airport has no CIFP data at all.
         plan.named_procedure_unmatched = true;
@@ -826,10 +928,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     return 0.0;
   };
 
-  // Classify how an endpoint attached to the network. A plan's connections are
-  // homogeneous (all from a procedure build, or all DCT fallback), so this is a
-  // per-endpoint verdict: a procedure was used; else procedures exist but none
-  // reached the network (radar vectors); else no procedure data at all.
+  // Classify how an endpoint attached to the network. Departure plans stay
+  // homogeneous (SID or DCT). Arrival may mix STAR splice with approach in one
+  // pool (#30) — those paths must be classified from the winning Connection's
+  // procedures.front().type, not from plan-level used_* flags.
   auto connection_kind = [](const EndpointPlan& plan) {
     if (plan.used_approach) {
       return ConnectionKind::kTerminalTransition;
@@ -842,8 +944,17 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     }
     return ConnectionKind::kDirect;
   };
+  auto arrival_kind_for_fix = [&](int arr_fix) {
+    const Connection* c = FindConnection(arr, arr_fix);
+    if (c != nullptr && !c->procedures.empty()) {
+      if (c->procedures.front().type == ProcedureType::kApproach) {
+        return ConnectionKind::kTerminalTransition;
+      }
+      return ConnectionKind::kProcedure;
+    }
+    return connection_kind(arr);
+  };
   const ConnectionKind dep_kind = connection_kind(dep);
-  const ConnectionKind arr_kind = connection_kind(arr);
 
   Routes routes;
   routes.reserve(paths.size());
@@ -855,6 +966,12 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     const int arr_fix = p.vertices.back();
     const double dep_seed = seed_of(sources, dep_fix);
     const double arr_seed = seed_of(goals, arr_fix);
+    const Connection* dep_conn = FindConnection(dep, dep_fix);
+    const Connection* arr_conn = FindConnection(arr, arr_fix);
+    const int dep_splice_v = dep_conn != nullptr ? dep_conn->splice_vertex : kNoVertex;
+    const double dep_splice_nm = dep_conn != nullptr ? dep_conn->splice_leg_nm : 0.0;
+    const int arr_splice_v = arr_conn != nullptr ? arr_conn->splice_vertex : kNoVertex;
+    const double arr_splice_nm = arr_conn != nullptr ? arr_conn->splice_leg_nm : 0.0;
 
     // Procedure selection depends on the candidate's own fix pair, which may
     // differ across candidates, so resolve it per path.
@@ -869,7 +986,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     std::string approach_iaf;
     double approach_bearing = -1.0;
     std::vector<std::string> approach_options;
-    if (arr.used_approach) {
+    const ConnectionKind arr_kind = arrival_kind_for_fix(arr_fix);
+    if (arr_kind == ConnectionKind::kTerminalTransition) {
       SelectApproachProcedures(arr, arr_fix, approach, approach_iaf, approach_bearing, arr_rwy,
                                approach_options);
     } else {
@@ -877,7 +995,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     }
 
     Route route = MakeRoute(*builder_, graph, p, dep.airport_icao, arr.airport_icao, sid_name,
-                            star_name, dep_seed, arr_seed, options);
+                            star_name, dep_seed, arr_seed, options, dep_splice_v, dep_splice_nm,
+                            arr_splice_v, arr_splice_nm);
     route.sid = sid_name;
     route.dep_runway = dep_rwy;
     route.sid_options = sid_options;
@@ -886,7 +1005,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     route.star_options = star_options;
     route.dep_connection = dep_kind;
     route.arr_connection = arr_kind;
-    if (arr.used_approach) {
+    if (arr_kind == ConnectionKind::kTerminalTransition) {
       route.terminal_transition = true;
       route.approach = std::move(approach);
       route.approach_iaf = std::move(approach_iaf);
