@@ -28,9 +28,11 @@ namespace bf::service {
 struct HandlerResult {
   std::string body;
   int status;
-  // Wall-clock cost of the database call this handler made, in milliseconds. Set
-  // only on a successful (2xx) response; every error path leaves it 0 via the
-  // default member initializer, since no meaningful compute happened.
+  // Wall-clock cost of the database / engine call this handler made, in
+  // milliseconds. Set on any path that timed meaningful work — including 404 /
+  // 422 after a lookup or FindRoutes / ParseRoute — so clients can see how long
+  // a miss cost. Left 0 only when the request was rejected before that work
+  // (e.g. 400 validation).
   uint32_t elapsed_ms = 0;
 };
 
@@ -52,6 +54,13 @@ inline constexpr int kMaxFl = 600;
 // Cap on Yen K-shortest alternatives per find_routes call (server protection;
 // the CLI does not enforce this).
 inline constexpr int kMaxK = 15;
+// Max length for ICAO / procedure / runway / SID / STAR / airway-rule idents
+// (and similar short strings). Far above any real ident; rejects pathological
+// payloads before they reach the engine.
+inline constexpr size_t kMaxIdentStringLen = 32;
+// Max length for a filed route string on parse_route (64 KiB). Real filed
+// routes are tiny; this only bounds abuse.
+inline constexpr size_t kMaxRouteStringLen = 64 * 1024;
 
 using QueryHandler =
     std::function<HandlerResult(const rapidjson::Value& args, const bf::NavDatabase& db)>;

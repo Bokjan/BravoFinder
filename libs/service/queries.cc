@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <optional>
 #include <string>
 #include <vector>
@@ -44,7 +45,7 @@ HandlerResult FindRoutes(const bf::NavDatabase& db, const bf::RouteRequest& requ
   if (!result) {
     // A failed route computation is a semantic failure (422): the request was
     // well-formed but no route satisfies it, or an endpoint is unknown.
-    return {RenderError(fmt, result.error().message), kStatusUnprocessableEntity, 0};
+    return {RenderError(fmt, result.error().message), kStatusUnprocessableEntity, elapsed};
   }
   return {RenderRoutes(fmt, result.value(), elapsed), kStatusOk, elapsed};
 }
@@ -57,7 +58,7 @@ HandlerResult ParseRoute(const bf::NavDatabase& db, const std::string& route_str
   if (!result) {
     // A parse failure is a semantic failure (422): the string was given but does
     // not form a valid route. The message names the offending token.
-    return {RenderError(fmt, result.error().message), kStatusUnprocessableEntity, 0};
+    return {RenderError(fmt, result.error().message), kStatusUnprocessableEntity, elapsed};
   }
   return {RenderRoute(fmt, result.value(), elapsed), kStatusOk, elapsed};
 }
@@ -75,7 +76,7 @@ HandlerResult RunGroupedLookup(const bf::NavDatabase& db, const std::vector<std:
   const bool all_empty =
       std::all_of(results.begin(), results.end(), [](const auto& group) { return group.empty(); });
   if (all_empty) {
-    return {render(fmt, ids, results), kStatusNotFound, 0};
+    return {render(fmt, ids, results), kStatusNotFound, elapsed};
   }
   return {render(fmt, ids, results), kStatusOk, elapsed};
 }
@@ -91,7 +92,7 @@ HandlerResult RunOptionalLookup(const bf::NavDatabase& db, const std::vector<std
   const bool all_missing =
       std::none_of(results.begin(), results.end(), [](const auto& opt) { return opt.has_value(); });
   if (all_missing) {
-    return {render(fmt, ids, results), kStatusNotFound, 0};
+    return {render(fmt, ids, results), kStatusNotFound, elapsed};
   }
   return {render(fmt, ids, results), kStatusOk, elapsed};
 }
@@ -162,7 +163,8 @@ HandlerResult LookupProcedureLegs(const bf::NavDatabase& db, const std::string& 
   if (!detail) {
     // Unknown airport, no CIFP data, or no procedure of that name: 404 rather
     // than an empty success payload.
-    return {RenderError(fmt, "no procedure of that name at that airport"), kStatusNotFound, 0};
+    return {RenderError(fmt, "no procedure of that name at that airport"), kStatusNotFound,
+            elapsed};
   }
   return {RenderProcedureDetail(fmt, *detail), kStatusOk, elapsed};
 }
@@ -181,6 +183,12 @@ std::string SelectorLabel(const ProcedureSelector& s) {
 HandlerResult LookupProceduresMixed(const bf::NavDatabase& db,
                                     const std::vector<ProcedureSelector>& selectors,
                                     OutputFormat fmt) {
+  if (selectors.size() > kMaxIdListSize) {
+    return {
+        RenderError(fmt, std::format("at most {} procedure selectors are allowed", kMaxIdListSize)),
+        bf::http_server::kStatusBadRequest};
+  }
+
   const auto start = std::chrono::steady_clock::now();
 
   // Two result streams parallel to `selectors`: summaries (a bare airport) and
@@ -223,7 +231,7 @@ HandlerResult LookupProceduresMixed(const bf::NavDatabase& db,
 
   std::string body = RenderProceduresMixed(fmt, labels, summaries, details);
   if (all_missed) {
-    return {std::move(body), kStatusNotFound, 0};
+    return {std::move(body), kStatusNotFound, elapsed};
   }
   return {std::move(body), kStatusOk, elapsed};
 }

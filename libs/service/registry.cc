@@ -13,12 +13,14 @@ Result<const NavDatabase*> NavDatabaseRegistry::Get(std::optional<uint32_t> cycl
   // Resolve which cache to serve: an explicit cycle, else the newest one.
   std::optional<BfdbEntry> entry = cycle ? inventory_.Find(*cycle) : inventory_.Latest();
   if (!entry) {
-    if (inventory_.empty()) {
+    // Never dereference an empty optional: an explicit cycle that is missing is
+    // "unknown cycle"; a missing Latest() (no cycle asked) means nothing loaded.
+    if (cycle) {
       return Result<const NavDatabase*>::Err(
-          Error(ErrorCode::kDataMissing, "no navigation databases loaded"));
+          Error(ErrorCode::kDataMissing, std::format("unknown AIRAC cycle: {}", *cycle)));
     }
     return Result<const NavDatabase*>::Err(
-        Error(ErrorCode::kDataMissing, std::format("unknown AIRAC cycle: {}", *cycle)));
+        Error(ErrorCode::kDataMissing, "no navigation databases loaded"));
   }
 
   const uint32_t key = entry->cycle;

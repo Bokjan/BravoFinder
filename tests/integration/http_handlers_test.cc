@@ -73,7 +73,8 @@ TEST_CASE("http handlers: find_routes status mapping", "[integration][http]") {
   CHECK(Run("find_routes", R"({"departure":"ZZ_NOPE_ZZ","arrival":"KLAX"})", *db).status == 422);
 }
 
-TEST_CASE("http handlers: elapsed_ms is set on success, zero on error", "[integration][http]") {
+TEST_CASE("http handlers: elapsed_ms is set on success, zero on validation error",
+          "[integration][http]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {
     SKIP("navigation data not found in '" << NavDataDir() << "'");
@@ -94,13 +95,16 @@ TEST_CASE("http handlers: elapsed_ms is set on success, zero on error", "[integr
   const bf::service::HandlerResult lookup = Run("lookup_airports", R"({"ids":["KJFK"]})", *db);
   REQUIRE(lookup.status == 200);
   CHECK(lookup.elapsed_ms < 10000);
-  // Every error path leaves elapsed_ms at 0 (no meaningful compute happened).
+  // 400 validation paths leave elapsed_ms at 0 (rejected before meaningful work).
   CHECK(Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":0})", *db).elapsed_ms == 0);
   CHECK(Run("find_routes", R"({"departure":"KJFK"})", *db).elapsed_ms == 0);
-  CHECK(Run("find_routes", R"({"departure":"ZZ_NOPE_ZZ","arrival":"KLAX"})", *db).elapsed_ms == 0);
-  CHECK(Run("parse_route", R"({"route":"KJFK ZZ_NOPE9 KLAX"})", *db).elapsed_ms == 0);
-  CHECK(Run("lookup_airports", R"({"ids":["ZZ_NOPE_ZZ"]})", *db).elapsed_ms == 0);
   CHECK(Run("lookup_airports", R"({})", *db).elapsed_ms == 0);
+  // 422 / 404 paths timed an engine call: elapsed_ms is set (may be 0 if sub-ms)
+  // and must stay under the same stuck-query ceiling.
+  CHECK(Run("find_routes", R"({"departure":"ZZ_NOPE_ZZ","arrival":"KLAX"})", *db).elapsed_ms <
+        10000);
+  CHECK(Run("parse_route", R"({"route":"KJFK ZZ_NOPE9 KLAX"})", *db).elapsed_ms < 10000);
+  CHECK(Run("lookup_airports", R"({"ids":["ZZ_NOPE_ZZ"]})", *db).elapsed_ms < 10000);
 }
 
 TEST_CASE("http handlers: find_routes emits full-precision coordinates", "[integration][http]") {
@@ -180,14 +184,14 @@ TEST_CASE("http handlers: airway_rules normalize lowercase regions and designato
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   // ZSSS->ZGGG is the reference query whose baseline runs on W131 / W134 / W19.
-  // Use NO region restriction (region_prefixes omitted = any region) and a
+  // Use region_prefixes:["*"] (any region; empty [] is rejected) and a
   // lowercase designator "w" with match:"prefix": the rule must block the whole
   // W family anywhere. (A region-limited rule would legitimately keep W legs
   // outside that region -- e.g. W45 near ZGGG -- so an unrestricted rule is the
   // clean assertion that normalization happened.)
   const bf::service::HandlerResult blocked = Run(
       "find_routes",
-      R"({"departure":"ZSSS","arrival":"ZGGG","k":1,"airway_rules":[{"designators":["w"],"match":"prefix","action":"block"}]})",
+      R"({"departure":"ZSSS","arrival":"ZGGG","k":1,"airway_rules":[{"region_prefixes":["*"],"designators":["w"],"match":"prefix","action":"block"}]})",
       *db);
   REQUIRE(blocked.status == 200);
   rapidjson::Document doc;
@@ -214,4 +218,17 @@ TEST_CASE("http handlers: airway_rules normalize lowercase regions and designato
   REQUIRE(baseline.status == 200);
   const std::string base_string = baseline.body;
   CHECK(blocked.body != base_string);
+}
+
+TEST_CASE("http handlers: empty ids and incomplete airway_rules are 400", "[integration][http]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  CHECK(Run("lookup_airports", R"({"ids":[]})", *db).status == 400);
+  // Both region_prefixes and designators are required; an empty rule object is
+  // rejected (use explicit ["*"] for "any", not omission or []).
+  CHECK(
+      Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":1,"airway_rules":[{}]})", *db)
+          .status == 400);
 }

@@ -14,7 +14,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -41,9 +40,40 @@ namespace {
 
 using bf::http_server::kStatusBadRequest;
 
-// rapidjson::HasMember / operator[] need a null-terminated C string; every
-// api_keys.h string_view is backed by a string literal, so .data() is safe.
-bool HasKey(const rapidjson::Value& o, std::string_view key) { return o.HasMember(key.data()); }
+// NUL-safe string extraction: RapidJSON strings may embed '\0', so never build a
+// std::string / string_view from GetString() alone (that truncates at the first
+// NUL). Always pair GetString() with GetStringLength().
+std::string JsonString(const rapidjson::Value& v) {
+  return std::string(v.GetString(), v.GetStringLength());
+}
+
+std::string_view JsonStringView(const rapidjson::Value& v) {
+  return std::string_view(v.GetString(), v.GetStringLength());
+}
+
+// Look up a member by string_view without assuming key.data() is NUL-terminated.
+// Returns nullptr when absent.
+const rapidjson::Value* Member(const rapidjson::Value& o, std::string_view key) {
+  const auto it =
+      o.FindMember(rapidjson::StringRef(key.data(), static_cast<rapidjson::SizeType>(key.size())));
+  if (it == o.MemberEnd()) {
+    return nullptr;
+  }
+  return &it->value;
+}
+
+bool HasKey(const rapidjson::Value& o, std::string_view key) { return Member(o, key) != nullptr; }
+
+// Wrap a handler so non-object args become a 400 before any field parsing.
+QueryHandler RequireObjectArgs(QueryHandler inner) {
+  return [inner = std::move(inner)](const rapidjson::Value& args,
+                                    const NavDatabase& db) -> HandlerResult {
+    if (!args.IsObject()) {
+      return {JsonError("arguments must be a JSON object"), kStatusBadRequest};
+    }
+    return inner(args, db);
+  };
+}
 
 // Parse a string-array argument. Returns nullopt if the member is absent OR
 // malformed (not an array, a non-string element, or more than kMaxIdListSize
@@ -51,10 +81,11 @@ bool HasKey(const rapidjson::Value& o, std::string_view key) { return o.HasMembe
 // (reject) check HasKey themselves before deciding.
 std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args,
                                                     std::string_view key) {
-  if (!HasKey(args, key) || !args[key.data()].IsArray()) {
+  const rapidjson::Value* arr_v = Member(args, key);
+  if (!arr_v || !arr_v->IsArray()) {
     return std::nullopt;
   }
-  const rapidjson::Value& arr = args[key.data()];
+  const rapidjson::Value& arr = *arr_v;
   if (arr.Size() > kMaxIdListSize) {
     return std::nullopt;  // over the cap: treat as malformed so callers reject it
   }
@@ -64,33 +95,59 @@ std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args
     if (!v.IsString()) {
       return std::nullopt;
     }
-    ids.push_back(v.GetString());
+    ids.push_back(JsonString(v));
   }
   return ids;
 }
 
-// Parse one string-array member of a rule object, with the same "absent or
-// malformed" collapse as ParseIdList. An absent member means "match everything"
-// for that side of the rule, which is an empty vector -- so absence and an empty
-// array are deliberately indistinguishable here. Returns false only for a member
-// that is present and genuinely malformed. Both region and designator entries
-// are upper-cased, since the navigation data stores them upper-case and the rest
-// of the query layer already normalizes user input (see ToUpper).
-bool ParseRuleStringList(const rapidjson::Value& rule, std::string_view key,
-                         std::vector<std::string>& out) {
-  if (!HasKey(rule, key)) {
-    return true;  // absent => match everything on this side
+// Parse one required string-array member of a rule object. Both region_prefixes
+// and designators are required on every rule (align with the CLI, where both
+// sides of '<regions>:<designators>' are mandatory). An empty array is rejected
+// — use explicit ["*"] for "any", matching the CLI's bare '*'. A lone ["*"]
+// clears `out` (match everything). "*" mixed with other entries, empty-string
+// elements, wrong type, or oversize lists are errors. Entries are upper-cased
+// (nav data is upper-case; see ToUpper).
+std::optional<std::string> ParseRuleStringList(const rapidjson::Value& rule, std::string_view key,
+                                               std::vector<std::string>& out) {
+  const rapidjson::Value* arr_v = Member(rule, key);
+  if (!arr_v) {
+    return std::format("{} is required (use [\"*\"] for any)", key);
   }
-  if (!rule[key.data()].IsArray() || rule[key.data()].Size() > kMaxIdListSize) {
-    return false;
+  if (!arr_v->IsArray() || arr_v->Size() > kMaxIdListSize) {
+    return std::format("{} must be an array of at most {} strings", key, kMaxIdListSize);
   }
-  for (const rapidjson::Value& v : rule[key.data()].GetArray()) {
+  if (arr_v->Size() == 0) {
+    return std::format("{} must not be empty (use [\"*\"] for any)", key);
+  }
+  std::vector<std::string> items;
+  items.reserve(arr_v->Size());
+  bool saw_star = false;
+  for (const rapidjson::Value& v : arr_v->GetArray()) {
     if (!v.IsString()) {
-      return false;
+      return std::format("{} must be an array of at most {} strings", key, kMaxIdListSize);
     }
-    out.emplace_back(ToUpper(v.GetString()));
+    std::string s = JsonString(v);
+    if (s.empty()) {
+      return std::format("{} must not contain empty strings", key);
+    }
+    if (s.size() > kMaxIdentStringLen) {
+      return std::format("{} entries must be at most {} characters", key, kMaxIdentStringLen);
+    }
+    if (s == "*") {
+      saw_star = true;
+    }
+    items.push_back(ToUpper(std::move(s)));
   }
-  return true;
+  if (saw_star) {
+    if (items.size() != 1) {
+      return std::format("{}: \"*\" cannot be mixed with other entries; use [\"*\"] alone for any",
+                         key);
+    }
+    out.clear();
+    return std::nullopt;
+  }
+  out = std::move(items);
+  return std::nullopt;
 }
 
 // Parse the airway_rules array into structured AirwayRules. Returns an error
@@ -104,13 +161,14 @@ bool ParseRuleStringList(const rapidjson::Value& rule, std::string_view key,
 // sharing one rule slot, so "block these 200 airways" is a single rule.
 std::optional<std::string> ParseAirwayRules(const rapidjson::Value& args,
                                             std::vector<bf::AirwayRule>& out) {
-  if (!HasKey(args, kKeyAirwayRules)) {
+  const rapidjson::Value* arr_v = Member(args, kKeyAirwayRules);
+  if (!arr_v) {
     return std::nullopt;
   }
-  if (!args[kKeyAirwayRules.data()].IsArray()) {
+  if (!arr_v->IsArray()) {
     return std::format("{} must be an array of rule objects", kKeyAirwayRules);
   }
-  const rapidjson::Value& arr = args[kKeyAirwayRules.data()];
+  const rapidjson::Value& arr = *arr_v;
   if (arr.Size() > bf::AirwayRuleConstraint::kMaxRules) {
     return std::format(
         "{} must hold at most {} rules (one rule may list any number "
@@ -122,19 +180,19 @@ std::optional<std::string> ParseAirwayRules(const rapidjson::Value& args,
       return std::format("each {} entry must be an object", kKeyAirwayRules);
     }
     bf::AirwayRule parsed;
-    if (!ParseRuleStringList(rule, kKeyRegionPrefixes, parsed.region_prefixes)) {
-      return std::format("{} must be an array of at most {} strings", kKeyRegionPrefixes,
-                         kMaxIdListSize);
+    if (std::optional<std::string> err =
+            ParseRuleStringList(rule, kKeyRegionPrefixes, parsed.region_prefixes)) {
+      return err;
     }
-    if (!ParseRuleStringList(rule, kKeyDesignators, parsed.designators)) {
-      return std::format("{} must be an array of at most {} strings", kKeyDesignators,
-                         kMaxIdListSize);
+    if (std::optional<std::string> err =
+            ParseRuleStringList(rule, kKeyDesignators, parsed.designators)) {
+      return err;
     }
-    if (HasKey(rule, kKeyMatch)) {
-      if (!rule[kKeyMatch.data()].IsString()) {
+    if (const rapidjson::Value* match_v = Member(rule, kKeyMatch)) {
+      if (!match_v->IsString()) {
         return std::format("{} must be \"{}\" or \"{}\"", kKeyMatch, kMatchExact, kMatchPrefix);
       }
-      const std::string_view match = rule[kKeyMatch.data()].GetString();
+      const std::string_view match = JsonStringView(*match_v);
       if (match == kMatchExact) {
         parsed.match = bf::AirwayRule::Match::kExact;
       } else if (match == kMatchPrefix) {
@@ -143,12 +201,12 @@ std::optional<std::string> ParseAirwayRules(const rapidjson::Value& args,
         return std::format("{} must be \"{}\" or \"{}\"", kKeyMatch, kMatchExact, kMatchPrefix);
       }
     }
-    if (HasKey(rule, kKeyAction)) {
-      if (!rule[kKeyAction.data()].IsString()) {
+    if (const rapidjson::Value* action_v = Member(rule, kKeyAction)) {
+      if (!action_v->IsString()) {
         return std::format("{} must be \"{}\" or \"{}\"", kKeyAction, kActionBlock,
                            kActionPenalize);
       }
-      const std::string_view action = rule[kKeyAction.data()].GetString();
+      const std::string_view action = JsonStringView(*action_v);
       if (action == kActionBlock) {
         parsed.action = bf::AirwayRule::Action::kBlock;
       } else if (action == kActionPenalize) {
@@ -158,11 +216,11 @@ std::optional<std::string> ParseAirwayRules(const rapidjson::Value& args,
                            kActionPenalize);
       }
     }
-    if (HasKey(rule, kKeyPenaltyFraction)) {
-      if (!rule[kKeyPenaltyFraction.data()].IsNumber()) {
+    if (const rapidjson::Value* frac_v = Member(rule, kKeyPenaltyFraction)) {
+      if (!frac_v->IsNumber()) {
         return std::format("{} must be a number >= 0", kKeyPenaltyFraction);
       }
-      const double fraction = rule[kKeyPenaltyFraction.data()].GetDouble();
+      const double fraction = frac_v->GetDouble();
       // Reject negatives and non-finite values: a negative penalty would break the
       // search heuristic's admissibility. No upper bound -- a large fraction is a
       // legitimate "almost block, but keep the graph connected".
@@ -176,50 +234,101 @@ std::optional<std::string> ParseAirwayRules(const rapidjson::Value& args,
   return std::nullopt;
 }
 
+// Required string: present, non-empty, and within max_len.
+std::optional<HandlerResult> RequireNonEmptyString(const rapidjson::Value& args,
+                                                   std::string_view key, std::string& out,
+                                                   size_t max_len) {
+  const rapidjson::Value* v = Member(args, key);
+  if (!v || !v->IsString()) {
+    return HandlerResult{JsonError(std::format("{} (non-empty string) is required", key)),
+                         kStatusBadRequest};
+  }
+  std::string s = JsonString(*v);
+  if (s.empty()) {
+    return HandlerResult{JsonError(std::format("{} must be a non-empty string", key)),
+                         kStatusBadRequest};
+  }
+  if (s.size() > max_len) {
+    return HandlerResult{JsonError(std::format("{} must be at most {} characters", key, max_len)),
+                         kStatusBadRequest};
+  }
+  out = std::move(s);
+  return std::nullopt;
+}
+
+// Optional string: absent is fine; if present it must be a non-empty string
+// within max_len (an explicit empty string is a 400, not "clear to any").
+std::optional<HandlerResult> OptionalNonEmptyString(const rapidjson::Value& args,
+                                                    std::string_view key, std::string& out,
+                                                    size_t max_len) {
+  const rapidjson::Value* v = Member(args, key);
+  if (!v) {
+    return std::nullopt;
+  }
+  if (!v->IsString()) {
+    return HandlerResult{JsonError(std::format("{} must be a string", key)), kStatusBadRequest};
+  }
+  std::string s = JsonString(*v);
+  if (s.empty()) {
+    return HandlerResult{JsonError(std::format("{} must be a non-empty string when present", key)),
+                         kStatusBadRequest};
+  }
+  if (s.size() > max_len) {
+    return HandlerResult{JsonError(std::format("{} must be at most {} characters", key, max_len)),
+                         kStatusBadRequest};
+  }
+  out = std::move(s);
+  return std::nullopt;
+}
+
 // Build a batch-lookup handler from a typed LookupX entry: parse the ids array
-// (400 on a malformed/missing list), then delegate to the entry in JSON.
+// (400 on a malformed/missing/empty list), then delegate to the entry in JSON.
 template <class Fn>
 QueryHandler MakeLookupAdapter(Fn fn) {
-  return [fn](const rapidjson::Value& args, const NavDatabase& db) -> HandlerResult {
+  return RequireObjectArgs([fn](const rapidjson::Value& args,
+                                const NavDatabase& db) -> HandlerResult {
     auto ids = ParseIdList(args, kKeyIds);
     if (!ids) {
       return {JsonError(std::format("{} (array of at most {} strings) is required", kKeyIds,
                                     kMaxIdListSize)),
               kStatusBadRequest};
     }
+    if (ids->empty()) {
+      return {JsonError(std::format("{} must be a non-empty array", kKeyIds)), kStatusBadRequest};
+    }
     return fn(db, *ids, OutputFormat::kJson);
-  };
+  });
 }
 
 // The find_routes handler: parse the args object into a RouteRequest (with the
 // server-side validation the typed entry does not redo), then delegate.
 HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase& db) {
   bf::RouteRequest request;
-  if (!HasKey(args, kKeyDeparture) || !args[kKeyDeparture.data()].IsString() ||
-      !HasKey(args, kKeyArrival) || !args[kKeyArrival.data()].IsString()) {
-    return {JsonError(std::format("{} and {} are required", kKeyDeparture, kKeyArrival)),
-            kStatusBadRequest};
+  if (auto err =
+          RequireNonEmptyString(args, kKeyDeparture, request.departure, kMaxIdentStringLen)) {
+    return *err;
   }
-  request.departure = args[kKeyDeparture.data()].GetString();
-  request.arrival = args[kKeyArrival.data()].GetString();
+  if (auto err = RequireNonEmptyString(args, kKeyArrival, request.arrival, kMaxIdentStringLen)) {
+    return *err;
+  }
   // Altitude is an inclusive flight-level range. min_fl/max_fl may be given
   // together for a band, or either alone (the other defaults to it) for a
   // single level. Absent => no altitude/MORA filtering. Present-but-wrong-type
   // is a 400 (not a silent default) so clients cannot think a constraint stuck.
   {
-    const bool has_min_key = HasKey(args, kKeyMinFl);
-    const bool has_max_key = HasKey(args, kKeyMaxFl);
-    if (has_min_key && !args[kKeyMinFl.data()].IsInt()) {
+    const rapidjson::Value* min_v = Member(args, kKeyMinFl);
+    const rapidjson::Value* max_v = Member(args, kKeyMaxFl);
+    const bool has_min_key = min_v != nullptr;
+    const bool has_max_key = max_v != nullptr;
+    if (has_min_key && !min_v->IsInt()) {
       return {JsonError(std::format("{} must be an integer", kKeyMinFl)), kStatusBadRequest};
     }
-    if (has_max_key && !args[kKeyMaxFl.data()].IsInt()) {
+    if (has_max_key && !max_v->IsInt()) {
       return {JsonError(std::format("{} must be an integer", kKeyMaxFl)), kStatusBadRequest};
     }
     if (has_min_key || has_max_key) {
-      const int min_fl =
-          has_min_key ? args[kKeyMinFl.data()].GetInt() : args[kKeyMaxFl.data()].GetInt();
-      const int max_fl =
-          has_max_key ? args[kKeyMaxFl.data()].GetInt() : args[kKeyMinFl.data()].GetInt();
+      const int min_fl = has_min_key ? min_v->GetInt() : max_v->GetInt();
+      const int max_fl = has_max_key ? max_v->GetInt() : min_v->GetInt();
       if (min_fl > max_fl) {
         return {JsonError(std::format("{} must not exceed {}", kKeyMinFl, kKeyMaxFl)),
                 kStatusBadRequest};
@@ -244,11 +353,11 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
       request.altitude = bf::FlRange{min_fl, max_fl};
     }
   }
-  if (HasKey(args, kKeyLevel)) {
-    if (!args[kKeyLevel.data()].IsString()) {
+  if (const rapidjson::Value* level_v = Member(args, kKeyLevel)) {
+    if (!level_v->IsString()) {
       return {JsonError(std::format("{} must be a string", kKeyLevel)), kStatusBadRequest};
     }
-    const std::string_view level = args[kKeyLevel.data()].GetString();
+    const std::string_view level = JsonStringView(*level_v);
     if (level == kLevelLow) {
       request.level = bf::LevelPreference::kLow;
     } else if (level == kLevelHigh) {
@@ -261,14 +370,14 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
               kStatusBadRequest};
     }
   }
-  if (HasKey(args, kKeyK)) {
+  if (const rapidjson::Value* k_v = Member(args, kKeyK)) {
     // A present-but-non-integer k (e.g. 3.5, or the string "3") must be rejected,
     // not silently dropped to the default: the caller clearly meant to set k, and
     // ignoring it would hand back one route where several were asked for.
-    if (!args[kKeyK.data()].IsInt()) {
+    if (!k_v->IsInt()) {
       return {JsonError(std::format("{} must be an integer", kKeyK)), kStatusBadRequest};
     }
-    request.k = args[kKeyK.data()].GetInt();
+    request.k = k_v->GetInt();
   }
   // The schema declares minimum:1, but enforce it server-side too: Yen K-shortest
   // is undefined for k <= 0, and a non-positive value must not reach FindRoutes.
@@ -284,27 +393,20 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   if (request.k > kMaxK) {
     return {JsonError(std::format("{} must not exceed {}", kKeyK, kMaxK)), kStatusBadRequest};
   }
-  auto require_string = [&](std::string_view key,
-                            std::string& out) -> std::optional<HandlerResult> {
-    if (!HasKey(args, key)) {
-      return std::nullopt;
-    }
-    if (!args[key.data()].IsString()) {
-      return HandlerResult{JsonError(std::format("{} must be a string", key)), kStatusBadRequest};
-    }
-    out = args[key.data()].GetString();
-    return std::nullopt;
-  };
-  if (auto err = require_string(kKeyDepartureRunway, request.departure_runway)) {
+  if (auto err = OptionalNonEmptyString(args, kKeyDepartureRunway, request.departure_runway,
+                                        kMaxIdentStringLen)) {
     return *err;
   }
-  if (auto err = require_string(kKeyArrivalRunway, request.arrival_runway)) {
+  if (auto err = OptionalNonEmptyString(args, kKeyArrivalRunway, request.arrival_runway,
+                                        kMaxIdentStringLen)) {
     return *err;
   }
-  if (auto err = require_string(kKeyDepartureSid, request.departure_sid)) {
+  if (auto err = OptionalNonEmptyString(args, kKeyDepartureSid, request.departure_sid,
+                                        kMaxIdentStringLen)) {
     return *err;
   }
-  if (auto err = require_string(kKeyArrivalStar, request.arrival_star)) {
+  if (auto err =
+          OptionalNonEmptyString(args, kKeyArrivalStar, request.arrival_star, kMaxIdentStringLen)) {
     return *err;
   }
   // For the optional ID lists, tell "absent" (skip) from "present but bad"
@@ -322,12 +424,12 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   if (std::optional<std::string> err = ParseAirwayRules(args, request.airway_rules)) {
     return {JsonError(*err), kStatusBadRequest};
   }
-  if (HasKey(args, kKeyRandomSeed)) {
-    if (!args[kKeyRandomSeed.data()].IsUint()) {
+  if (const rapidjson::Value* seed_v = Member(args, kKeyRandomSeed)) {
+    if (!seed_v->IsUint()) {
       return {JsonError(std::format("{} must be an unsigned integer", kKeyRandomSeed)),
               kStatusBadRequest};
     }
-    request.random_seed = args[kKeyRandomSeed.data()].GetUint();
+    request.random_seed = seed_v->GetUint();
   }
   if (HasKey(args, kKeyForcedPoints)) {
     auto v = ParseIdList(args, kKeyForcedPoints);
@@ -344,21 +446,24 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
 
 // The lookup_procedure_legs handler: per-leg detail of one named procedure.
 HandlerResult LookupProcedureLegsHandler(const rapidjson::Value& args, const NavDatabase& db) {
-  if (!HasKey(args, kKeyAirport) || !args[kKeyAirport.data()].IsString() ||
-      !HasKey(args, kKeyProcedure) || !args[kKeyProcedure.data()].IsString()) {
-    return {JsonError(std::format("{} and {} are required", kKeyAirport, kKeyProcedure)),
-            kStatusBadRequest};
+  std::string airport;
+  std::string procedure;
+  if (auto err = RequireNonEmptyString(args, kKeyAirport, airport, kMaxIdentStringLen)) {
+    return *err;
   }
-  return LookupProcedureLegs(db, args[kKeyAirport.data()].GetString(),
-                             args[kKeyProcedure.data()].GetString(), OutputFormat::kJson);
+  if (auto err = RequireNonEmptyString(args, kKeyProcedure, procedure, kMaxIdentStringLen)) {
+    return *err;
+  }
+  return LookupProcedureLegs(db, airport, procedure, OutputFormat::kJson);
 }
 
 // The parse_route handler: validate & expand a filed route string.
 HandlerResult ParseRouteHandler(const rapidjson::Value& args, const NavDatabase& db) {
-  if (!HasKey(args, kKeyRoute) || !args[kKeyRoute.data()].IsString()) {
-    return {JsonError(std::format("{} (string) is required", kKeyRoute)), kStatusBadRequest};
+  std::string route;
+  if (auto err = RequireNonEmptyString(args, kKeyRoute, route, kMaxRouteStringLen)) {
+    return *err;
   }
-  return ParseRoute(db, args[kKeyRoute.data()].GetString(), OutputFormat::kJson);
+  return ParseRoute(db, route, OutputFormat::kJson);
 }
 
 }  // namespace
@@ -370,12 +475,13 @@ std::vector<NamedHandler> MakeHandlers() {
   std::vector<NamedHandler> handlers;
   handlers.reserve(9);
 
-  handlers.push_back({std::string(kHandlerFindRoutes), FindRoutesHandler});
-  handlers.push_back({std::string(kHandlerParseRoute), ParseRouteHandler});
+  handlers.push_back({std::string(kHandlerFindRoutes), RequireObjectArgs(FindRoutesHandler)});
+  handlers.push_back({std::string(kHandlerParseRoute), RequireObjectArgs(ParseRouteHandler)});
   handlers.push_back({std::string(kHandlerLookupWaypoints), MakeLookupAdapter(LookupWaypoints)});
   handlers.push_back({std::string(kHandlerLookupAirports), MakeLookupAdapter(LookupAirports)});
   handlers.push_back({std::string(kHandlerLookupProcedures), MakeLookupAdapter(LookupProcedures)});
-  handlers.push_back({std::string(kHandlerLookupProcedureLegs), LookupProcedureLegsHandler});
+  handlers.push_back(
+      {std::string(kHandlerLookupProcedureLegs), RequireObjectArgs(LookupProcedureLegsHandler)});
   handlers.push_back({std::string(kHandlerLookupAirways), MakeLookupAdapter(LookupAirways)});
   handlers.push_back(
       {std::string(kHandlerLookupNavaidDetail), MakeLookupAdapter(LookupNavaidDetails)});

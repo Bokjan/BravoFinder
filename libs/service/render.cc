@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/domain/encoding_scale.h"
@@ -27,6 +28,22 @@
 namespace bf::service {
 
 namespace {
+
+// Flatten control characters that would break a single-line text payload (or
+// inject blank lines) when an id / error message is echoed. JSON path uses
+// RapidJSON Writer and needs no sanitization.
+std::string SanitizeTextFragment(std::string_view s) {
+  std::string out;
+  out.reserve(s.size());
+  for (const char c : s) {
+    if (c == '\n' || c == '\r' || c == '\0') {
+      out.push_back(' ');
+    } else {
+      out.push_back(c);
+    }
+  }
+  return out;
+}
 
 // A small RAII guard over a RapidJSON Writer writing to a StringBuffer, with the
 // 6-dp max-decimal-places every JSON renderer here uses (point lat/lon must not
@@ -209,7 +226,7 @@ std::string RenderWaypoints(OutputFormat fmt, const std::vector<std::string>& id
   std::ostringstream os;
   for (size_t i = 0; i < ids.size(); ++i) {
     if (results[i].empty()) {
-      os << ids[i] << ": not found\n";
+      os << SanitizeTextFragment(ids[i]) << ": not found\n";
       continue;
     }
     for (const bf::WaypointInfo& w : results[i]) {
@@ -239,7 +256,7 @@ std::string RenderAirports(OutputFormat fmt, const std::vector<std::string>& ids
   std::ostringstream os;
   for (size_t i = 0; i < ids.size(); ++i) {
     if (!results[i]) {
-      os << ids[i] << ": not found\n";
+      os << SanitizeTextFragment(ids[i]) << ": not found\n";
       continue;
     }
     const bf::AirportInfo& a = *results[i];
@@ -268,7 +285,7 @@ std::string RenderProcedures(OutputFormat fmt, const std::vector<std::string>& i
   std::ostringstream os;
   for (size_t i = 0; i < ids.size(); ++i) {
     if (!results[i]) {
-      os << ids[i] << ": not found\n";
+      os << SanitizeTextFragment(ids[i]) << ": not found\n";
       continue;
     }
     WriteProceduresSummaryText(os, *results[i]);
@@ -294,7 +311,7 @@ std::string RenderAirways(OutputFormat fmt, const std::vector<std::string>& ids,
   std::ostringstream os;
   for (size_t i = 0; i < ids.size(); ++i) {
     if (!results[i]) {
-      os << ids[i] << ": not found\n";
+      os << SanitizeTextFragment(ids[i]) << ": not found\n";
       continue;
     }
     const bf::AirwayInfo& a = *results[i];
@@ -325,7 +342,7 @@ std::string RenderNavaidDetails(OutputFormat fmt, const std::vector<std::string>
   std::ostringstream os;
   for (size_t i = 0; i < ids.size(); ++i) {
     if (results[i].empty()) {
-      os << ids[i] << ": not found\n";
+      os << SanitizeTextFragment(ids[i]) << ": not found\n";
       continue;
     }
     for (const bf::NavaidDetailInfo& d : results[i]) {
@@ -361,7 +378,7 @@ std::string RenderHolds(OutputFormat fmt, const std::vector<std::string>& ids,
   std::ostringstream os;
   for (size_t i = 0; i < ids.size(); ++i) {
     if (results[i].empty()) {
-      os << ids[i] << ": not found\n";
+      os << SanitizeTextFragment(ids[i]) << ": not found\n";
       continue;
     }
     for (const bf::HoldInfo& h : results[i]) {
@@ -452,7 +469,7 @@ std::string RenderProceduresMixed(
     } else if (details[i]) {
       os << RenderProcedureDetail(fmt, *details[i]);
     } else {
-      os << labels[i] << ": not found\n";
+      os << SanitizeTextFragment(labels[i]) << ": not found\n";
     }
   }
   return os.str();
@@ -474,7 +491,7 @@ std::string RenderError(OutputFormat fmt, const std::string& message) {
   if (fmt == OutputFormat::kJson) {
     return JsonError(message);
   }
-  return std::format("{}{}\n", kTextErrorPrefix, message);
+  return std::format("{}{}\n", kTextErrorPrefix, SanitizeTextFragment(message));
 }
 
 }  // namespace bf::service
