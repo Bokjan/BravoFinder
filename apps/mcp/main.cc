@@ -49,10 +49,7 @@ int RunHttp(bf::service::NavDatabaseRegistry& registry, const std::string& host,
   std::signal(SIGPIPE, SIG_IGN);
 #endif
   // libuv reads UV_THREADPOOL_SIZE once, the first time the pool is used, so set
-  // it before the loop runs. Bounded to libuv's maximum of 1024.
-  if (worker_threads > 1024) {
-    worker_threads = 1024;
-  }
+  // it before the loop runs. Bounds are validated in main before this runs.
   bf::SetEnv("UV_THREADPOOL_SIZE", std::to_string(worker_threads));
 
   uv_loop_t loop;
@@ -116,7 +113,7 @@ int main(int argc, char** argv) {
 
   std::string transport = "stdio";
   std::string host = "0.0.0.0";
-  int port = bf::http_server::kDefaultPort;
+  int port = bf::http_server::kDefaultMcpPort;
   int worker_threads = static_cast<int>(std::thread::hardware_concurrency());
   if (worker_threads <= 0) {
     worker_threads = 4;
@@ -151,6 +148,25 @@ int main(int argc, char** argv) {
   // Shared LGPL §4c combined-work notice (see version_banner.h).
   app.set_version_flag("--version", bf::service::VersionBanner());
   CLI11_PARSE(app, argc, argv);
+
+  // Reject out-of-range HTTP-mode values (validated even in stdio mode so a
+  // mistyped flag fails loudly rather than being silently ignored / clamped).
+  if (port < 1 || port > 65535) {
+    std::cerr << bf::service::kTextErrorPrefix << "--port must be in 1..65535 (got " << port
+              << ")\n";
+    return EXIT_FAILURE;
+  }
+  if (worker_threads < 1 || worker_threads > 1024) {
+    std::cerr << bf::service::kTextErrorPrefix << "--worker-threads must be in 1..1024 (got "
+              << worker_threads << ")\n";
+    return EXIT_FAILURE;
+  }
+  if (io_timeout_sec < 1) {
+    std::cerr << bf::service::kTextErrorPrefix << "--io-timeout must be >= 1 second (got "
+              << io_timeout_sec << ")\n";
+    return EXIT_FAILURE;
+  }
+
   const std::string dir = db_dir;
 
   bf::Result<bf::BfdbInventory> inventory = bf::BfdbInventory::Scan(dir);

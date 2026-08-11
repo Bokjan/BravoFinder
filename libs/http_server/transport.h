@@ -34,8 +34,12 @@ class Connection;
 // --io-timeout). The Limits struct stores it as milliseconds.
 inline constexpr int kDefaultIoTimeoutSec = 30;
 
-// Default bind port for bf-http / bf-mcp --transport http (--port).
+// Default bind port for bf-http (--port).
 inline constexpr int kDefaultPort = 8080;
+
+// Default bind port for bf-mcp --transport http (--port). Distinct from
+// kDefaultPort so bf-http and bf-mcp can run side-by-side on one host.
+inline constexpr int kDefaultMcpPort = 8081;
 
 // Default request body cap, in bytes (--max-body). 1 MiB.
 inline constexpr size_t kDefaultMaxBodyBytes = 1u << 20;

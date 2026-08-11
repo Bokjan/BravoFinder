@@ -60,7 +60,7 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 - **chunked 拒绝**：内网 JSON API 不需要 `Transfer-Encoding: chunked` → **显式拒绝**（400 + 关连接），安全地拒而非误解析，防请求走私。
 - **Expect: 100-continue**：不回中间的 `100 Continue`，直接 **417** + 关连接，避免客户端空等。
 - **同时只处理一个请求**：不做 pipelining——一个请求分发后忽略后续输入字节，并在写回时强制 `Connection: close`（无论第二请求是挤在同一次读缓冲里，还是分多次读进来，都一样处理），防止 keep-alive 复用到已经丢弃的下一请求上。
-- **路由 path**：按原始字符串精确匹配，不做百分号解码 / 规范化（`/v1/routes` ≠ `/v1/routes/`）；查询参数同样按原始 query 字符串交给消费者。
+- **路由 path**：按字面字符串匹配；会去掉**单个**末尾 `/`（`/v1/routes/` 与 `/v1/routes` 等价），根路径 `/` 保留不动；不做百分号解码。查询参数同样按原始 query 字符串交给消费者。
 - **异常兜底**：worker 里 handler 理论只走 `Result`，仍 try/catch 兜住意外异常 → 500，绝不让异常穿过线程边界。
 
 ## 端点与错误模型
@@ -83,7 +83,7 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 
 ## MCP-over-HTTP 传输（`bf-mcp --transport http`）
 
-`bf-mcp` 是同一套查询能力的另一个消费者。它默认 **stdio**（本地 MCP client spawn，向后兼容），也可切到 **HTTP**：`bf-mcp --transport http --port 8080`，供远程 / 多客户端 MCP client 接入。REST（`bf-http`）不受影响、独立二进制——`BravoFinderWeb` 的 Go 网关按 path+method 字节透传 REST、从不解析 body，砍掉 REST 换纯 MCP 会把它退化成 JSON-RPC↔REST 翻译桥，故 REST 保留。
+`bf-mcp` 是同一套查询能力的另一个消费者。它默认 **stdio**（本地 MCP client 拉起进程，向后兼容），也可切到 **HTTP**：`bf-mcp --transport http --port 8081`（默认端口与 `bf-http` 的 8080 错开，便于同机并跑），供远程 / 多客户端 MCP client 接入。REST（`bf-http`）不受影响、独立二进制——`BravoFinderWeb` 的 Go 网关按 path+method 字节透传 REST、从不解析 body，砍掉 REST 换纯 MCP 会把它退化成 JSON-RPC↔REST 翻译桥，故 REST 保留。
 
 - **协议核心复用**：两种 MCP 传输共用 transport-neutral 的 `Dispatcher`（`apps/mcp/dispatcher.{h,cc}`，method 分发 + 协议版本协商 + 工具表 + **batch**）。`Dispatch` 同时认单个对象与 batch（JSON 数组）：batch 逐元素分发、收集非 notification 项为数组，全 notification 则无响应；非对象元素回一个 `id:null` 的 `-32600`（不静默丢弃），空 batch 回单个 `-32600` error 对象（非数组，per JSON-RPC 2.0）。正因为 batch 在 `Dispatcher` 里，**stdio 也支持 batch**——一行 batch 请求进、一行数组响应出。stdio 内联 `Dispatch`；HTTP 把整个 `Dispatch` offload 到线程池（`Dispatch` 是 `const`、只读 registry/tools，多 worker 并发安全）。`stdio_runner` 与 `mcp_http` 只是两层薄壳。错误码（`-32700`/`-32600`/`-32601`/`-32602`，JSON-RPC 2.0 §5.1 规范定义）收口在 `apps/mcp/jsonrpc.h` 的 `constexpr`，不散落字面量。
 - **传输核心复用**：HTTP 模式建在 `bf_http_server` 上，与 REST 同源——10–30ms 的 `tools/call` 计算走同一套 `uv_queue_work` offload + 连接存活守卫。offload 的工作单元是 **可拷贝** 的 `std::function<WorkResult()>`（解析后的请求用 `shared_ptr<Document>` 持有，move-capture 的 Document 不可拷贝、进不了 `std::function`）。

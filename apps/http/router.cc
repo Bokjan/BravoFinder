@@ -165,24 +165,31 @@ Router::Router(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop)
 
 void Router::Handle(std::shared_ptr<http_server::Connection> conn,
                     const http_server::HttpRequest& req) {
+  // Strip a single trailing '/' so /v1/routes/ matches /v1/routes. Leave "/"
+  // alone (root) and do not percent-decode — path match stays literal otherwise.
+  std::string path = req.path;
+  if (path.size() > 1 && path.back() == '/') {
+    path.pop_back();
+  }
+
   // Liveness: the process is up, so always 200 -- no database touched.
-  if (req.method == "GET" && req.path == "/healthz") {
+  if (req.method == "GET" && path == "/healthz") {
     conn->WriteResponse(http_server::kStatusOk, StatusJson("ok"), req.keep_alive);
     return;
   }
   // Program version for consumers — loop-thread, no database.
-  if (req.method == "GET" && req.path == "/v1/version") {
+  if (req.method == "GET" && path == "/v1/version") {
     conn->WriteResponse(http_server::kStatusOk, VersionJson(), req.keep_alive);
     return;
   }
   // The cycle list is an in-memory read of the (immutable) inventory.
-  if (req.method == "GET" && req.path == "/v1/cycles") {
+  if (req.method == "GET" && path == "/v1/cycles") {
     conn->WriteResponse(http_server::kStatusOk, SerializeCycles(), req.keep_alive);
     return;
   }
   // Readiness: opening the latest cycle may do disk I/O, so offload it; 503 if
   // it cannot be resolved.
-  if (req.method == "GET" && req.path == "/readyz") {
+  if (req.method == "GET" && path == "/readyz") {
     if (inflight_.load(std::memory_order_relaxed) >= kMaxInflightWork) {
       conn->WriteResponse(http_server::kStatusServiceUnavailable,
                           http_server::JsonError("server busy"), req.keep_alive);
@@ -198,7 +205,7 @@ void Router::Handle(std::shared_ptr<http_server::Connection> conn,
   }
 
   // Query endpoints: POST + JSON body. An unmatched (method, path) is 404.
-  auto it = routes_.find(req.path);
+  auto it = routes_.find(path);
   if (req.method != "POST" || it == routes_.end()) {
     conn->WriteResponse(http_server::kStatusNotFound, http_server::JsonError("not found"),
                         req.keep_alive);

@@ -19,6 +19,7 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
     std::vector<std::string> ids;
     std::string data_dir = "navdata";
     std::string db_path;
+    std::string cifp_load = "on-demand";
     std::string format = "text";
   };
   auto a = std::make_shared<Args>();
@@ -39,12 +40,17 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
   query->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();
   query->add_option("--db", a->db_path, "Prebuilt .bfdb cache to load (skips parsing)");
+  query
+      ->add_option("--cifp-load", a->cifp_load,
+                   "CIFP cache load mode: on-demand (default) or eager")
+      ->capture_default_str()
+      ->check(CLI::IsMember({"on-demand", "eager"}));
   query->add_option("--format", a->format, "Output format: text or json")
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
 
   query->callback([a, &exit_code]() {
-    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir);
+    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
       PrintCliError(db.error().message);
       exit_code = EXIT_FAILURE;
@@ -84,16 +90,20 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
       result = bf::service::LookupProceduresMixed(db.value(), selectors, fmt);
     }
 
-    // The lookup body (matches / "not found" lines / null array) always goes to
-    // stdout, parallel to the input, so scripts can capture it uniformly. Exit
-    // non-zero only when every requested id was missing (status 404); a partial
-    // hit still succeeds.
+    // Match cmd_route / cmd_parse_route: failures (status >= 400) go to stderr
+    // with a non-zero exit; success stays on stdout. A partial hit is still
+    // success (status 200) and prints the parallel body to stdout.
+    if (result.status >= bf::service::kErrorStatusThreshold) {
+      std::cerr << result.body;
+      if (fmt == bf::service::OutputFormat::kJson) {
+        std::cerr << "\n";
+      }
+      exit_code = EXIT_FAILURE;
+      return;
+    }
     std::cout << result.body;
     if (fmt == bf::service::OutputFormat::kJson) {
       std::cout << "\n";
-    }
-    if (result.status >= bf::service::kErrorStatusThreshold) {
-      exit_code = EXIT_FAILURE;
     }
   });
 }

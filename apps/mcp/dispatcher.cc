@@ -83,6 +83,16 @@ Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const
     return {};  // not a JSON object: nothing to reply to
   }
   const bool has_id = request.HasMember("id");
+  // JSON-RPC 2.0 requires "jsonrpc":"2.0" on every request. Reject early with
+  // -32600 (id echoed when present, else null) so a missing/wrong version is
+  // not silently treated as a well-formed request or notification.
+  if (!request.HasMember("jsonrpc") || !request["jsonrpc"].IsString() ||
+      std::string_view(request["jsonrpc"].GetString()) != jsonrpc::kVersion) {
+    const rapidjson::Value null_id(rapidjson::kNullType);
+    const rapidjson::Value& id = has_id ? request["id"] : null_id;
+    return {MakeError(id, jsonrpc::kInvalidRequest, "invalid request: jsonrpc must be \"2.0\""),
+            true};
+  }
   if (!request.HasMember("method") || !request["method"].IsString()) {
     // Invalid request: only reply if it carried an id (a notification with no
     // method is silently dropped, per JSON-RPC).
@@ -142,10 +152,10 @@ Dispatcher::Response Dispatcher::DispatchBatch(const rapidjson::Value& batch) co
   w.StartArray();
   bool has_response = false;
   for (const rapidjson::Value& item : batch.GetArray()) {
+    // Non-object batch elements (scalars, nested arrays, …) are not valid
+    // JSON-RPC requests. Emit -32600 (id null) and do NOT recurse into
+    // DispatchBatch for a nested array — a batch is one level deep.
     if (!item.IsObject()) {
-      // A non-object batch element is not a valid JSON-RPC request: emit a
-      // -32600 error entry (id null) so the client sees the rejection instead
-      // of a silently shortened response array, per JSON-RPC 2.0.
       has_response = true;
       const rapidjson::Value null_id(rapidjson::kNullType);
       const std::string err = MakeError(null_id, jsonrpc::kInvalidRequest, "invalid request");
@@ -285,9 +295,9 @@ std::string Dispatcher::HandleToolsList(const rapidjson::Value& id) const {
     entry.AddMember("name", rapidjson::Value(kListCyclesTool, alloc), alloc);
     entry.AddMember(
         "description",
-        rapidjson::Value("List the AIRAC cycles this server can query. Returns each cycle and "
-                         "whether it is already loaded. Pass a cycle to the other tools' "
-                         "'cycle' argument to query a specific one.",
+        rapidjson::Value("List the AIRAC cycles this server can query. Returns each cycle "
+                         "(newest first). Pass a cycle to the other tools' 'cycle' argument "
+                         "to query a specific one.",
                          alloc),
         alloc);
     rapidjson::Value schema(rapidjson::kObjectType);
@@ -304,9 +314,8 @@ std::string Dispatcher::HandleToolsList(const rapidjson::Value& id) const {
 // Serialize the registry's available cycles as a JSON array, newest first.
 std::string Dispatcher::HandleListCycles(const rapidjson::Value& id) const {
   const BfdbInventory& inv = registry_.inventory();
-  // A cycle is "loaded" once Get has opened it; the inventory does not track
-  // that, so we only report the cycle here (loaded state is transient and not
-  // essential for the client's choice).
+  // Report only the cycle number: whether a cycle has been opened yet is
+  // transient registry state and is not part of this tool's contract.
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartArray();

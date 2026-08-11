@@ -68,7 +68,7 @@ Exposes `bf route` and `bf query` as MCP tools for LLM clients, over **stdio** (
 
 ```bash
 BRAVOFINDER_NAVDATA=navdata bf-mcp                       # stdio, local client
-bf-mcp --transport http --db-dir /path/to/caches --port 8080
+bf-mcp --transport http --db-dir /path/to/caches --port 8081
 ```
 
 ### HTTP server (`bf-http`)

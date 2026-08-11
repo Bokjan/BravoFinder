@@ -26,7 +26,8 @@ Result<NavDatabase> OpenForRead(const std::string& db_path, const std::string& d
 
 // Parse an --alt spec into an inclusive flight-level range. Accepts a single
 // level ("350" -> {350, 350}) or a hyphenated range ("300-400" -> {300, 400}).
-// Returns nullopt on malformed input or an inverted range (min > max).
+// Returns nullopt on malformed input, an inverted range (min > max), or a level
+// outside 0..bf::service::kMaxFl (inclusive).
 std::optional<FlRange> ParseAltSpec(const std::string& spec);
 
 // Parse one --airway-filter spec into a structured AirwayRule. The syntax is

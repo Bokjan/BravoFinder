@@ -224,6 +224,32 @@ TEST_CASE("mcp dispatcher: JSON-RPC protocol errors", "[unit][mcp]") {
     rapidjson::Document doc = Parse(resp.body);
     CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidParams);
   }
+
+  SECTION("missing jsonrpc is -32600") {
+    const rapidjson::Document req = Req(R"({"id":4,"method":"tools/list"})");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+    CHECK(doc["id"].GetInt() == 4);
+  }
+
+  SECTION("wrong jsonrpc version is -32600") {
+    const rapidjson::Document req = Req(R"({"jsonrpc":"1.0","id":5,"method":"tools/list"})");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+  }
+
+  SECTION("missing jsonrpc without an id still replies with id null") {
+    const rapidjson::Document req = Req(R"({"method":"initialize"})");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+    CHECK(doc["id"].IsNull());
+  }
 }
 
 TEST_CASE("mcp dispatcher: a notification yields no response", "[unit][mcp]") {
@@ -271,6 +297,33 @@ TEST_CASE("mcp dispatcher: a batch dispatches each element", "[unit][mcp]") {
     REQUIRE(doc.Size() == 2);
     CHECK(doc[0]["id"].GetInt() == 1);
     CHECK(doc[1]["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+  }
+
+  SECTION("a nested array batch element is -32600, not a recursive batch") {
+    const rapidjson::Document req = Req(
+        R"([{"jsonrpc":"2.0","id":1,"method":"tools/list"},[{"jsonrpc":"2.0","id":2,"method":"tools/list"}]])");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    REQUIRE(doc.IsArray());
+    REQUIRE(doc.Size() == 2);
+    CHECK(doc[0]["id"].GetInt() == 1);
+    CHECK(doc[1]["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+    // Nested request id 2 must not appear as a successful result entry.
+    CHECK_FALSE(doc[1].HasMember("result"));
+  }
+
+  SECTION("a batch element missing jsonrpc is -32600") {
+    const rapidjson::Document req =
+        Req(R"([{"id":1,"method":"tools/list"},{"jsonrpc":"2.0","id":2,"method":"tools/list"}])");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    REQUIRE(doc.IsArray());
+    REQUIRE(doc.Size() == 2);
+    CHECK(doc[0]["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+    CHECK(doc[1]["id"].GetInt() == 2);
+    CHECK(doc[1].HasMember("result"));
   }
 
   SECTION("a batch of only notifications yields no response") {

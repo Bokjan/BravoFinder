@@ -10,29 +10,73 @@
 
 #include "stdio_runner.h"
 
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+
 #include <iostream>
 #include <string>
 
+#include "jsonrpc.h"
 #include "rapidjson/document.h"
 
 namespace bf::mcp {
 
 namespace {
 
+// A JSON-RPC error envelope with a null id, for a framing failure where no
+// request id can be extracted (oversized line, parse error, or a body that is
+// neither a JSON object nor an array). Mirrors mcp_http's JsonRpcFramingError.
+std::string JsonRpcFramingError(int code, const std::string& message) {
+  rapidjson::StringBuffer buf;
+  rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+  w.StartObject();
+  w.Key("jsonrpc");
+  w.String(jsonrpc::kVersion);
+  w.Key("id");
+  w.Null();
+  w.Key("error");
+  w.StartObject();
+  w.Key("code");
+  w.Int(code);
+  w.Key("message");
+  w.String(message.c_str(), static_cast<unsigned>(message.size()));
+  w.EndObject();
+  w.EndObject();
+  return buf.GetString();
+}
+
+void WriteFramingError(int code, const std::string& message) {
+  std::cout << JsonRpcFramingError(code, message) << "\n";
+  std::cout.flush();
+}
+
 // Parse a JSON-RPC request line. Returns false if the line is not a valid JSON
-// object or array (the caller then silently skips it, as a well-behaved client
-// sends well-formed JSON). An array is a JSON-RPC batch; the Dispatcher handles
-// it as one unit, so the stdio transport gets batch support for free.
-bool ParseRequest(const std::string& line, rapidjson::Document& doc) {
+// object or array (the caller then emits a framing error). An array is a
+// JSON-RPC batch; the Dispatcher handles it as one unit, so the stdio transport
+// gets batch support for free. On failure, *out_code / *out_message name the
+// framing error to write (-32700 parse, -32600 invalid request).
+bool ParseRequest(const std::string& line, rapidjson::Document& doc, int* out_code,
+                  std::string* out_message) {
   if (line.empty()) {
+    *out_code = jsonrpc::kParseError;
+    *out_message = "empty request";
     return false;
   }
   // Parse iteratively (kParseIterativeFlag) over (data, size): the line is
   // untrusted, and rapidjson's default recursive-descent parser would blow the
   // C++ stack on a deeply nested payload. Using the length form also stops an
   // embedded NUL from truncating the request.
-  return !doc.Parse<rapidjson::kParseIterativeFlag>(line.data(), line.size()).HasParseError() &&
-         (doc.IsObject() || doc.IsArray());
+  if (doc.Parse<rapidjson::kParseIterativeFlag>(line.data(), line.size()).HasParseError()) {
+    *out_code = jsonrpc::kParseError;
+    *out_message = "parse error";
+    return false;
+  }
+  if (!doc.IsObject() && !doc.IsArray()) {
+    *out_code = jsonrpc::kInvalidRequest;
+    *out_message = "request must be a JSON object or array";
+    return false;
+  }
+  return true;
 }
 
 // Read one newline-terminated line from `in`, bounding memory to `max_len`
@@ -88,12 +132,16 @@ int StdioRunner::Run() {
       break;
     }
     if (lr == LineResult::kOversized) {
-      // The oversized line was drained to its newline; drop it (there is no
-      // request id to reply to yet).
+      // The oversized line was drained to its newline; there is no request id to
+      // reply to, so emit a framing-level parse error (id null) and continue.
+      WriteFramingError(jsonrpc::kParseError, "request line too large");
       continue;
     }
     rapidjson::Document doc;
-    if (!ParseRequest(line, doc)) {
+    int err_code = 0;
+    std::string err_message;
+    if (!ParseRequest(line, doc, &err_code, &err_message)) {
+      WriteFramingError(err_code, err_message);
       continue;
     }
     const Dispatcher::Response resp = dispatcher_.Dispatch(doc);

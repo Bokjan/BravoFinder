@@ -70,11 +70,26 @@ int main(int argc, char** argv) {
   app.set_version_flag("--version", bf::service::VersionBanner());
   CLI11_PARSE(app, argc, argv);
 
-  // libuv reads UV_THREADPOOL_SIZE once, the first time the pool is used, so set
-  // it before the loop runs. Bounded to libuv's maximum of 1024.
-  if (worker_threads > 1024) {
-    worker_threads = 1024;
+  // Reject out-of-range bind / pool / timeout values with a clear stderr message
+  // rather than clamping (silent clamp hid misconfiguration).
+  if (port < 1 || port > 65535) {
+    std::cerr << bf::service::kTextErrorPrefix << "--port must be in 1..65535 (got " << port
+              << ")\n";
+    return EXIT_FAILURE;
   }
+  if (worker_threads < 1 || worker_threads > 1024) {
+    std::cerr << bf::service::kTextErrorPrefix << "--worker-threads must be in 1..1024 (got "
+              << worker_threads << ")\n";
+    return EXIT_FAILURE;
+  }
+  if (io_timeout_sec < 1) {
+    std::cerr << bf::service::kTextErrorPrefix << "--io-timeout must be >= 1 second (got "
+              << io_timeout_sec << ")\n";
+    return EXIT_FAILURE;
+  }
+
+  // libuv reads UV_THREADPOOL_SIZE once, the first time the pool is used, so set
+  // it before the loop runs.
   bf::SetEnv("UV_THREADPOOL_SIZE", std::to_string(worker_threads));
 
   // Build the registry (fail-fast, matching bf-mcp).

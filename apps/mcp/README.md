@@ -56,7 +56,7 @@ bf-mcp --db-dir /path/to/caches
 # Serve MCP over HTTP instead of stdio (single endpoint POST/GET/DELETE /mcp).
 # HTTP-mode flags mirror bf-http: --host, --port, --worker-threads, --max-body,
 # --io-timeout (all ignored in the default stdio mode).
-bf-mcp --transport http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
+bf-mcp --transport http --db-dir /path/to/caches --host 0.0.0.0 --port 8081
 ```
 
 The HTTP transport is stateless-with-id: `initialize` returns a random `Mcp-Session-Id` header that the server does not track (every request is independent). `POST /mcp` carries a JSON-RPC request (single or batch) and answers `application/json`, or a single `text/event-stream` SSE event when the client's `Accept` header opts in; a notification-only body returns `202`. `GET /mcp` opens an SSE stream (a placeholder — no server-push today). `DELETE /mcp` acknowledges a session teardown. See [docs/http-service.zh-CN.md](../../docs/http-service.zh-CN.md) for the transport design.

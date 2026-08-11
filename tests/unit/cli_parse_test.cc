@@ -146,6 +146,13 @@ TEST_CASE("alt spec: single level and range", "[unit][cli]") {
   CHECK_FALSE(bf::cli::ParseAltSpec("").has_value());
   CHECK_FALSE(bf::cli::ParseAltSpec("FL350").has_value());
   CHECK_FALSE(bf::cli::ParseAltSpec("350x").has_value());
+  // Help text promises 0..kMaxFl; anything above that band must be rejected.
+  CHECK_FALSE(bf::cli::ParseAltSpec("601").has_value());
+  CHECK_FALSE(bf::cli::ParseAltSpec("300-601").has_value());
+  const std::optional<bf::FlRange> at_max = bf::cli::ParseAltSpec("600");
+  REQUIRE(at_max.has_value());
+  CHECK(at_max->min_fl == 600);
+  CHECK(at_max->max_fl == 600);
 }
 
 }  // namespace

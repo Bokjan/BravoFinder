@@ -17,6 +17,7 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
     std::string route_str;
     std::string data_dir = "navdata";
     std::string db_path;
+    std::string cifp_load = "on-demand";
     std::string format = "text";
   };
   auto a = std::make_shared<Args>();
@@ -30,12 +31,17 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
   parse->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();
   parse->add_option("--db", a->db_path, "Prebuilt .bfdb cache to load (skips parsing)");
+  parse
+      ->add_option("--cifp-load", a->cifp_load,
+                   "CIFP cache load mode: on-demand (default) or eager")
+      ->capture_default_str()
+      ->check(CLI::IsMember({"on-demand", "eager"}));
   parse->add_option("--format", a->format, "Output format: text or json")
       ->capture_default_str()
       ->check(CLI::IsMember({"text", "json"}));
 
   parse->callback([a, &exit_code]() {
-    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir);
+    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
       PrintCliError(db.error().message);
       exit_code = EXIT_FAILURE;

@@ -165,7 +165,13 @@ http_server::WorkResult BuildMcpWorkResult(const Dispatcher& dispatcher,
 
 void McpHttpHandler::Handle(std::shared_ptr<http_server::Connection> conn,
                             const http_server::HttpRequest& req) {
-  if (req.path != "/mcp") {
+  // Strip a single trailing '/' so /mcp/ matches /mcp. Leave "/" alone and do
+  // not percent-decode — path match stays literal otherwise.
+  std::string path = req.path;
+  if (path.size() > 1 && path.back() == '/') {
+    path.pop_back();
+  }
+  if (path != "/mcp") {
     conn->WriteResponse(http_server::kStatusNotFound, http_server::JsonError("not found"),
                         req.keep_alive);
     return;

@@ -14,6 +14,7 @@
 
 #include "api_keys.h"
 #include "core/base/string_util.h"
+#include "handlers.h"  // bf::service::kMaxFl
 
 namespace bf::cli {
 
@@ -39,7 +40,9 @@ std::optional<FlRange> ParseAltSpec(const std::string& spec) {
     const char* begin = s.data();
     const char* end = begin + s.size();
     auto [ptr, ec] = std::from_chars(begin, end, out);
-    return ec == std::errc{} && ptr == end && out >= 0;
+    // Help text promises 0..kMaxFl; reject anything outside that inclusive band
+    // here so cmd_route / the shared parsers stay consistent with the docs.
+    return ec == std::errc{} && ptr == end && out >= 0 && out <= bf::service::kMaxFl;
   };
   if (dash == std::string::npos) {
     int fl = 0;
