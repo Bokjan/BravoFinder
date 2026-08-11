@@ -238,6 +238,13 @@ std::string Post(const std::string& path, const std::string& body, const std::st
   return r;
 }
 
+std::string PostKeepAlive(const std::string& path, const std::string& body) {
+  std::string r = "POST " + path + " HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n";
+  r += "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n";
+  r += body;
+  return r;
+}
+
 // One request over a fresh connection; returns the full response.
 std::string RoundTrip(int port, const std::string& request) {
   const int fd = ConnectTo(port);
@@ -372,6 +379,22 @@ TEST_CASE("http server end-to-end over a loopback socket", "[integration][http]"
     const std::string health = RoundTrip(port, Get("/healthz", false));
     CHECK(StatusOf(health) == 200);
   }
+
+  SECTION("bytes while awaiting a response force Connection: close") {
+    // Pipeline across reads: start a keep-alive route (offloaded), then send a
+    // second request before the response is written. The second request's bytes
+    // are dropped and the first response must close the connection so keep-alive
+    // cannot desync onto the discarded request.
+    const int fd = ConnectTo(port);
+    REQUIRE(fd >= 0);
+    REQUIRE(SendAll(
+        fd, PostKeepAlive("/v1/routes", R"({"departure":"KJFK","arrival":"KLAX","k":10})")));
+    REQUIRE(SendAll(fd, Get("/healthz", true)));
+    const std::string resp = ReadResponse(fd);
+    REQUIRE(StatusOf(resp) == 200);
+    CHECK(HasConnection(resp, "close"));
+    close(fd);
+  }
 }
 
 // Hardening paths that reject or close a connection before any request reaches
@@ -437,6 +460,63 @@ TEST_CASE("http hardening: header limits and idle timeout", "[integration][http]
     CHECK(StatusOf(resp) == 408);
     CHECK(HasConnection(resp, "close"));
     close(fd);
+  }
+
+  SECTION("Content-Length over the body cap is rejected with 413 before the body") {
+    // Declare a body larger than max_body_bytes (default 1 MiB here) without
+    // sending it: headers-complete must 413 immediately.
+    std::string req = "POST /healthz HTTP/1.1\r\nHost: x\r\nContent-Length: 2000000\r\n\r\n";
+    CHECK(StatusOf(RoundTrip(port, req)) == 413);
+  }
+
+  SECTION("Expect: 100-continue is rejected with 417") {
+    std::string req =
+        "POST /healthz HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nExpect: 100-continue\r\n\r\n";
+    CHECK(StatusOf(RoundTrip(port, req)) == 417);
+  }
+
+  SECTION("request deadline fires even when idle timer is kept reset") {
+    // io_timeout is long enough that per-chunk idle resets would never fire;
+    // request_timeout is short so a drip across message-begin still 408s.
+    bf::service::NavDatabaseRegistry registry2(bf::BfdbInventory{});
+    bf::http_server::Limits tight;
+    tight.io_timeout_ms = 2000;
+    tight.request_timeout_ms = 400;
+    ServerHarness h2(registry2, tight);
+    REQUIRE(h2.port() > 0);
+    const int fd = ConnectTo(h2.port());
+    REQUIRE(fd >= 0);
+    REQUIRE(SendAll(fd, "POST /healthz HTTP/1.1\r\n"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    REQUIRE(SendAll(fd, "Host: x\r\n"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    REQUIRE(SendAll(fd, "Content-Length: 0\r\n\r\n"));
+    const std::string resp = ReadResponse(fd);
+    CHECK(StatusOf(resp) == 408);
+    CHECK(HasConnection(resp, "close"));
+    close(fd);
+  }
+
+  SECTION("max_connections sheds additional accepts") {
+    bf::service::NavDatabaseRegistry registry2(bf::BfdbInventory{});
+    bf::http_server::Limits one;
+    one.max_connections = 1;
+    one.io_timeout_ms = 5000;
+    ServerHarness h2(registry2, one);
+    REQUIRE(h2.port() > 0);
+    const int held = ConnectTo(h2.port());
+    REQUIRE(held >= 0);
+    REQUIRE(SendAll(held, Get("/healthz", true)));
+    REQUIRE(StatusOf(ReadResponse(held)) == 200);
+    // First connection is still live (keep-alive). A second accept is closed
+    // without serving a response.
+    const int extra = ConnectTo(h2.port());
+    REQUIRE(extra >= 0);
+    REQUIRE(SendAll(extra, Get("/healthz", false)));
+    const std::string resp = ReadResponse(extra);
+    CHECK(resp.empty());
+    close(extra);
+    close(held);
   }
 }
 

@@ -53,6 +53,8 @@ class Server {
   RequestHandler& handler_;
   Limits limits_;
   uv_tcp_t handle_{};
+  // Live Connection count (loop thread only). Enforces Limits::max_connections.
+  size_t live_connections_ = 0;
 };
 
 }  // namespace bf::http_server

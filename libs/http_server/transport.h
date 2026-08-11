@@ -40,6 +40,15 @@ inline constexpr int kDefaultPort = 8080;
 // Default request body cap, in bytes (--max-body). 1 MiB.
 inline constexpr size_t kDefaultMaxBodyBytes = 1u << 20;
 
+// Default cap on simultaneously open connections (accept path). Beyond this the
+// server accepts then immediately closes so the backlog does not stall forever.
+inline constexpr size_t kDefaultMaxConnections = 1024;
+
+// Default hard deadline for assembling one request (from message-begin), in
+// seconds. Distinct from the idle timer: a client that dribbles bytes just under
+// io_timeout_ms can hold a connection for ~body_cap * idle without this.
+inline constexpr int kDefaultRequestTimeoutSec = 120;
+
 // Seconds-to-milliseconds scale for Limits::io_timeout_ms.
 inline constexpr uint64_t kMsPerSec = 1000;
 
@@ -53,6 +62,11 @@ struct Limits {
   size_t max_body_bytes = kDefaultMaxBodyBytes;  // 1 MiB request body cap (--max-body)
   uint64_t io_timeout_ms = static_cast<uint64_t>(kDefaultIoTimeoutSec) *
                            kMsPerSec;  // header/body read + idle keep-alive (--io-timeout)
+  // Hard wall-clock budget to finish reading one request after its first byte
+  // of the message (OnMessageBegin). 0 disables the deadline (idle timeout only).
+  uint64_t request_timeout_ms = static_cast<uint64_t>(kDefaultRequestTimeoutSec) * kMsPerSec;
+  // Simultaneous live connections. 0 = unlimited (tests / specialised embeds).
+  size_t max_connections = kDefaultMaxConnections;
 };
 
 // A fully-parsed HTTP request handed to the RequestHandler. method/path are what
@@ -104,8 +118,8 @@ class RequestHandler {
 };
 
 // Build an error JSON payload {"error":"<message>"} with RapidJSON's Writer so
-// the message is auto-escaped. Used for the transport's own rejects (413/431/
-// 414/400/503); query-layer errors use bf::service::JsonError.
+// the message is auto-escaped. Used for the transport's own rejects (413/417/
+// 431/414/400/503); query-layer errors use bf::service::JsonError.
 std::string JsonError(const std::string& message);
 
 }  // namespace bf::http_server

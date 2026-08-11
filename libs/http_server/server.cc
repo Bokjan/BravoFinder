@@ -60,13 +60,34 @@ void Server::OnNewConnection(uv_stream_t* server, int status) {
     return;  // accept failed at the libuv level; nothing to clean up yet
   }
   auto* self = static_cast<Server*>(server->data);
+  // At the connection cap: accept into a throwaway Connection and close it
+  // immediately so the kernel backlog does not stall, without counting it as
+  // live. 0 means unlimited.
+  if (self->limits_.max_connections > 0 &&
+      self->live_connections_ >= self->limits_.max_connections) {
+    std::shared_ptr<Connection> rejected =
+        Connection::Create(server->loop, self->handler_, self->limits_);
+    if (uv_accept(server, rejected->stream()) != 0) {
+      // still close so the handle is torn down
+    }
+    rejected->Close();
+    return;
+  }
   std::shared_ptr<Connection> conn =
       Connection::Create(server->loop, self->handler_, self->limits_);
-  if (uv_accept(server, conn->stream()) == 0) {
-    conn->Start();
-  } else {
+  if (uv_accept(server, conn->stream()) != 0) {
     conn->Close();  // could not accept into the handle; close and free it
+    return;
   }
+  // Count only after a successful accept; on_closed decrements when both
+  // handles finish closing (StartClose / client EOF / write failure).
+  ++self->live_connections_;
+  conn->SetOnClosed([self]() {
+    if (self->live_connections_ > 0) {
+      --self->live_connections_;
+    }
+  });
+  conn->Start();
 }
 
 }  // namespace bf::http_server

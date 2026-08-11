@@ -78,17 +78,20 @@ void QueueWork(std::shared_ptr<Connection> conn, uv_loop_t* loop, std::function<
   w->keep_alive = keep_alive;
   w->inflight = &inflight;
   w->req.data = w;
+  // Count before queueing so a concurrent shed-load check on the loop thread
+  // cannot under-count a request that is about to sit on the threadpool. Roll
+  // back if uv_queue_work fails (nothing was queued).
+  inflight.fetch_add(1, std::memory_order_relaxed);
   const int r = uv_queue_work(loop, &w->req, OnWork, OnAfterWork);
   if (r != 0) {
-    // The threadpool queue is unavailable: answer 503 inline and clean up. No
-    // increment happened, so nothing to undo.
+    inflight.fetch_sub(1, std::memory_order_relaxed);
+    // The threadpool queue is unavailable: answer 503 inline and clean up.
     if (w->conn->IsAlive()) {
       w->conn->WriteResponse(kStatusServiceUnavailable, JsonError("server busy"), keep_alive);
     }
     delete w;
     return;
   }
-  inflight.fetch_add(1, std::memory_order_relaxed);
 }
 
 }  // namespace bf::http_server

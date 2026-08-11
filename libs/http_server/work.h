@@ -34,11 +34,12 @@ class Connection;
 // Offload one unit of work. On a worker thread: run `work` (wrapped in a
 // try/catch that turns any escaping exception into a 500). On completion (loop
 // thread): write the response via `conn` if it is still alive, using
-// `keep_alive` for the connection disposition. `inflight` counts in-flight work
-// items: incremented once the item is queued and decremented in the completion
-// callback, so the caller can shed load (503) before the queue grows without
-// bound. All accesses are on the loop thread; the counter is atomic only as a
-// defensive convention.
+// `keep_alive` for the connection disposition (Connection may still force-close
+// if pipelined bytes arrived while awaiting). `inflight` counts in-flight work
+// items: incremented before uv_queue_work and rolled back if queueing fails, then
+// decremented in the completion callback, so the caller can shed load (503)
+// before the queue grows without bound. All accesses are on the loop thread; the
+// counter is atomic only as a defensive convention.
 void QueueWork(std::shared_ptr<Connection> conn, uv_loop_t* loop, std::function<WorkResult()> work,
                bool keep_alive, std::atomic<int>& inflight);
 

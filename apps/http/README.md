@@ -166,7 +166,8 @@ Every non-2xx response body is `{"error":"<message>"}`.
 | **400** | Bad request: malformed JSON, missing/invalid field (`k<1`, `min_fl>max_fl`), or a bad/unserved `?cycle=`. |
 | **404** | Nothing matched: all lookup ids missing, no such procedure, or an unregistered path. |
 | **422** | Well-formed but unsatisfiable: unknown endpoint, no feasible route, a bad route token. |
-| **413** | Request body exceeds `--max-body`. |
+| **413** | Request body exceeds `--max-body` (including a declared `Content-Length` over the cap). |
+| **417** | `Expect: 100-continue` (interim 100 is not supported). |
 | **400** | `Transfer-Encoding: chunked` request body (refused; the server only accepts `Content-Length`). |
 | **500** | Unexpected server error. |
 | **503** | `/readyz` only: the newest cycle cannot be opened. |

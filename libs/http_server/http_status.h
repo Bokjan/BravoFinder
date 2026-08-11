@@ -22,6 +22,7 @@ inline constexpr int kStatusMethodNotAllowed = 405;
 inline constexpr int kStatusRequestTimeout = 408;
 inline constexpr int kStatusPayloadTooLarge = 413;
 inline constexpr int kStatusUriTooLong = 414;
+inline constexpr int kStatusExpectationFailed = 417;
 inline constexpr int kStatusUnprocessableEntity = 422;
 inline constexpr int kStatusRequestHeaderFieldsTooLarge = 431;
 inline constexpr int kStatusInternalServerError = 500;

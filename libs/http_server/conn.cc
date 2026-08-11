@@ -9,14 +9,18 @@
 //   * response framing: hand-written status line + Content-Type / Content-Length
 //     / Connection / Date headers + body, or a close-delimited open stream (SSE)
 //     with no Content-Length (BeginStream / WriteEvent);
-//   * limits: caps on total header bytes, header count, and body size (413) to
-//     bound memory;
+//   * limits: caps on total header bytes, header count, body size (413; also
+//     early reject when Content-Length declares over the cap), and live
+//     connections (Server::max_connections);
 //   * timeouts: one idle timer covers header-read, body-read, and idle
-//     keep-alive, closing slow/stalled connections (slowloris);
+//     keep-alive; a separate hard request deadline (from message-begin) catches
+//     slow-drip clients that keep resetting the idle timer;
 //   * chunked rejection: any Transfer-Encoding request is refused (400) and the
 //     connection closed rather than parsed, so a smuggled body cannot desync us;
-//   * one request in flight: after dispatch we ignore further input bytes until
-//     the response is written (no pipelining), but still react to a disconnect.
+//   * Expect: 100-continue is refused with 417 (we never emit an interim 100);
+//   * one request in flight: after dispatch we do not pipeline — further input
+//     bytes are ignored and force Connection: close after the response so a
+//     keep-alive client cannot desync on dropped pipelined requests.
 //
 // Everything here runs on the libuv loop thread. The heavy query itself is
 // offloaded (work.cc); only the response write comes back here.
@@ -31,6 +35,7 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -67,6 +72,8 @@ const char* ReasonPhrase(int status) {
       return "Payload Too Large";
     case kStatusUriTooLong:
       return "URI Too Long";
+    case kStatusExpectationFailed:
+      return "Expectation Failed";
     case kStatusUnprocessableEntity:
       return "Unprocessable Entity";
     case kStatusRequestHeaderFieldsTooLarge:
@@ -265,14 +272,16 @@ std::string HttpRequest::Header(const std::string& name) const {
   return "";
 }
 
-Connection::Connection(Passkey, RequestHandler& handler, const Limits& limits)
-    : handler_(handler), limits_(limits) {}
+Connection::Connection(Passkey, RequestHandler& handler, const Limits& limits,
+                       std::function<void()> on_closed)
+    : handler_(handler), limits_(limits), on_closed_(std::move(on_closed)) {}
 
 Connection::~Connection() = default;
 
 std::shared_ptr<Connection> Connection::Create(uv_loop_t* loop, RequestHandler& handler,
-                                               const Limits& limits) {
-  auto conn = std::make_shared<Connection>(Passkey{}, handler, limits);
+                                               const Limits& limits,
+                                               std::function<void()> on_closed) {
+  auto conn = std::make_shared<Connection>(Passkey{}, handler, limits, std::move(on_closed));
   // Strong self-reference: the object outlives the local shared_ptr and every
   // libuv callback until both handles finish closing.
   conn->self_ = conn;
@@ -334,6 +343,10 @@ void Connection::StartClose() {
     --open_handles_;
   }
   if (open_handles_ == 0) {
+    if (on_closed_) {
+      on_closed_();
+      on_closed_ = nullptr;
+    }
     self_.reset();  // may delete this; nothing may follow
   }
 }
@@ -352,10 +365,12 @@ void Connection::ResetForNextRequest() {
   request_ready_ = false;
   keep_alive_ = false;
   awaiting_response_ = false;
+  force_close_after_response_ = false;
   pipelined_ = false;
   streaming_ = false;
   reject_status_ = kStatusNone;
   reject_message_.clear();
+  request_started_at_ms_ = 0;
   RestartTimer();
 }
 
@@ -378,17 +393,24 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
     return;  // no data available yet (EAGAIN-equivalent)
   }
   if (conn->awaiting_response_) {
-    // A request is already dispatched; we do not pipeline, so ignore any bytes
-    // that arrive before we have answered it -- and do NOT restart the idle
-    // timer for them: otherwise a client could keep dribbling bytes to hold the
-    // connection (and its shared_ptr<Connection> + in-flight WorkRequest) alive
-    // indefinitely while its dispatched work is still running.
+    // A request is already dispatched; we do not pipeline. Drop the bytes, do
+    // NOT restart the idle timer (a drip must not hold the connection + in-flight
+    // WorkRequest alive), and force Connection: close after the response so the
+    // client cannot keep-alive onto a desynced stream where its next request was
+    // already discarded.
+    conn->force_close_after_response_ = true;
+    conn->keep_alive_ = false;
+    return;
+  }
+  if (conn->RequestDeadlineExceeded()) {
+    conn->awaiting_response_ = true;
+    conn->WriteResponse(kStatusRequestTimeout, JsonError("request timeout"), false);
     return;
   }
   conn->RestartTimer();
   const llhttp_errno_t err = llhttp_execute(&conn->parser_, buf->base, static_cast<size_t>(nread));
   if (conn->reject_status_ != kStatusNone) {
-    // A hardening limit tripped (body/header cap, chunked): answer and close.
+    // A hardening limit tripped (body/header cap, chunked, Expect, …): answer and close.
     conn->awaiting_response_ = true;
     conn->WriteResponse(conn->reject_status_, JsonError(conn->reject_message_), false);
     return;
@@ -406,6 +428,7 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
         stop != nullptr ? static_cast<size_t>(stop - buf->base) : static_cast<size_t>(nread);
     if (conn->pipelined_ || consumed < static_cast<size_t>(nread)) {
       conn->keep_alive_ = false;
+      conn->force_close_after_response_ = true;
     }
     conn->awaiting_response_ = true;
     conn->Dispatch();
@@ -440,14 +463,22 @@ void Connection::OnTimeout(uv_timer_t* t) {
     return;
   }
   if (!conn->closing_) {
-    // Slow or idle client with nothing dispatched (slowloris, or an idle keep-
-    // alive): answer 408 per RFC 9110 §15.5.7 (SHOULD) so the client learns why
-    // the connection dropped; the false keep_alive makes the write close after.
+    // Slow or idle client with nothing dispatched (slowloris, request deadline,
+    // or an idle keep-alive): answer 408 per RFC 9110 §15.5.7 (SHOULD) so the
+    // client learns why the connection dropped; the false keep_alive makes the
+    // write close after.
     conn->awaiting_response_ = true;
     conn->WriteResponse(kStatusRequestTimeout, JsonError("request timeout"), false);
     return;
   }
   conn->StartClose();
+}
+
+bool Connection::RequestDeadlineExceeded() const {
+  if (limits_.request_timeout_ms == 0 || request_started_at_ms_ == 0) {
+    return false;
+  }
+  return uv_now(handle_.loop) - request_started_at_ms_ >= limits_.request_timeout_ms;
 }
 
 int Connection::OnMessageBegin(llhttp_t* p) {
@@ -460,6 +491,9 @@ int Connection::OnMessageBegin(llhttp_t* p) {
     conn->pipelined_ = true;
     return -1;
   }
+  // Stamp the hard request deadline clock. Idle keep-alive with no message in
+  // flight leaves request_started_at_ms_ at 0 (ResetForNextRequest clears it).
+  conn->request_started_at_ms_ = uv_now(conn->handle_.loop);
   return 0;
 }
 
@@ -505,6 +539,12 @@ void Connection::FinishHeaderPair() {
   if (lower == "transfer-encoding") {
     saw_transfer_encoding_ = true;
   }
+  // We never emit an interim 100 Continue; refuse Expect: 100-continue with 417
+  // so the client does not stall waiting for a 100 that will never come.
+  if (lower == "expect" && AsciiIeq(cur_value_, "100-continue")) {
+    reject_status_ = kStatusExpectationFailed;
+    reject_message_ = "Expect: 100-continue is not supported";
+  }
   headers_.emplace_back(std::move(lower), cur_value_);
   cur_field_.clear();
   cur_value_.clear();
@@ -544,6 +584,13 @@ int Connection::OnHeadersComplete(llhttp_t* p) {
   if (conn->saw_transfer_encoding_) {
     conn->reject_status_ = kStatusBadRequest;
     conn->reject_message_ = "chunked transfer-encoding is not supported";
+    return -1;
+  }
+  // Early 413 when Content-Length already declares a body over the cap: refuse
+  // before reading (or slow-dripping) the declared payload.
+  if ((p->flags & F_CONTENT_LENGTH) != 0 && p->content_length > conn->limits_.max_body_bytes) {
+    conn->reject_status_ = kStatusPayloadTooLarge;
+    conn->reject_message_ = "request body exceeds the configured limit";
     return -1;
   }
   return 0;
@@ -595,6 +642,12 @@ void Connection::WriteRaw(std::vector<uint8_t> payload, WriteMode mode) {
   if (closing_) {
     return;
   }
+  // uv_buf_init's length is unsigned (32-bit on common ABIs). A payload that
+  // does not fit would truncate; refuse rather than write a partial frame.
+  if (payload.size() > static_cast<size_t>((std::numeric_limits<unsigned>::max)())) {
+    StartClose();
+    return;
+  }
   // Own the write request through the uv_write handoff: if uv_write fails the
   // unique_ptr frees it; on a successful queue libuv owns it and OnWriteDone
   // deletes it, so release() the pointer there.
@@ -603,10 +656,6 @@ void Connection::WriteRaw(std::vector<uint8_t> payload, WriteMode mode) {
   wr->conn = shared_from_this();
   wr->mode = mode;
   wr->req.data = wr.get();
-  // uv_buf_init's base is char* (libuv) and its length arg is unsigned int
-  // (uv.h), so the length is a 32-bit field regardless of the cast -- fine here
-  // since every response body (JSON) is far under 4 GiB. A >4 GiB payload would
-  // need splitting across multiple uv_buf_t.
   uv_buf_t b = uv_buf_init(reinterpret_cast<char*>(wr->payload.data()),
                            static_cast<unsigned>(wr->payload.size()));
   const int r = uv_write(&wr->req, stream(), &b, 1, OnWriteDone);
@@ -620,6 +669,11 @@ void Connection::WriteRaw(std::vector<uint8_t> payload, WriteMode mode) {
 void Connection::WriteResponse(int status, const std::string& body, bool keep_alive,
                                const std::string& content_type, const Headers& extra_headers,
                                uint32_t elapsed_ms) {
+  // Pipelined bytes while awaiting (or same-buffer trailing request) force close
+  // even when the handler / QueueWork asked for keep-alive.
+  if (force_close_after_response_) {
+    keep_alive = false;
+  }
   WriteRaw(BuildResponse(status, body, keep_alive, content_type, extra_headers, elapsed_ms),
            keep_alive ? WriteMode::kKeepAlive : WriteMode::kClose);
 }
@@ -685,6 +739,12 @@ void Connection::OnWriteDone(uv_write_t* req, int status) {
 void Connection::OnHandleClosed(uv_handle_t* h) {
   auto* conn = static_cast<Connection*>(h->data);
   if (--conn->open_handles_ == 0) {
+    // Notify the Server (live-connection accounting) before dropping self_: the
+    // callback must not assume `conn` outlives this stack frame once reset runs.
+    if (conn->on_closed_) {
+      conn->on_closed_();
+      conn->on_closed_ = nullptr;
+    }
     conn->self_.reset();  // may delete conn; nothing may follow
   }
 }

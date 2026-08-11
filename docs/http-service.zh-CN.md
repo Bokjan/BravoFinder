@@ -55,10 +55,12 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 
 - **keep-alive**：依 `llhttp_should_keep_alive` 复用连接；复用前**完整重置** parser 与请求缓冲，防上一请求残留串到下一请求。
 - **响应帧**：手写状态行 + `Content-Type`/`Content-Length`/`Connection`/`Date`；只发 `Content-Length`。
-- **上限**：header 总长/条数上限（→ 431）、body 上限（`--max-body` → 413），防内存耗尽。
-- **超时**：单个 idle 定时器覆盖 header 读取 / body 读取 / 空闲 keep-alive（`--io-timeout`），防 slowloris 慢连接占用。
+- **上限**：header 总长/条数上限（→ 431）、body 上限（`--max-body` → 413，含 headers 完成时按声明的 `Content-Length` 提前拒）、同时打开连接数（`Limits::max_connections`，默认 1024；超额则 accept 后立刻关闭）。
+- **超时**：idle 定时器覆盖 header/body 读取与空闲 keep-alive（`--io-timeout`）；另有从请求开始（message-begin）起算的硬截止时间（`Limits::request_timeout_ms`，默认 120s），防止客户端慢速逐字节送数据、反复把 idle 定时器往后推。
 - **chunked 拒绝**：内网 JSON API 不需要 `Transfer-Encoding: chunked` → **显式拒绝**（400 + 关连接），安全地拒而非误解析，防请求走私。
-- **单请求在飞**：不做 pipelining——一个请求分发后忽略后续输入字节，直到响应写完（但仍响应断开）。
+- **Expect: 100-continue**：不回中间的 `100 Continue`，直接 **417** + 关连接，避免客户端空等。
+- **同时只处理一个请求**：不做 pipelining——一个请求分发后忽略后续输入字节，并在写回时强制 `Connection: close`（无论第二请求是挤在同一次读缓冲里，还是分多次读进来，都一样处理），防止 keep-alive 复用到已经丢弃的下一请求上。
+- **路由 path**：按原始字符串精确匹配，不做百分号解码 / 规范化（`/v1/routes` ≠ `/v1/routes/`）；查询参数同样按原始 query 字符串交给消费者。
 - **异常兜底**：worker 里 handler 理论只走 `Result`，仍 try/catch 兜住意外异常 → 500，绝不让异常穿过线程边界。
 
 ## 端点与错误模型
@@ -69,8 +71,9 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 |---|---|
 | **400** | JSON 解析失败 / 缺必填字段 / 参数非法（k<1、min>max）/ 未知无效 `?cycle=` |
 | **404** | 批量 lookup 全未命中 / procedure-legs 无匹配 / 未注册路径 |
+| **417** | `Expect: 100-continue`（本服务不回 `100 Continue`） |
 | **422** | `FindRoutes`/`ParseRoute` 语义失败（未知端点、无航路、坏 token）——语法合法但无解 |
-| **413** | 请求体超 `--max-body` |
+| **413** | 请求体超 `--max-body`（含声明的 Content-Length 过大） |
 | **400** | `Transfer-Encoding: chunked` 请求体（显式拒绝） |
 | **500** | worker 未捕获异常 |
 

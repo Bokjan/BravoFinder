@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,12 +55,17 @@ class Connection : public std::enable_shared_from_this<Connection> {
  public:
   // Create a connection on `loop`, initialize its TCP handle, and arm the
   // idle timer. The caller then uv_accept()s into tcp() and calls Start().
+  // `on_closed` (optional) runs on the loop thread once both handles have
+  // finished closing, just before the self-reference is dropped — used by
+  // Server to track live connection count against Limits::max_connections.
   static std::shared_ptr<Connection> Create(uv_loop_t* loop, RequestHandler& handler,
-                                            const Limits& limits);
+                                            const Limits& limits,
+                                            std::function<void()> on_closed = {});
 
   // Public only so make_shared can call it; the Passkey makes it effectively
   // private (only Create() can construct one). Do not call directly.
-  Connection(Passkey, RequestHandler& handler, const Limits& limits);
+  Connection(Passkey, RequestHandler& handler, const Limits& limits,
+             std::function<void()> on_closed);
 
   ~Connection();
 
@@ -78,6 +84,12 @@ class Connection : public std::enable_shared_from_this<Connection> {
   // Close the connection (e.g. the acceptor could not uv_accept into it).
   // Idempotent; the object is freed once its handles finish closing.
   void Close();
+
+  // Optional loop-thread callback invoked once both handles have finished
+  // closing (just before the self-reference drops). Server uses this to track
+  // live connection count; set only after a successful accept + count increment
+  // so a failed accept cannot decrement a count that was never raised.
+  void SetOnClosed(std::function<void()> on_closed) { on_closed_ = std::move(on_closed); }
 
   // True until close has been initiated. Checked on the loop thread by an
   // offloaded work item's completion callback before it writes: a false result
@@ -157,12 +169,18 @@ class Connection : public std::enable_shared_from_this<Connection> {
   // single field or value is rejected before it can grow unbounded.
   bool HeaderBudgetExceeded() const;
 
+  // True when the hard request deadline (Limits::request_timeout_ms from
+  // message-begin) has elapsed. Idle keep-alive with no request in flight is
+  // never overdue.
+  bool RequestDeadlineExceeded() const;
+
   uv_tcp_t handle_{};
   uv_timer_t timer_{};
   llhttp_t parser_{};
   llhttp_settings_t settings_{};
   RequestHandler& handler_;
   Limits limits_;
+  std::function<void()> on_closed_;
 
   // Self-reference keeping the object alive between callbacks; reset when the
   // last handle finishes closing.
@@ -189,11 +207,14 @@ class Connection : public std::enable_shared_from_this<Connection> {
   std::vector<uint8_t> body_;
   bool request_ready_ = false;
   bool keep_alive_ = false;
-  bool awaiting_response_ = false;   // request dispatched; ignore further input bytes
+  bool awaiting_response_ = false;  // request dispatched; further input forces close-after-reply
+  bool force_close_after_response_ = false;  // pipelined bytes while awaiting; do not keep-alive
   bool pipelined_ = false;           // a second request began in the same buffer; close after reply
   bool streaming_ = false;           // an open stream is active; writes leave the connection open
   int reject_status_ = kStatusNone;  // non-zero => a hardening limit tripped; response + close
   std::string reject_message_;       // human-readable reason paired with reject_status_
+  // uv_now(loop) at OnMessageBegin; 0 means no request is being assembled.
+  uint64_t request_started_at_ms_ = 0;
 
   // A fixed read buffer; reads are one-at-a-time per connection on the loop
   // thread, so a single owned buffer suffices (no per-read allocation).
