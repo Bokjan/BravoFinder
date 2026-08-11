@@ -11,7 +11,7 @@
 int main(int argc, char** argv) {
   // Engine BF_LOG_* is silent until a sink is installed. CLI installs stderr at
   // WARN so loader/diagnostics warnings surface; user-facing failures stay on
-  // PrintCliError ("error: ...") and do not go through BF_LOG_*.
+  // bf::service::PrintError ("error: ...") and do not go through BF_LOG_*.
   auto logger = std::make_shared<bf::StderrLogger>();
   logger->set_min_level(bf::LogLevel::kWarn);
   bf::SetDefaultLogger(logger);

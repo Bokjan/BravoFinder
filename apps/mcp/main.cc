@@ -21,15 +21,14 @@
 #include <CLI/CLI.hpp>
 #include <csignal>
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <thread>
 
 #include "core/base/env.h"
 #include "io/cache/bfdb_inventory.h"
+#include "io_print.h"
 #include "mcp_http.h"
 #include "registry.h"
-#include "render.h"
 #include "server.h"
 #include "stdio_runner.h"
 #include "version_banner.h"
@@ -63,15 +62,14 @@ int RunHttp(bf::service::NavDatabaseRegistry& registry, const std::string& host,
   bf::http_server::Server server(&loop, handler, limits);
   const int rc = server.Listen(host, port);
   if (rc != 0) {
-    std::cerr << bf::service::kTextErrorPrefix << "cannot listen on " << host << ":" << port << ": "
-              << uv_strerror(rc) << "\n";
+    bf::service::PrintError("cannot listen on {}:{}: {}", host, port, uv_strerror(rc));
     if (const int close_rc = uv_loop_close(&loop); close_rc != 0) {
-      std::cerr << "warning: uv_loop_close: " << uv_strerror(close_rc) << "\n";
+      bf::service::PrintWarning("uv_loop_close: {}", uv_strerror(close_rc));
     }
     return EXIT_FAILURE;
   }
-  std::cerr << "bf-mcp (http) listening on " << host << ":" << port << " (" << cycle_count
-            << " cycle(s), " << worker_threads << " worker threads)\n";
+  bf::service::PrintStatus("bf-mcp (http) listening on {}:{} ({} cycle(s), {} worker threads)",
+                           host, port, cycle_count, worker_threads);
 
   uv_signal_t sigint;
   uv_signal_init(&loop, &sigint);
@@ -103,8 +101,8 @@ int RunHttp(bf::service::NavDatabaseRegistry& registry, const std::string& host,
   if (const int close_rc = uv_loop_close(&loop); close_rc != 0) {
     // Nonzero (UV_EBUSY) means a handle outlived the drain -- harmless at exit,
     // but surfaced rather than swallowed so a future drain regression is visible.
-    std::cerr << "warning: uv_loop_close: " << uv_strerror(close_rc)
-              << " (a handle outlived the drain)\n";
+    bf::service::PrintWarning("uv_loop_close: {} (a handle outlived the drain)",
+                              uv_strerror(close_rc));
   }
   return EXIT_SUCCESS;
 }
@@ -156,18 +154,15 @@ int main(int argc, char** argv) {
   // Reject out-of-range HTTP-mode values (validated even in stdio mode so a
   // mistyped flag fails loudly rather than being silently ignored / clamped).
   if (port < 1 || port > 65535) {
-    std::cerr << bf::service::kTextErrorPrefix << "--port must be in 1..65535 (got " << port
-              << ")\n";
+    bf::service::PrintError("--port must be in 1..65535 (got {})", port);
     return EXIT_FAILURE;
   }
   if (worker_threads < 1 || worker_threads > 1024) {
-    std::cerr << bf::service::kTextErrorPrefix << "--worker-threads must be in 1..1024 (got "
-              << worker_threads << ")\n";
+    bf::service::PrintError("--worker-threads must be in 1..1024 (got {})", worker_threads);
     return EXIT_FAILURE;
   }
   if (io_timeout_sec < 1) {
-    std::cerr << bf::service::kTextErrorPrefix << "--io-timeout must be >= 1 second (got "
-              << io_timeout_sec << ")\n";
+    bf::service::PrintError("--io-timeout must be >= 1 second (got {})", io_timeout_sec);
     return EXIT_FAILURE;
   }
 
@@ -175,18 +170,20 @@ int main(int argc, char** argv) {
 
   bf::Result<bf::BfdbInventory> inventory = bf::BfdbInventory::Scan(dir);
   if (!inventory) {
-    std::cerr << bf::service::kTextErrorPrefix << inventory.error().message << "\n";
+    bf::service::PrintError(inventory.error().message);
     return EXIT_FAILURE;
   }
   if (inventory.value().empty()) {
-    std::cerr << bf::service::kTextErrorPrefix << "no nav_<cycle>.bfdb caches found in '" << dir
-              << "' (build one with `bf build`, or set --db-dir / BRAVOFINDER_NAVDATA)\n";
+    bf::service::PrintError(
+        "no nav_<cycle>.bfdb caches found in '{}' (build one with `bf build`, or set "
+        "--db-dir / BRAVOFINDER_NAVDATA)",
+        dir);
     return EXIT_FAILURE;
   }
   // Surface files that were present but unusable, so reduced coverage is not
   // silent.
   for (const std::string& skipped : inventory.value().skipped()) {
-    std::cerr << "warning: ignoring unreadable cache '" << skipped << "'\n";
+    bf::service::PrintWarning("ignoring unreadable cache '{}'", skipped);
   }
   const size_t cycle_count = inventory.value().entries().size();
   const auto cifp_mode = cifp_load == "eager" ? bf::CifpLoad::kEager : bf::CifpLoad::kOnDemand;

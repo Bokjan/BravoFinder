@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 #include <cstdint>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <string>
 
 #include "cli_common.h"
 #include "commands.h"
+#include "io_print.h"
 #include "queries.h"
 #include "render.h"
 
@@ -43,7 +43,7 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
   parse->callback([a, &exit_code]() {
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
-      PrintCliError(db.error().message);
+      bf::service::PrintError(db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -52,10 +52,8 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
     const bf::service::HandlerResult result =
         bf::service::ParseRoute(db.value(), a->route_str, fmt);
     if (result.status >= bf::service::kErrorStatusThreshold) {
-      std::cerr << result.body;
-      if (fmt == bf::service::OutputFormat::kJson) {
-        std::cerr << "\n";
-      }
+      bf::service::PrintStderr(result.body,
+                               /*ensure_newline=*/fmt == bf::service::OutputFormat::kJson);
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -64,9 +62,10 @@ void RegisterParseRoute(CLI::App& app, int& exit_code) {
       // transport shape); the CLI wraps it with the elapsed_ms envelope it has
       // shipped since v3.13.0. parse_route yields exactly one route, so the
       // envelope uses the singular "route" key (not the "routes" array).
-      std::cout << bf::cli::WrapRouteEnvelope(result.body, result.elapsed_ms) << "\n";
+      bf::service::PrintStdout(bf::cli::WrapRouteEnvelope(result.body, result.elapsed_ms),
+                               /*ensure_newline=*/true);
     } else {
-      std::cout << result.body;
+      bf::service::PrintStdout(result.body);
     }
   });
 }

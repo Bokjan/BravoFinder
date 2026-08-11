@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include <cstdint>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "cli_common.h"
 #include "commands.h"
+#include "io_print.h"
 #include "queries.h"
 #include "render.h"
 
@@ -52,7 +52,7 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
   query->callback([a, &exit_code]() {
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
-      PrintCliError(db.error().message);
+      bf::service::PrintError(db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -94,17 +94,13 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
     // with a non-zero exit; success stays on stdout. A partial hit is still
     // success (status 200) and prints the parallel body to stdout.
     if (result.status >= bf::service::kErrorStatusThreshold) {
-      std::cerr << result.body;
-      if (fmt == bf::service::OutputFormat::kJson) {
-        std::cerr << "\n";
-      }
+      bf::service::PrintStderr(result.body,
+                               /*ensure_newline=*/fmt == bf::service::OutputFormat::kJson);
       exit_code = EXIT_FAILURE;
       return;
     }
-    std::cout << result.body;
-    if (fmt == bf::service::OutputFormat::kJson) {
-      std::cout << "\n";
-    }
+    bf::service::PrintStdout(result.body,
+                             /*ensure_newline=*/fmt == bf::service::OutputFormat::kJson);
   });
 }
 

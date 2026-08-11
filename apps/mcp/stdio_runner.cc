@@ -15,6 +15,7 @@
 
 #include <iostream>
 #include <string>
+#include <string_view>
 
 #include "jsonrpc.h"
 #include "rapidjson/document.h"
@@ -45,9 +46,13 @@ std::string JsonRpcFramingError(int code, const std::string& message) {
   return buf.GetString();
 }
 
-void WriteFramingError(int code, const std::string& message) {
-  std::cout << JsonRpcFramingError(code, message) << "\n";
+void WriteStdoutLine(std::string_view payload) {
+  std::cout << payload << '\n';
   std::cout.flush();
+}
+
+void WriteFramingError(int code, const std::string& message) {
+  WriteStdoutLine(JsonRpcFramingError(code, message));
 }
 
 // Parse a JSON-RPC request line. Returns false if the line is not a valid JSON
@@ -146,8 +151,7 @@ int StdioRunner::Run() {
     }
     const Dispatcher::Response resp = dispatcher_.Dispatch(doc);
     if (resp.has_response) {
-      std::cout << resp.body << "\n";
-      std::cout.flush();
+      WriteStdoutLine(resp.body);
     }
   }
   return 0;

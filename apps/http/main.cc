@@ -14,14 +14,13 @@
 #include <CLI/CLI.hpp>
 #include <csignal>
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <thread>
 
 #include "core/base/env.h"
 #include "io/cache/bfdb_inventory.h"
+#include "io_print.h"
 #include "registry.h"
-#include "render.h"
 #include "router.h"
 #include "server.h"
 #include "version_banner.h"
@@ -73,18 +72,15 @@ int main(int argc, char** argv) {
   // Reject out-of-range bind / pool / timeout values with a clear stderr message
   // rather than clamping (silent clamp hid misconfiguration).
   if (port < 1 || port > 65535) {
-    std::cerr << bf::service::kTextErrorPrefix << "--port must be in 1..65535 (got " << port
-              << ")\n";
+    bf::service::PrintError("--port must be in 1..65535 (got {})", port);
     return EXIT_FAILURE;
   }
   if (worker_threads < 1 || worker_threads > 1024) {
-    std::cerr << bf::service::kTextErrorPrefix << "--worker-threads must be in 1..1024 (got "
-              << worker_threads << ")\n";
+    bf::service::PrintError("--worker-threads must be in 1..1024 (got {})", worker_threads);
     return EXIT_FAILURE;
   }
   if (io_timeout_sec < 1) {
-    std::cerr << bf::service::kTextErrorPrefix << "--io-timeout must be >= 1 second (got "
-              << io_timeout_sec << ")\n";
+    bf::service::PrintError("--io-timeout must be >= 1 second (got {})", io_timeout_sec);
     return EXIT_FAILURE;
   }
 
@@ -95,16 +91,18 @@ int main(int argc, char** argv) {
   // Build the registry (fail-fast, matching bf-mcp).
   bf::Result<bf::BfdbInventory> inventory = bf::BfdbInventory::Scan(db_dir);
   if (!inventory) {
-    std::cerr << bf::service::kTextErrorPrefix << inventory.error().message << "\n";
+    bf::service::PrintError(inventory.error().message);
     return EXIT_FAILURE;
   }
   if (inventory.value().empty()) {
-    std::cerr << bf::service::kTextErrorPrefix << "no nav_<cycle>.bfdb caches found in '" << db_dir
-              << "' (build one with `bf build`, or set --db-dir / BRAVOFINDER_NAVDATA)\n";
+    bf::service::PrintError(
+        "no nav_<cycle>.bfdb caches found in '{}' (build one with `bf build`, or set "
+        "--db-dir / BRAVOFINDER_NAVDATA)",
+        db_dir);
     return EXIT_FAILURE;
   }
   for (const std::string& skipped : inventory.value().skipped()) {
-    std::cerr << "warning: ignoring unreadable cache '" << skipped << "'\n";
+    bf::service::PrintWarning("ignoring unreadable cache '{}'", skipped);
   }
   const size_t cycle_count = inventory.value().entries().size();
   const auto cifp_mode = cifp_load == "eager" ? bf::CifpLoad::kEager : bf::CifpLoad::kOnDemand;
@@ -122,13 +120,12 @@ int main(int argc, char** argv) {
   bf::http_server::Server server(&loop, router, limits);
   const int rc = server.Listen(host, port);
   if (rc != 0) {
-    std::cerr << bf::service::kTextErrorPrefix << "cannot listen on " << host << ":" << port << ": "
-              << uv_strerror(rc) << "\n";
+    bf::service::PrintError("cannot listen on {}:{}: {}", host, port, uv_strerror(rc));
     return EXIT_FAILURE;
   }
 
-  std::cerr << "bf-http listening on " << host << ":" << port << " (" << cycle_count
-            << " cycle(s), " << worker_threads << " worker threads)\n";
+  bf::service::PrintStatus("bf-http listening on {}:{} ({} cycle(s), {} worker threads)", host,
+                           port, cycle_count, worker_threads);
 
   // Graceful shutdown: SIGINT / SIGTERM stop the loop so uv_run returns and main
   // exits cleanly (lets in-flight I/O drain a final iteration) instead of being
@@ -169,8 +166,8 @@ int main(int argc, char** argv) {
     // Nonzero (UV_EBUSY) means a handle outlived the drain above -- harmless at
     // process exit, but a signal that the teardown missed something, so surface
     // it rather than swallow a future drain regression.
-    std::cerr << "warning: uv_loop_close: " << uv_strerror(close_rc)
-              << " (a handle outlived the drain)\n";
+    bf::service::PrintWarning("uv_loop_close: {} (a handle outlived the drain)",
+                              uv_strerror(close_rc));
   }
   return 0;
 }

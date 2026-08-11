@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <cstdint>
 #include <cstdlib>
-#include <format>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,6 +11,7 @@
 #include "core/constraints/airway_rule_constraint.h"
 #include "core/routing/route_request.h"
 #include "handlers.h"
+#include "io_print.h"
 #include "queries.h"
 
 namespace bf::cli {
@@ -110,7 +109,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     // on-demand procedure parsing.
     Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
     if (!db) {
-      PrintCliError(db.error().message);
+      bf::service::PrintError(db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -121,8 +120,8 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     if (!a->alt_spec.empty()) {
       std::optional<FlRange> range = ParseAltSpec(a->alt_spec);
       if (!range) {
-        PrintCliError("invalid --alt '{}' (expected a level like 350 or a range like 300-400)",
-                      a->alt_spec);
+        bf::service::PrintError(
+            "invalid --alt '{}' (expected a level like 350 or a range like 300-400)", a->alt_spec);
         exit_code = EXIT_FAILURE;
         return;
       }
@@ -138,7 +137,7 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
       std::string error;
       std::optional<AirwayRule> rule = bf::cli::ParseAirwayFilter(spec, error);
       if (!rule) {
-        PrintCliError("invalid --airway-filter '{}': {}", spec, error);
+        bf::service::PrintError("invalid --airway-filter '{}': {}", spec, error);
         exit_code = EXIT_FAILURE;
         return;
       }
@@ -160,19 +159,18 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
         a->format == "json" ? bf::service::OutputFormat::kJson : bf::service::OutputFormat::kText;
     const bf::service::HandlerResult result = bf::service::FindRoutes(db.value(), request, fmt);
     if (result.status >= bf::service::kErrorStatusThreshold) {
-      std::cerr << result.body;
-      if (fmt == bf::service::OutputFormat::kJson) {
-        std::cerr << "\n";
-      }
+      bf::service::PrintStderr(result.body,
+                               /*ensure_newline=*/fmt == bf::service::OutputFormat::kJson);
       exit_code = EXIT_FAILURE;
       return;
     }
     if (fmt == bf::service::OutputFormat::kJson) {
       // The query layer renders a bare routes array (the transport shape); the
       // CLI wraps it with the elapsed_ms envelope it has shipped since v3.13.0.
-      std::cout << bf::cli::WrapRoutesEnvelope(result.body, result.elapsed_ms) << "\n";
+      bf::service::PrintStdout(bf::cli::WrapRoutesEnvelope(result.body, result.elapsed_ms),
+                               /*ensure_newline=*/true);
     } else {
-      std::cout << result.body;
+      bf::service::PrintStdout(result.body);
     }
   });
 }

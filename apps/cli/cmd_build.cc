@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <cstdlib>
-#include <iostream>
+#include <format>
 #include <memory>
 #include <string>
 
@@ -8,6 +8,7 @@
 #include "commands.h"
 #include "io/cache/bfdb_naming.h"
 #include "io/nav_database.h"
+#include "io_print.h"
 
 namespace bf::cli {
 
@@ -30,7 +31,7 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
   build->callback([args, &exit_code]() {
     Result<NavDatabase> db = NavDatabase::Open(args->data_dir, args->loader);
     if (!db) {
-      PrintCliError(db.error().message);
+      bf::service::PrintError(db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }
@@ -45,11 +46,13 @@ void RegisterBuild(CLI::App& app, int& exit_code) {
     // cannot resolve SID/STAR).
     Result<uint32_t> written = db.value().WriteUnified(out);
     if (!written) {
-      PrintCliError(written.error().message);
+      bf::service::PrintError(written.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }
-    std::cout << "wrote " << out << " (" << written.value() << " airports with procedures)\n";
+    bf::service::PrintStdout(
+        std::format("wrote {} ({} airports with procedures)", out, written.value()),
+        /*ensure_newline=*/true);
   });
 }
 

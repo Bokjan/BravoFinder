@@ -2,12 +2,9 @@
 #pragma once
 
 #include <cstdint>
-#include <format>
-#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include "core/routing/route_request.h"
@@ -55,24 +52,6 @@ std::optional<FlRange> ParseAltSpec(const std::string& spec);
 //
 // On failure, returns nullopt and sets `error` to a message naming what was wrong.
 std::optional<AirwayRule> ParseAirwayFilter(const std::string& spec, std::string& error);
-
-// User-facing CLI failure line: "error: <message>\n" on stderr. Keeps the
-// stable kTextErrorPrefix contract (scripts/tests grep it). Deliberately not
-// BF_LOG_*: the CLI installs a stderr logger for engine diagnostics
-// ([LEVEL] file:line), while this channel stays a separate, greppable shape.
-// Two overloads: a single-argument form for an already-formatted string, and a
-// variadic template for a compile-time format string + args. Overload resolution
-// picks the template only for a literal format string (std::format_string's
-// constructor is explicit and requires a constant format), so a runtime string
-// always lands on the single-argument form.
-inline void PrintCliError(std::string_view message) {
-  std::cerr << bf::service::kTextErrorPrefix << message << '\n';
-}
-
-template <class... Args>
-void PrintCliError(std::format_string<Args...> fmt, Args&&... args) {
-  PrintCliError(std::format(fmt, std::forward<Args>(args)...));
-}
 
 // Wrap a rendered routes array (the bare transport-shape body the query layer
 // returns for find_routes) in the CLI's {"routes": <body>, "elapsed_ms": <n>}
