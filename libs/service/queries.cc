@@ -25,6 +25,7 @@ namespace bf::service {
 
 namespace {
 
+using bf::http_server::kStatusBadRequest;
 using bf::http_server::kStatusNotFound;
 using bf::http_server::kStatusOk;
 using bf::http_server::kStatusUnprocessableEntity;
@@ -33,6 +34,16 @@ uint32_t ElapsedMs(std::chrono::steady_clock::time_point start) {
   return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                    std::chrono::steady_clock::now() - start)
                                    .count());
+}
+
+// Reject an oversized id list before any engine work. The HTTP adapter
+// (ParseIdList) already enforces kMaxIdListSize, but the CLI calls the typed
+// entries directly — checking here keeps the cap uniform across all three
+// consumers and bounds memory before Lookup* fans out.
+HandlerResult RejectOversizedIds(OutputFormat fmt, size_t count) {
+  return {
+      RenderError(fmt, std::format("at most {} ids are allowed (got {})", kMaxIdListSize, count)),
+      kStatusBadRequest};
 }
 
 }  // namespace
@@ -70,6 +81,9 @@ HandlerResult ParseRoute(const bf::NavDatabase& db, const std::string& route_str
 template <class Info, class LookupFn, class RenderFn>
 HandlerResult RunGroupedLookup(const bf::NavDatabase& db, const std::vector<std::string>& ids,
                                OutputFormat fmt, LookupFn lookup, RenderFn render) {
+  if (ids.size() > kMaxIdListSize) {
+    return RejectOversizedIds(fmt, ids.size());
+  }
   const auto start = std::chrono::steady_clock::now();
   std::vector<std::vector<Info>> results = lookup(db, ids);
   const uint32_t elapsed = ElapsedMs(start);
@@ -86,6 +100,9 @@ HandlerResult RunGroupedLookup(const bf::NavDatabase& db, const std::vector<std:
 template <class Info, class LookupFn, class RenderFn>
 HandlerResult RunOptionalLookup(const bf::NavDatabase& db, const std::vector<std::string>& ids,
                                 OutputFormat fmt, LookupFn lookup, RenderFn render) {
+  if (ids.size() > kMaxIdListSize) {
+    return RejectOversizedIds(fmt, ids.size());
+  }
   const auto start = std::chrono::steady_clock::now();
   std::vector<std::optional<Info>> results = lookup(db, ids);
   const uint32_t elapsed = ElapsedMs(start);
@@ -186,7 +203,7 @@ HandlerResult LookupProceduresMixed(const bf::NavDatabase& db,
   if (selectors.size() > kMaxIdListSize) {
     return {
         RenderError(fmt, std::format("at most {} procedure selectors are allowed", kMaxIdListSize)),
-        bf::http_server::kStatusBadRequest};
+        kStatusBadRequest};
   }
 
   const auto start = std::chrono::steady_clock::now();

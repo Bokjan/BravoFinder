@@ -478,11 +478,14 @@ TEST_CASE("http hardening: header limits and idle timeout", "[integration][http]
 
   SECTION("request deadline fires even when idle timer is kept reset") {
     // io_timeout is long enough that per-chunk idle resets would never fire;
-    // request_timeout is short so a drip across message-begin still 408s.
+    // request_timeout is short so a drip across message-begin still 408s. The
+    // deadline is set well under the total drip time so the check does not land
+    // on the >= boundary (uv_now caches the time at loop-iteration start, which
+    // can lag real time by a few ms and flip a tight comparison).
     bf::service::NavDatabaseRegistry registry2(bf::BfdbInventory{});
     bf::http_server::Limits tight;
     tight.io_timeout_ms = 2000;
-    tight.request_timeout_ms = 400;
+    tight.request_timeout_ms = 200;
     ServerHarness h2(registry2, tight);
     REQUIRE(h2.port() > 0);
     const int fd = ConnectTo(h2.port());

@@ -9,9 +9,11 @@
 #include <cmath>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "handlers.h"
 #include "io/nav_database.h"
+#include "queries.h"
 #include "rapidjson/document.h"
 #include "test_bfdb.h"
 
@@ -231,4 +233,23 @@ TEST_CASE("http handlers: empty ids and incomplete airway_rules are 400", "[inte
   CHECK(
       Run("find_routes", R"({"departure":"KJFK","arrival":"KLAX","k":1,"airway_rules":[{}]})", *db)
           .status == 400);
+}
+
+TEST_CASE("typed lookups reject an id list over kMaxIdListSize", "[integration][http]") {
+  // The HTTP adapter (ParseIdList) caps ids at kMaxIdListSize, but the CLI calls
+  // the typed entries directly. The cap must live in the typed entry too so the
+  // CLI path is bounded the same as HTTP — exercise it without going through the
+  // adapter by calling bf::service::Lookup* with an oversized vector.
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "'");
+  }
+  const std::vector<std::string> too_many(bf::service::kMaxIdListSize + 1, "KJFK");
+  CHECK(bf::service::LookupAirports(*db, too_many, bf::service::OutputFormat::kJson).status == 400);
+  CHECK(bf::service::LookupWaypoints(*db, too_many, bf::service::OutputFormat::kJson).status ==
+        400);
+  CHECK(bf::service::LookupAirways(*db, too_many, bf::service::OutputFormat::kJson).status == 400);
+  CHECK(bf::service::LookupNavaidDetails(*db, too_many, bf::service::OutputFormat::kJson).status ==
+        400);
+  CHECK(bf::service::LookupHolds(*db, too_many, bf::service::OutputFormat::kJson).status == 400);
 }
