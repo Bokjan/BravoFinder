@@ -111,19 +111,24 @@ class ProcedureConnector {
   // (no inbound edge). Each IF contributes K nearest inbound proxy goals F with
   // seed |F→IF| + STAR body (IF→last fix + stub); splice_vertex = IF. Call when
   // BuildArrival's on-network gates are empty. Unresolvable IFs are skipped.
+  // Optional `name_filter` restricts to a named STAR (bare name or NAME.TRANSITION)
+  // so --star rebinds splice metadata to the requested procedure only.
   static std::vector<Connection> BuildStarSpliceArrival(const CifpData& cifp,
                                                         const Coordinate& airport_coord,
                                                         const GraphBuilder& builder,
-                                                        const std::string& runway_filter);
+                                                        const std::string& runway_filter,
+                                                        const std::string& name_filter = {});
 
   // Departure connections for published SID exits that resolve but are
   // off-network (no outbound edge). Each exit contributes K nearest outbound
   // proxy goals F with seed SID body (runway→exit) + |exit→F|; splice_vertex =
   // exit. Call when BuildDeparture's on-network gates are empty.
+  // Optional `name_filter` restricts to a named SID (same selector shape as --sid).
   static std::vector<Connection> BuildSidSpliceDeparture(const CifpData& cifp,
                                                          const Coordinate& airport_coord,
                                                          const GraphBuilder& builder,
-                                                         const std::string& runway_filter);
+                                                         const std::string& runway_filter,
+                                                         const std::string& name_filter = {});
 
   // DCT fallback: connect to the nearest on-network waypoints by great-circle
   // distance. Used when no procedure connections are available. `arrival` picks

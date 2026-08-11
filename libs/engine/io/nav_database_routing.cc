@@ -106,8 +106,9 @@ bool FilterConnectionsByName(std::vector<Connection>& connections, const std::st
 }
 
 // Soft-prefer STAR splice over approach when both compete in the same arrival
-// pool (issue #30). Added to approach seeds only when at least one STAR splice
-// candidate exists; pure no-STAR (#24) airports must not pay this bump.
+// pool (issue #30). Applied to search ranking / SeededEndpoint.cost only — never
+// written into Connection::seed_distance_nm (which stays geographic for MakeRoute
+// and reported distances). Pure no-STAR (#24) airports must not pay this bump.
 constexpr double kProcedurePreferNm = 15.0;
 
 const Connection* FindConnection(const EndpointPlan& plan, int fix_vertex) {
@@ -119,10 +120,38 @@ const Connection* FindConnection(const EndpointPlan& plan, int fix_vertex) {
   return nullptr;
 }
 
-// Fold `incoming` into `by_fix` by fix_vertex (same semantics as the connector's
-// Accumulate: keep the cheaper seed and its splice/bearing metadata; append all
-// refs; on a seed win move the winner's primary ref to front).
-void MergeConnection(std::vector<Connection>& by_fix, Connection incoming) {
+bool IsApproachFront(const Connection& c) {
+  return !c.procedures.empty() && c.procedures.front().type == ProcedureType::kApproach;
+}
+
+// True when the arrival pool still holds both STAR and approach refs (soft-prefer
+// was armed at build time and both sides survived Accumulate).
+bool SoftPreferStarActive(const EndpointPlan& plan) {
+  bool any_star = false;
+  bool any_apch = false;
+  for (const Connection& c : plan.connections) {
+    for (const ProcedureRef& ref : c.procedures) {
+      if (ref.type == ProcedureType::kApproach) {
+        any_apch = true;
+      } else if (ref.type == ProcedureType::kStar) {
+        any_star = true;
+      }
+    }
+  }
+  return any_star && any_apch;
+}
+
+double EffectiveSeedNm(const Connection& c, bool soft_prefer_star) {
+  double seed = c.seed_distance_nm;
+  if (soft_prefer_star && IsApproachFront(c)) {
+    seed += kProcedurePreferNm;
+  }
+  return seed;
+}
+
+// Fold `incoming` into `by_fix` by fix_vertex. Ranking uses effective seed
+// (approach + B when soft-prefer is on); stored seed_distance_nm stays raw.
+void MergeConnection(std::vector<Connection>& by_fix, Connection incoming, bool soft_prefer_star) {
   for (Connection& c : by_fix) {
     if (c.fix_vertex != incoming.fix_vertex) {
       continue;
@@ -131,7 +160,7 @@ void MergeConnection(std::vector<Connection>& by_fix, Connection incoming) {
     for (ProcedureRef& ref : incoming.procedures) {
       c.procedures.push_back(std::move(ref));
     }
-    if (incoming.seed_distance_nm < c.seed_distance_nm) {
+    if (EffectiveSeedNm(incoming, soft_prefer_star) < EffectiveSeedNm(c, soft_prefer_star)) {
       c.seed_distance_nm = incoming.seed_distance_nm;
       c.bearing = incoming.bearing;
       c.approach_bearing = incoming.approach_bearing;
@@ -146,19 +175,33 @@ void MergeConnection(std::vector<Connection>& by_fix, Connection incoming) {
   by_fix.push_back(std::move(incoming));
 }
 
-void MergeAll(std::vector<Connection>& dst, std::vector<Connection> src) {
+void MergeAll(std::vector<Connection>& dst, std::vector<Connection> src, bool soft_prefer_star) {
   for (Connection& c : src) {
-    MergeConnection(dst, std::move(c));
+    MergeConnection(dst, std::move(c), soft_prefer_star);
   }
 }
 
-void SortConnectionsBySeed(std::vector<Connection>& by_fix) {
-  std::sort(by_fix.begin(), by_fix.end(), [](const Connection& a, const Connection& b) {
-    if (a.seed_distance_nm != b.seed_distance_nm) {
-      return a.seed_distance_nm < b.seed_distance_nm;
-    }
-    return a.fix_vertex < b.fix_vertex;
-  });
+void SortConnectionsBySeed(std::vector<Connection>& by_fix, bool soft_prefer_star) {
+  std::sort(by_fix.begin(), by_fix.end(),
+            [soft_prefer_star](const Connection& a, const Connection& b) {
+              const double sa = EffectiveSeedNm(a, soft_prefer_star);
+              const double sb = EffectiveSeedNm(b, soft_prefer_star);
+              if (sa != sb) {
+                return sa < sb;
+              }
+              return a.fix_vertex < b.fix_vertex;
+            });
+}
+
+std::vector<SeededEndpoint> ToSearchEndpoints(const std::vector<Connection>& connections,
+                                              bool soft_prefer_star) {
+  std::vector<SeededEndpoint> endpoints;
+  endpoints.reserve(connections.size());
+  for (const Connection& c : connections) {
+    endpoints.push_back(
+        SeededEndpoint{c.fix_vertex, EffectiveSeedNm(c, soft_prefer_star), c.bearing});
+  }
+  return endpoints;
 }
 
 Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const ShortestPath& path,
@@ -660,11 +703,11 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
           plan.connections = ProcedureConnector::BuildDeparture(*cifp, apt, *builder_, rwy);
           if (!sel.empty()) {
             if (!FilterConnectionsByName(plan.connections, sel)) {
-              // Named --sid: also try off-network exit splice candidates.
+              // Named --sid: only accumulate matching off-network exit splices so
+              // splice_vertex/seed bind to the requested SID, not a merge winner.
               plan.connections =
-                  ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, *builder_, rwy);
-              if (!FilterConnectionsByName(plan.connections, sel)) {
-                plan.connections.clear();
+                  ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, *builder_, rwy, sel);
+              if (plan.connections.empty()) {
                 plan.named_procedure_unmatched = true;
                 return Result<EndpointPlan>::Ok(std::move(plan));
               }
@@ -681,9 +724,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
           if (!sel.empty()) {
             if (!FilterConnectionsByName(plan.connections, sel)) {
               plan.connections =
-                  ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, *builder_, rwy);
-              if (!FilterConnectionsByName(plan.connections, sel)) {
-                plan.connections.clear();
+                  ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, *builder_, rwy, sel);
+              if (plan.connections.empty()) {
                 plan.named_procedure_unmatched = true;
                 return Result<EndpointPlan>::Ok(std::move(plan));
               }
@@ -699,15 +741,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
                 ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, *builder_, rwy);
             std::vector<Connection> apch =
                 ProcedureConnector::BuildApproachArrival(*cifp, apt, *builder_, rwy);
-            const bool have_splice = !pool.empty();
-            if (have_splice) {
-              for (Connection& c : apch) {
-                c.seed_distance_nm += kProcedurePreferNm;
-              }
-            }
-            // STAR first, then approach: equal seeds keep STAR at procedures.front().
-            MergeAll(pool, std::move(apch));
-            SortConnectionsBySeed(pool);
+            const bool soft_prefer = !pool.empty() && !apch.empty();
+            // STAR first, then approach: equal effective seeds keep STAR at front.
+            MergeAll(pool, std::move(apch), soft_prefer);
+            SortConnectionsBySeed(pool, soft_prefer);
             plan.connections = std::move(pool);
             // Plan-level flags are only meaningful for homogeneous pools; mixed
             // STAR∪approach is classified per path from procedures.front().type.
@@ -839,8 +876,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   // two-compare on the hot loop instead of a type-erased call per neighbor.
   const NavGraph& graph = builder_->graph();
   options.node_filter = NodeFilter{builder_->first_airport_vertex(), graph.VertexCount(), nullptr};
-  std::vector<SeededEndpoint> sources = ProcedureConnector::ToEndpoints(dep.connections);
-  std::vector<SeededEndpoint> goals = ProcedureConnector::ToEndpoints(arr.connections);
+  std::vector<SeededEndpoint> sources =
+      ToSearchEndpoints(dep.connections, /*soft_prefer_star=*/false);
+  const bool arr_soft_prefer = SoftPreferStarActive(arr);
+  std::vector<SeededEndpoint> goals = ToSearchEndpoints(arr.connections, arr_soft_prefer);
   // Drop any seeded connection fix the request asks to avoid: it would otherwise
   // slip through as a search start/end, which AvoidConstraint cannot catch.
   if (!avoid_vertices.empty()) {
@@ -919,13 +958,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   }
 
   // Look up a connection fix's seed cost among an endpoint's seeded fixes.
-  auto seed_of = [](const std::vector<SeededEndpoint>& eps, int vertex) {
-    for (const SeededEndpoint& e : eps) {
-      if (e.vertex == vertex) {
-        return e.cost;
-      }
-    }
-    return 0.0;
+  // Geographic seed for MakeRoute / phase split — never the soft-prefer bump.
+  auto raw_seed_of = [](const EndpointPlan& plan, int vertex) {
+    const Connection* c = FindConnection(plan, vertex);
+    return c != nullptr ? c->seed_distance_nm : 0.0;
   };
 
   // Classify how an endpoint attached to the network. Departure plans stay
@@ -964,8 +1000,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     }
     const int dep_fix = p.vertices.front();
     const int arr_fix = p.vertices.back();
-    const double dep_seed = seed_of(sources, dep_fix);
-    const double arr_seed = seed_of(goals, arr_fix);
+    const double dep_seed = raw_seed_of(dep, dep_fix);
+    const double arr_seed = raw_seed_of(arr, arr_fix);
     const Connection* dep_conn = FindConnection(dep, dep_fix);
     const Connection* arr_conn = FindConnection(arr, arr_fix);
     const int dep_splice_v = dep_conn != nullptr ? dep_conn->splice_vertex : kNoVertex;
@@ -997,6 +1033,13 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     Route route = MakeRoute(*builder_, graph, p, dep.airport_icao, arr.airport_icao, sid_name,
                             star_name, dep_seed, arr_seed, options, dep_splice_v, dep_splice_nm,
                             arr_splice_v, arr_splice_nm);
+    // A* folds SeededEndpoint.cost into distance_nm; strip the soft-prefer bump
+    // so reported totals stay geographic when an approach goal won the mixed pool.
+    if (arr_soft_prefer && arr_kind == ConnectionKind::kTerminalTransition) {
+      route.total_distance_nm = std::max(0.0, route.total_distance_nm - kProcedurePreferNm);
+      route.enroute_distance_nm =
+          std::max(0.0, route.total_distance_nm - route.dep_distance_nm - route.arr_distance_nm);
+    }
     route.sid = sid_name;
     route.dep_runway = dep_rwy;
     route.sid_options = sid_options;

@@ -453,21 +453,26 @@ TEST_CASE("off-network published STAR/SID gates produce DCT-splice proxies", "[u
     bf::CifpData cifp;
     cifp.procedures = {star};
 
+    const int c = builder.VerticesByIdent("CCC")[0];
+    const bf::Coordinate eee = builder.graph().CoordOf(e);
+    const bf::Coordinate ccc = builder.graph().CoordOf(c);
+    const double body_nm = eee.DistanceTo(ccc) + ccc.DistanceTo(airport);
+
     // Gate-only BuildArrival sees no on-network IF (EEE is off-net).
     CHECK(bf::ProcedureConnector::BuildArrival(cifp, airport, builder, "").empty());
     const auto splice = bf::ProcedureConnector::BuildStarSpliceArrival(cifp, airport, builder, "");
     REQUIRE_FALSE(splice.empty());
-    for (const bf::Connection& c : splice) {
-      CHECK(c.splice_vertex == e);
-      CHECK(c.splice_leg_nm > 0.0);
-      CHECK(c.fix_vertex != e);
-      CHECK(builder.HasInbound(c.fix_vertex));
-      REQUIRE_FALSE(c.procedures.empty());
-      CHECK(c.procedures.front().name == "TSTAR");
-      CHECK(c.procedures.front().type == bf::ProcedureType::kStar);
-      // seed = |F→EEE| + body(EEE→CCC + stub)
-      CHECK_THAT(c.seed_distance_nm,
-                 WithinRel(c.splice_leg_nm + (c.seed_distance_nm - c.splice_leg_nm), 1e-9));
+    for (const bf::Connection& conn : splice) {
+      CHECK(conn.splice_vertex == e);
+      CHECK(conn.fix_vertex != e);
+      CHECK(builder.HasInbound(conn.fix_vertex));
+      REQUIRE_FALSE(conn.procedures.empty());
+      CHECK(conn.procedures.front().name == "TSTAR");
+      CHECK(conn.procedures.front().type == bf::ProcedureType::kStar);
+      const bf::Coordinate f = builder.graph().CoordOf(conn.fix_vertex);
+      const double splice_leg = f.DistanceTo(eee);
+      CHECK_THAT(conn.splice_leg_nm, WithinRel(splice_leg, 1e-6));
+      CHECK_THAT(conn.seed_distance_nm, WithinRel(splice_leg + body_nm, 1e-6));
     }
   }
 
@@ -490,16 +495,52 @@ TEST_CASE("off-network published STAR/SID gates produce DCT-splice proxies", "[u
     bf::CifpData cifp;
     cifp.procedures = {sid};
 
+    const int a = builder.VerticesByIdent("AAA")[0];
+    const bf::Coordinate aaa = builder.graph().CoordOf(a);
+    const bf::Coordinate eee = builder.graph().CoordOf(e);
+    const double body_nm = airport.DistanceTo(aaa) + aaa.DistanceTo(eee);
+
     const auto splice = bf::ProcedureConnector::BuildSidSpliceDeparture(cifp, airport, builder, "");
     REQUIRE_FALSE(splice.empty());
-    for (const bf::Connection& c : splice) {
-      CHECK(c.splice_vertex == e);
-      CHECK(c.splice_leg_nm > 0.0);
-      CHECK(c.fix_vertex != e);
-      CHECK(builder.HasOutbound(c.fix_vertex));
-      REQUIRE_FALSE(c.procedures.empty());
-      CHECK(c.procedures.front().name == "TSID");
-      CHECK(c.procedures.front().type == bf::ProcedureType::kSid);
+    for (const bf::Connection& conn : splice) {
+      CHECK(conn.splice_vertex == e);
+      CHECK(conn.fix_vertex != e);
+      CHECK(builder.HasOutbound(conn.fix_vertex));
+      REQUIRE_FALSE(conn.procedures.empty());
+      CHECK(conn.procedures.front().name == "TSID");
+      CHECK(conn.procedures.front().type == bf::ProcedureType::kSid);
+      const bf::Coordinate f = builder.graph().CoordOf(conn.fix_vertex);
+      const double splice_leg = eee.DistanceTo(f);
+      CHECK_THAT(conn.splice_leg_nm, WithinRel(splice_leg, 1e-6));
+      CHECK_THAT(conn.seed_distance_nm, WithinRel(body_nm + splice_leg, 1e-6));
+    }
+  }
+
+  SECTION("named splice filter binds splice_vertex to the requested procedure") {
+    bf::Procedure star_a;
+    star_a.type = bf::ProcedureType::kStar;
+    star_a.name = "STARA";
+    star_a.legs = {leg(bf::PathTerminator::kIF, "EEE"), leg(bf::PathTerminator::kTF, "CCC")};
+    bf::Procedure star_b;
+    star_b.type = bf::ProcedureType::kStar;
+    star_b.name = "STARB";
+    // Longer body so an unfiltered merge would prefer STARA; naming STARB must
+    // still reprice around EEE→BBB→airport and keep splice on EEE.
+    star_b.legs = {leg(bf::PathTerminator::kIF, "EEE"), leg(bf::PathTerminator::kTF, "BBB"),
+                   leg(bf::PathTerminator::kTF, "CCC")};
+    bf::CifpData cifp;
+    cifp.procedures = {star_a, star_b};
+
+    const auto named =
+        bf::ProcedureConnector::BuildStarSpliceArrival(cifp, airport, builder, "", "STARB");
+    REQUIRE_FALSE(named.empty());
+    for (const bf::Connection& conn : named) {
+      CHECK(conn.splice_vertex == e);
+      REQUIRE_FALSE(conn.procedures.empty());
+      CHECK(conn.procedures.front().name == "STARB");
+      for (const bf::ProcedureRef& ref : conn.procedures) {
+        CHECK(ref.name == "STARB");
+      }
     }
   }
 }

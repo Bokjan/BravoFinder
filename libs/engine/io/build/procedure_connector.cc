@@ -32,6 +32,19 @@ bool RunwayMatches(const Procedure& p, const std::string& runway_filter) {
   return p.runway.empty() || p.runway == runway_filter;
 }
 
+// Optional name/transition selector: bare "NAME" or "NAME.TRANSITION". Empty
+// accepts all. Same rules as routing's named --star/--sid filter.
+bool NameMatches(const Procedure& p, const std::string& selector) {
+  if (selector.empty()) {
+    return true;
+  }
+  const size_t dot = selector.find('.');
+  if (dot == std::string::npos) {
+    return p.name == selector;
+  }
+  return p.name == selector.substr(0, dot) && p.transition_ident == selector.substr(dot + 1);
+}
+
 // Build a ProcedureRef describing one procedure record.
 ProcedureRef MakeRef(const Procedure& p) {
   ProcedureRef ref;
@@ -197,18 +210,13 @@ std::vector<Connection> Finalize(std::vector<Connection> by_fix) {
   return by_fix;
 }
 
-// Collect one side's connections: walk every matching procedure record and
-// accumulate its handoff fixes. `gate_only` keeps only the published handoff
-// points (the STAR's Initial Fix / the SID's last fix-bearing leg). Callers
-// that need the legacy "any on-network fix" model pass false; BuildSide always
-// uses gate_only=true (issue #30 removed the airport-level mid-join fallback).
-//
-// Bearings are computed from the FULL hit list even when only gates survive: a
-// gate's procedure heading is set by the fix that precedes/follows it along the
+// Collect one side's published on-network handoff fixes: the STAR's Initial Fix
+// / the SID's last fix-bearing leg. Bearings come from the full on-network hit
+// list so a gate's heading is set by the fix that precedes/follows it along the
 // published track, not by the next gate.
 std::vector<Connection> CollectSide(const CifpData& cifp, ProcedureType want, WalkDir dir,
                                     const Coordinate& airport_coord, const GraphBuilder& builder,
-                                    const std::string& runway_filter, bool gate_only) {
+                                    const std::string& runway_filter) {
   const bool departure = dir == WalkDir::kOutbound;
   std::vector<Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
@@ -230,7 +238,7 @@ std::vector<Connection> CollectSide(const CifpData& cifp, ProcedureType want, Wa
       hit_coords.push_back(builder.graph().CoordOf(h.vertex));
     }
     for (size_t j = 0; j < walk.hits.size(); ++j) {
-      if (gate_only && !walk.hits[j].is_gate) {
+      if (!walk.hits[j].is_gate) {
         continue;
       }
       double seed = 0.0;
@@ -257,13 +265,11 @@ std::vector<Connection> CollectSide(const CifpData& cifp, ProcedureType want, Wa
 
 // Collect one side's published on-network gates only. Airports whose STAR/SID
 // gates are all off-network are handled by BuildStarSpliceArrival /
-// BuildSidSpliceDeparture (issue #30) rather than the former airport-level
-// mid-join fallback (joining at an on-network fix the procedure merely passes).
+// BuildSidSpliceDeparture (issue #30).
 std::vector<Connection> BuildSide(const CifpData& cifp, ProcedureType want, WalkDir dir,
                                   const Coordinate& airport_coord, const GraphBuilder& builder,
                                   const std::string& runway_filter) {
-  return Finalize(CollectSide(cifp, want, dir, airport_coord, builder, runway_filter,
-                              /*gate_only=*/true));
+  return Finalize(CollectSide(cifp, want, dir, airport_coord, builder, runway_filter));
 }
 
 // Polyline distance along a procedure's definite fixes, optionally starting at
@@ -454,10 +460,12 @@ double SidBodyToExitNm(const Procedure& p, int exit_v, const Coordinate& airport
 std::vector<Connection> CollectStarSpliceArrivals(const CifpData& cifp,
                                                   const Coordinate& airport_coord,
                                                   const GraphBuilder& builder,
-                                                  const std::string& runway_filter) {
+                                                  const std::string& runway_filter,
+                                                  const std::string& name_filter) {
   std::vector<Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
-    if (p.type != ProcedureType::kStar || !RunwayMatches(p, runway_filter)) {
+    if (p.type != ProcedureType::kStar || !RunwayMatches(p, runway_filter) ||
+        !NameMatches(p, name_filter)) {
       continue;
     }
     for (const ProcedureLeg& leg : p.legs) {
@@ -493,10 +501,12 @@ std::vector<Connection> CollectStarSpliceArrivals(const CifpData& cifp,
 std::vector<Connection> CollectSidSpliceDepartures(const CifpData& cifp,
                                                    const Coordinate& airport_coord,
                                                    const GraphBuilder& builder,
-                                                   const std::string& runway_filter) {
+                                                   const std::string& runway_filter,
+                                                   const std::string& name_filter) {
   std::vector<Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
-    if (p.type != ProcedureType::kSid || !RunwayMatches(p, runway_filter)) {
+    if (p.type != ProcedureType::kSid || !RunwayMatches(p, runway_filter) ||
+        !NameMatches(p, name_filter)) {
       continue;
     }
     const size_t exit_leg = LastFixBearingLeg(p);
@@ -626,19 +636,21 @@ std::vector<Connection> ProcedureConnector::BuildApproachArrival(const CifpData&
   return Finalize(std::move(by_fix));
 }
 
-std::vector<Connection> ProcedureConnector::BuildStarSpliceArrival(
-    const CifpData& cifp, const Coordinate& airport_coord, const GraphBuilder& builder,
-    const std::string& runway_filter) {
+std::vector<Connection> ProcedureConnector::BuildStarSpliceArrival(const CifpData& cifp,
+                                                                   const Coordinate& airport_coord,
+                                                                   const GraphBuilder& builder,
+                                                                   const std::string& runway_filter,
+                                                                   const std::string& name_filter) {
   std::vector<Connection> by_fix =
-      CollectStarSpliceArrivals(cifp, airport_coord, builder, runway_filter);
+      CollectStarSpliceArrivals(cifp, airport_coord, builder, runway_filter, name_filter);
   return Finalize(std::move(by_fix));
 }
 
 std::vector<Connection> ProcedureConnector::BuildSidSpliceDeparture(
     const CifpData& cifp, const Coordinate& airport_coord, const GraphBuilder& builder,
-    const std::string& runway_filter) {
+    const std::string& runway_filter, const std::string& name_filter) {
   std::vector<Connection> by_fix =
-      CollectSidSpliceDepartures(cifp, airport_coord, builder, runway_filter);
+      CollectSidSpliceDepartures(cifp, airport_coord, builder, runway_filter, name_filter);
   return Finalize(std::move(by_fix));
 }
 
