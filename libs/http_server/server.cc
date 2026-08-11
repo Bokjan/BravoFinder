@@ -4,6 +4,7 @@
 #include "server.h"
 
 #include <cstdint>
+#include <vector>
 
 #include "conn.h"
 
@@ -55,6 +56,16 @@ void Server::Close() {
   }
 }
 
+void Server::Shutdown() {
+  Close();
+  // Snapshot because each Connection::Close may erase from live_ via on_closed
+  // before the loop finishes; iterating live_ directly would invalidate.
+  const std::vector<Connection*> snapshot(live_.begin(), live_.end());
+  for (Connection* conn : snapshot) {
+    conn->Close();
+  }
+}
+
 void Server::OnNewConnection(uv_stream_t* server, int status) {
   if (status != 0) {
     return;  // accept failed at the libuv level; nothing to clean up yet
@@ -63,8 +74,7 @@ void Server::OnNewConnection(uv_stream_t* server, int status) {
   // At the connection cap: accept into a throwaway Connection and close it
   // immediately so the kernel backlog does not stall, without counting it as
   // live. 0 means unlimited.
-  if (self->limits_.max_connections > 0 &&
-      self->live_connections_ >= self->limits_.max_connections) {
+  if (self->limits_.max_connections > 0 && self->live_.size() >= self->limits_.max_connections) {
     std::shared_ptr<Connection> rejected =
         Connection::Create(server->loop, self->handler_, self->limits_);
     if (uv_accept(server, rejected->stream()) != 0) {
@@ -79,14 +89,11 @@ void Server::OnNewConnection(uv_stream_t* server, int status) {
     conn->Close();  // could not accept into the handle; close and free it
     return;
   }
-  // Count only after a successful accept; on_closed decrements when both
-  // handles finish closing (StartClose / client EOF / write failure).
-  ++self->live_connections_;
-  conn->SetOnClosed([self]() {
-    if (self->live_connections_ > 0) {
-      --self->live_connections_;
-    }
-  });
+  // Track only after a successful accept; on_closed erases when both handles
+  // finish closing (StartClose / client EOF / write failure / Shutdown).
+  Connection* raw = conn.get();
+  self->live_.insert(raw);
+  conn->SetOnClosed([self, raw]() { self->live_.erase(raw); });
   conn->Start();
 }
 

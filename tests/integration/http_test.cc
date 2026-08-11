@@ -65,10 +65,10 @@ class ServerHarness {
   }
 
   ~ServerHarness() {
-    // Ask the loop thread to stop accepting (close the listener + the async).
-    // The loop then drains any in-flight computation and client disconnects on
-    // its own and returns from uv_run once no handle or queued work remains, so
-    // every Connection frees itself normally — no fixed-delay settle to guess.
+    // Ask the loop thread to shut down (listener + live connections + async).
+    // The loop then drains in-flight computation and connection closes on its
+    // own and returns from uv_run once no handle or queued work remains, so
+    // every Connection frees itself via StartClose — no fixed-delay settle.
     uv_async_send(&stop_);
     thread_.join();
   }
@@ -79,24 +79,25 @@ class ServerHarness {
   void RunLoop(std::promise<int> port_promise) {
     uv_loop_init(&loop_);
     uv_async_init(&loop_, &stop_, [](uv_async_t* a) {
-      // Runs on the loop thread: stop accepting, then close the async itself.
-      // uv_run(UV_RUN_DEFAULT) returns once the listener, this async, all
-      // Connections, and all queued threadpool work have drained.
+      // Runs on the loop thread: Shutdown closes the listener and every live
+      // Connection through StartClose (needed if keep-alive peers linger), then
+      // close the async itself. uv_run(UV_RUN_DEFAULT) returns once the
+      // listener, this async, all Connections, and all queued work have drained.
       auto* server = static_cast<bf::http_server::Server*>(a->data);
-      server->Close();
+      server->Shutdown();
       uv_close(reinterpret_cast<uv_handle_t*>(a), nullptr);
     });
     bf::http::Router router(registry_, &loop_);
     bf::http_server::Server server(&loop_, router, limits_);
-    // The async callback needs the server to close its listener. Safe to set
-    // before the send: the destructor cannot fire the async until the ctor has
-    // returned, which is after port_promise is fulfilled below.
+    // The async callback needs the server for Shutdown. Safe to set before the
+    // send: the destructor cannot fire the async until the ctor has returned,
+    // which is after port_promise is fulfilled below.
     stop_.data = &server;
     const int r = server.Listen("127.0.0.1", 0);
     port_promise.set_value(r == 0 ? server.BoundPort() : -1);
     uv_run(&loop_, UV_RUN_DEFAULT);
-    // Belt and braces: close any handle still open (there should be none after a
-    // graceful drain) and flush, then close the loop.
+    // Belt and braces: close any leftover non-connection handle and flush, then
+    // close the loop. Connections already closing are skipped by uv_is_closing.
     uv_walk(
         &loop_,
         [](uv_handle_t* h, void*) {

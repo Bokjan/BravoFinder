@@ -12,16 +12,23 @@
 #include <uv.h>
 
 #include <string>
+#include <unordered_set>
 
 #include "transport.h"  // Limits, RequestHandler
 
 namespace bf::http_server {
+
+class Connection;
 
 class Server {
  public:
   // Serve connections routed by `handler`, applying `limits` to each. Both must
   // outlive the Server. Does no I/O until Listen().
   Server(uv_loop_t* loop, RequestHandler& handler, const Limits& limits);
+  // Do not destroy a Server while the loop still polls its handles. Call
+  // Shutdown() (or Close()) on the loop thread and drain with uv_run before
+  // destroying the Server or the loop. The destructor still calls Close() as a
+  // last resort for the listening handle only.
   ~Server();
 
   Server(const Server&) = delete;
@@ -39,12 +46,18 @@ class Server {
 
   // Stop accepting new connections by closing the listening socket. MUST be
   // called on the loop thread (e.g. from a uv_async callback). Idempotent.
-  // In-flight connections and queued work are untouched and drain on their own;
-  // once they finish, a loop running UV_RUN_DEFAULT has no active handles left
-  // and returns — enabling a graceful shutdown with no fixed-delay settle.
-  // The destructor also calls Close() so a forgotten Close cannot leak the
-  // listening handle; prefer an explicit Close before destroying the loop.
+  // In-flight connections are untouched — use Shutdown() for process teardown
+  // when keep-alive peers may still be open. Prefer an explicit Close/Shutdown
+  // on the loop thread before destroying the loop (see ~Server).
   void Close();
+
+  // Stop accepting and close every live Connection through Connection::Close
+  // (StartClose), so self_ resets and IsAlive() goes false. MUST be called on
+  // the loop thread. Idempotent; safe if live_ mutates as closes complete.
+  // Prefer this over Close() + uv_walk(uv_close(..., nullptr)) for process
+  // teardown — walking Connection handles with a null close callback bypasses
+  // StartClose and can leave self_ alive.
+  void Shutdown();
 
  private:
   static void OnNewConnection(uv_stream_t* server, int status);
@@ -53,8 +66,9 @@ class Server {
   RequestHandler& handler_;
   Limits limits_;
   uv_tcp_t handle_{};
-  // Live Connection count (loop thread only). Enforces Limits::max_connections.
-  size_t live_connections_ = 0;
+  // Live Connection pointers (loop thread only). Enforces Limits::max_connections
+  // via size(); erased from SetOnClosed once both handles finish closing.
+  std::unordered_set<Connection*> live_;
 };
 
 }  // namespace bf::http_server

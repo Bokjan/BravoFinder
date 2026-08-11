@@ -144,14 +144,18 @@ int main(int argc, char** argv) {
 
   uv_run(&loop, UV_RUN_DEFAULT);
 
-  // Graceful drain. uv_stop returned the loop while route-compute work may still
-  // be in flight on the threadpool; its completion callbacks (which read the
-  // registry) must run before `registry` -- a stack local below -- is destroyed,
-  // or a worker could touch it in the exit window. Close every remaining handle
-  // (listener, live connections, signal watchers) and run the loop again: the
-  // pending uv_work_t requests keep it alive until they finish, so this final run
-  // delivers their completions and every handle's close callback before we exit.
-  // Mirrors the teardown idiom in http_test.cc.
+  // Graceful drain after uv_stop. Route-compute work may still be in flight on
+  // the threadpool; its completion callbacks (which read the registry) must run
+  // before `registry` — a stack local below — is destroyed. Shutdown() stops
+  // accepting and closes every live Connection through Connection::Close
+  // (StartClose), so self_ resets and IsAlive() goes false. A bare uv_walk that
+  // uv_close()s Connection handles with a null callback would bypass StartClose
+  // and leave connections looking alive. The walk below only closes leftover
+  // non-connection handles (signal watchers, etc.); already-closing handles are
+  // skipped by uv_is_closing. The pending uv_work_t requests keep the loop alive
+  // until they finish, so this final run delivers their completions and every
+  // handle's close callback before we exit. Mirrors http_test.cc teardown.
+  server.Shutdown();
   uv_walk(
       &loop,
       [](uv_handle_t* h, void*) {

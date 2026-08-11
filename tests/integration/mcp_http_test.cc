@@ -100,8 +100,10 @@ class McpHarness {
   void RunLoop(std::promise<int> port_promise) {
     uv_loop_init(&loop_);
     uv_async_init(&loop_, &stop_, [](uv_async_t* a) {
+      // Shutdown closes the listener and live Connections via StartClose (so
+      // keep-alive peers do not linger); then close the async itself.
       auto* server = static_cast<bf::http_server::Server*>(a->data);
-      server->Close();
+      server->Shutdown();
       uv_close(reinterpret_cast<uv_handle_t*>(a), nullptr);
     });
     bf::mcp::McpHttpHandler handler(registry_, &loop_);
@@ -110,6 +112,8 @@ class McpHarness {
     const int r = server.Listen("127.0.0.1", 0);
     port_promise.set_value(r == 0 ? server.BoundPort() : -1);
     uv_run(&loop_, UV_RUN_DEFAULT);
+    // Belt and braces for leftover non-connection handles; already-closing
+    // Connection handles are skipped by uv_is_closing.
     uv_walk(
         &loop_,
         [](uv_handle_t* h, void*) {

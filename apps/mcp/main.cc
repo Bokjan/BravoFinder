@@ -84,9 +84,13 @@ int RunHttp(bf::service::NavDatabaseRegistry& registry, const std::string& host,
 
   uv_run(&loop, UV_RUN_DEFAULT);
 
-  // Graceful drain: close every remaining handle and run the loop again so any
-  // in-flight route-compute completions (which read the registry) run before the
-  // registry -- a caller's stack local -- is destroyed.
+  // Graceful drain after uv_stop: Shutdown() stops accepting and closes live
+  // Connections through Connection::Close (StartClose). Do not uv_close
+  // Connection handles with a null callback — that bypasses StartClose and can
+  // leave self_ / IsAlive() stuck. The walk only closes leftover handles
+  // (signals, etc.); already-closing ones are skipped. Final uv_run delivers
+  // in-flight work completions before the caller's registry is destroyed.
+  server.Shutdown();
   uv_walk(
       &loop,
       [](uv_handle_t* h, void*) {

@@ -47,6 +47,8 @@ loop 线程：连接仍存活则写响应，否则丢弃结果
 - `after_work` 回到 loop 线程后先查 `IsAlive()`：连接已关就**丢弃响应**，不写。
 - `self_` 只在两个 handle（tcp + timer）都关完后释放，对象随最后一个在途引用消失而析构。
 
+**进程退出时的关闭路径**：必须走 `Connection::Close` / `Server::Shutdown`（内部 `StartClose`），让 `self_` 复位、`IsAlive()` 变 false。禁止对 Connection 的 TCP/timer handle 直接 `uv_close(..., nullptr)`——那样会绕过 `StartClose`，`self_` 可能永远不释放，连接在存活守卫眼里仍是「活的」。`Server::Close()` 只关 listener（停 accept）；进程拆卸用 `Shutdown()`。销毁 `Server`/loop 之前，先在 loop 线程上 `Shutdown`（或 `Close`），再用 `uv_run` 把 close 回调与在途 work 排空。
+
 集成测试专门覆盖「计算途中断开不崩」（`tests/integration/http_test.cc`），并跑 tsan。
 
 ### 手搓 HTTP 的安全硬化
