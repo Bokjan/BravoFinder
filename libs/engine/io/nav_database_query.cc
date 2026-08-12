@@ -6,7 +6,9 @@
 
 #include "core/base/string_util.h"
 #include "core/domain/encoding_scale.h"
+#include "core/domain/procedure.h"
 #include "io/build/graph_builder.h"
+#include "io/cache/nav_detail_codec.h"
 #include "io/nav_database.h"
 
 namespace bf {
@@ -58,22 +60,35 @@ std::vector<std::optional<AirportInfo>> NavDatabase::LookupAirports(
     }
     const Ident& id = builder_->IdentOf(v);
     Result<const CifpData*> cifp = ProceduresFor(up);
-    // Corrupt CIFP: still report the airport; has_procedures stays false rather
-    // than inventing SID/STAR presence. Route queries surface kCacheCorrupt.
-    const bool has_procedures = cifp && cifp.value() != nullptr;
-    out[i] = AirportInfo{id.ident, id.arinc424_icao_code, builder_->graph().CoordOf(v),
-                         builder_->ElevationOf(v), has_procedures};
+    bool has_procedures = false;
+    bool procedures_corrupt = false;
+    if (!cifp) {
+      // Corrupt CIFP: still report the airport; flag the unreadability so
+      // callers do not treat this as "no procedures published".
+      procedures_corrupt = (cifp.error().code == ErrorCode::kCacheCorrupt);
+    } else {
+      has_procedures = cifp.value() != nullptr;
+    }
+    out[i] = AirportInfo{id.ident,
+                         id.arinc424_icao_code,
+                         builder_->graph().CoordOf(v),
+                         builder_->ElevationOf(v),
+                         has_procedures,
+                         procedures_corrupt};
   }
   return out;
 }
 
-std::vector<std::optional<AirportProcedures>> NavDatabase::LookupProcedures(
+Result<std::vector<std::optional<AirportProcedures>>> NavDatabase::LookupProcedures(
     const std::vector<std::string>& icaos) const {
   std::vector<std::optional<AirportProcedures>> out(icaos.size());
   for (size_t i = 0; i < icaos.size(); ++i) {
     const std::string up = ToUpper(icaos[i]);
     Result<const CifpData*> cifp_r = ProceduresFor(up);
-    if (!cifp_r || cifp_r.value() == nullptr) {
+    if (!cifp_r) {
+      return Result<std::vector<std::optional<AirportProcedures>>>::Err(std::move(cifp_r).error());
+    }
+    if (cifp_r.value() == nullptr) {
       continue;
     }
     const CifpData* cifp = cifp_r.value();
@@ -85,7 +100,7 @@ std::vector<std::optional<AirportProcedures>> NavDatabase::LookupProcedures(
     }
     out[i] = std::move(ap);
   }
-  return out;
+  return Result<std::vector<std::optional<AirportProcedures>>>::Ok(std::move(out));
 }
 
 // Format a leg's altitude constraint as a compact display token. Empty when the
@@ -109,13 +124,16 @@ std::string FormatAltToken(const AltitudeConstraint& a) {
 }
 }  // namespace
 
-std::optional<AirportProcedureDetail> NavDatabase::LookupProcedureDetail(
+Result<std::optional<AirportProcedureDetail>> NavDatabase::LookupProcedureDetail(
     const std::string& icao, const std::string& procedure_name) const {
   const std::string up_icao = ToUpper(icao);
   const std::string up_name = ToUpper(procedure_name);
   Result<const CifpData*> cifp_r = ProceduresFor(up_icao);
-  if (!cifp_r || cifp_r.value() == nullptr) {
-    return std::nullopt;
+  if (!cifp_r) {
+    return Result<std::optional<AirportProcedureDetail>>::Err(std::move(cifp_r).error());
+  }
+  if (cifp_r.value() == nullptr) {
+    return Result<std::optional<AirportProcedureDetail>>::Ok(std::nullopt);
   }
   const CifpData* cifp = cifp_r.value();
   AirportProcedureDetail out;
@@ -146,9 +164,9 @@ std::optional<AirportProcedureDetail> NavDatabase::LookupProcedureDetail(
     out.transitions.push_back(std::move(d));
   }
   if (out.transitions.empty()) {
-    return std::nullopt;  // airport has procedures, but none of that name
+    return Result<std::optional<AirportProcedureDetail>>::Ok(std::nullopt);
   }
-  return out;
+  return Result<std::optional<AirportProcedureDetail>>::Ok(std::move(out));
 }
 
 std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
@@ -166,7 +184,7 @@ std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
 std::vector<std::vector<NavaidDetailInfo>> NavDatabase::LookupNavaidDetails(
     const std::vector<std::string>& idents) const {
   std::vector<std::vector<NavaidDetailInfo>> out(idents.size());
-  if (!detail_archive_.has_value()) {
+  if (!detail_archive_) {
     return out;
   }
   for (size_t i = 0; i < idents.size(); ++i) {
@@ -178,7 +196,7 @@ std::vector<std::vector<NavaidDetailInfo>> NavDatabase::LookupNavaidDetails(
 std::vector<std::vector<HoldInfo>> NavDatabase::LookupHolds(
     const std::vector<std::string>& fix_idents) const {
   std::vector<std::vector<HoldInfo>> out(fix_idents.size());
-  if (!detail_archive_.has_value()) {
+  if (!detail_archive_) {
     return out;
   }
   for (size_t i = 0; i < fix_idents.size(); ++i) {

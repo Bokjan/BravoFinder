@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "core/domain/msa.h"
 #include "core/routing/route.h"
 #include "http_status.h"
 #include "io/nav_database.h"
@@ -136,12 +137,22 @@ HandlerResult LookupAirports(const bf::NavDatabase& db, const std::vector<std::s
 
 HandlerResult LookupProcedures(const bf::NavDatabase& db, const std::vector<std::string>& ids,
                                OutputFormat fmt) {
-  return RunOptionalLookup<bf::AirportProcedures>(
-      db, ids, fmt,
-      [](const bf::NavDatabase& d, const std::vector<std::string>& i) {
-        return d.LookupProcedures(i);
-      },
-      RenderProcedures);
+  if (ids.size() > kMaxIdListSize) {
+    return RejectOversizedIds(fmt, ids.size());
+  }
+  const auto start = std::chrono::steady_clock::now();
+  bf::Result<std::vector<std::optional<bf::AirportProcedures>>> looked = db.LookupProcedures(ids);
+  const uint32_t elapsed = ElapsedMs(start);
+  if (!looked) {
+    return {RenderError(fmt, looked.error().message), kStatusUnprocessableEntity, elapsed};
+  }
+  const auto& results = looked.value();
+  const bool all_missing =
+      std::none_of(results.begin(), results.end(), [](const auto& opt) { return opt.has_value(); });
+  if (all_missing) {
+    return {RenderProcedures(fmt, ids, results), kStatusNotFound, elapsed};
+  }
+  return {RenderProcedures(fmt, ids, results), kStatusOk, elapsed};
 }
 
 HandlerResult LookupAirways(const bf::NavDatabase& db, const std::vector<std::string>& ids,
@@ -172,18 +183,44 @@ HandlerResult LookupHolds(const bf::NavDatabase& db, const std::vector<std::stri
       RenderHolds);
 }
 
+HandlerResult LookupMsa(const bf::NavDatabase& db, const std::vector<std::string>& ids,
+                        OutputFormat fmt) {
+  if (ids.size() > kMaxIdListSize) {
+    return RejectOversizedIds(fmt, ids.size());
+  }
+  const auto start = std::chrono::steady_clock::now();
+  std::vector<std::optional<std::vector<bf::MsaSector>>> results(ids.size());
+  for (size_t i = 0; i < ids.size(); ++i) {
+    std::vector<bf::MsaSector> sectors = db.MsaForAirport(ids[i]);
+    if (!sectors.empty()) {
+      results[i] = std::move(sectors);
+    }
+  }
+  const uint32_t elapsed = ElapsedMs(start);
+  const bool all_missing =
+      std::none_of(results.begin(), results.end(), [](const auto& opt) { return opt.has_value(); });
+  if (all_missing) {
+    return {RenderMsa(fmt, ids, results), kStatusNotFound, elapsed};
+  }
+  return {RenderMsa(fmt, ids, results), kStatusOk, elapsed};
+}
+
 HandlerResult LookupProcedureLegs(const bf::NavDatabase& db, const std::string& airport,
                                   const std::string& procedure, OutputFormat fmt) {
   const auto start = std::chrono::steady_clock::now();
-  std::optional<bf::AirportProcedureDetail> detail = db.LookupProcedureDetail(airport, procedure);
+  bf::Result<std::optional<bf::AirportProcedureDetail>> looked =
+      db.LookupProcedureDetail(airport, procedure);
   const uint32_t elapsed = ElapsedMs(start);
-  if (!detail) {
+  if (!looked) {
+    return {RenderError(fmt, looked.error().message), kStatusUnprocessableEntity, elapsed};
+  }
+  if (!looked.value()) {
     // Unknown airport, no CIFP data, or no procedure of that name: 404 rather
     // than an empty success payload.
     return {RenderError(fmt, "no procedure of that name at that airport"), kStatusNotFound,
             elapsed};
   }
-  return {RenderProcedureDetail(fmt, *detail), kStatusOk, elapsed};
+  return {RenderProcedureDetail(fmt, *looked.value()), kStatusOk, elapsed};
 }
 
 // ---- CLI procedure kind (mixed summary / detail selectors) ------------------
@@ -222,14 +259,24 @@ HandlerResult LookupProceduresMixed(const bf::NavDatabase& db,
       summary_airports.push_back(selectors[i].airport);
       summary_indices.push_back(i);
     } else {
-      details[i] = db.LookupProcedureDetail(selectors[i].airport, selectors[i].procedure);
+      bf::Result<std::optional<bf::AirportProcedureDetail>> d =
+          db.LookupProcedureDetail(selectors[i].airport, selectors[i].procedure);
+      if (!d) {
+        const uint32_t elapsed = ElapsedMs(start);
+        return {RenderError(fmt, d.error().message), kStatusUnprocessableEntity, elapsed};
+      }
+      details[i] = std::move(d).value();
     }
   }
   if (!summary_airports.empty()) {
-    std::vector<std::optional<bf::AirportProcedures>> looked =
+    bf::Result<std::vector<std::optional<bf::AirportProcedures>>> looked =
         db.LookupProcedures(summary_airports);
+    if (!looked) {
+      const uint32_t elapsed = ElapsedMs(start);
+      return {RenderError(fmt, looked.error().message), kStatusUnprocessableEntity, elapsed};
+    }
     for (size_t j = 0; j < summary_indices.size(); ++j) {
-      summaries[summary_indices[j]] = std::move(looked[j]);
+      summaries[summary_indices[j]] = std::move(looked.value()[j]);
     }
   }
   const uint32_t elapsed = ElapsedMs(start);

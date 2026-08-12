@@ -16,12 +16,9 @@ namespace {
 using bf::test::NavDataDir;
 
 // Share one opened database across cases (read-only after Open; lookups are
-// const). Prefers a prebuilt cache for fast startup. Returns nullptr when data
-// is absent so callers SKIP.
-const bf::NavDatabase* SharedDb() {
-  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb();
-  return db ? &db.value() : nullptr;
-}
+// const). Prefers a prebuilt cache for fast startup. Returns nullptr only when
+// the cache is absent (kDataMissing) so callers SKIP; format mismatch FAILs.
+const bf::NavDatabase* SharedDb() { return bf::test::SharedReadOnlyDbOrSkip(); }
 
 }  // namespace
 
@@ -82,19 +79,20 @@ TEST_CASE("query: procedure lookup lists SIDs for an airport with CIFP", "[integ
     SKIP("navigation data not found in '" << NavDataDir() << "'");
   }
   auto r = db->LookupProcedures({"KJFK", "KIKR"});
-  REQUIRE(r.size() == 2);
-  REQUIRE(r[0].has_value());
-  CHECK(r[0]->icao == "KJFK");
-  CHECK_FALSE(r[0]->procedures.empty());
+  REQUIRE(r);
+  REQUIRE(r.value().size() == 2);
+  REQUIRE(r.value()[0].has_value());
+  CHECK(r.value()[0]->icao == "KJFK");
+  CHECK_FALSE(r.value()[0]->procedures.empty());
   bool has_sid = false;
-  for (const bf::ProcedureSummary& p : r[0]->procedures) {
+  for (const bf::ProcedureSummary& p : r.value()[0]->procedures) {
     if (p.type == bf::ProcedureType::kSid) {
       has_sid = true;
       break;
     }
   }
   CHECK(has_sid);
-  CHECK_FALSE(r[1].has_value());  // KIKR has no CIFP
+  CHECK_FALSE(r.value()[1].has_value());  // KIKR has no CIFP
 }
 
 TEST_CASE("query: procedure detail surfaces per-leg rnp/turn/speed", "[integration][query]") {
@@ -105,15 +103,18 @@ TEST_CASE("query: procedure detail surfaces per-leg rnp/turn/speed", "[integrati
   // KJFK R13L is an RNAV approach: its RF leg to JEVNI carries RNP 0.30 and a
   // right turn, and it publishes a speed limit on an early leg. This exercises
   // the three new leg fields end to end through the query path.
-  std::optional<bf::AirportProcedureDetail> d = db->LookupProcedureDetail("kjfk", "R13L");
-  REQUIRE(d.has_value());
-  CHECK(d->icao == "KJFK");
-  CHECK(d->procedure == "R13L");
-  REQUIRE_FALSE(d->transitions.empty());
+  bf::Result<std::optional<bf::AirportProcedureDetail>> looked =
+      db->LookupProcedureDetail("kjfk", "R13L");
+  REQUIRE(looked);
+  REQUIRE(looked.value().has_value());
+  const bf::AirportProcedureDetail& d = *looked.value();
+  CHECK(d.icao == "KJFK");
+  CHECK(d.procedure == "R13L");
+  REQUIRE_FALSE(d.transitions.empty());
 
   bool saw_rf_rnp_turn = false;
   bool saw_speed = false;
-  for (const bf::ProcedureDetail& t : d->transitions) {
+  for (const bf::ProcedureDetail& t : d.transitions) {
     for (const bf::ProcedureLegInfo& leg : t.legs) {
       if (leg.fix == "JEVNI" && leg.path_term == "RF") {
         CHECK(leg.rnp_nm == Catch::Approx(0.30));
@@ -128,9 +129,17 @@ TEST_CASE("query: procedure detail surfaces per-leg rnp/turn/speed", "[integrati
   CHECK(saw_rf_rnp_turn);
   CHECK(saw_speed);
 
-  // An airport without CIFP, and an unknown procedure name, both yield nullopt.
-  CHECK_FALSE(db->LookupProcedureDetail("KIKR", "ANYTHING").has_value());
-  CHECK_FALSE(db->LookupProcedureDetail("KJFK", "NO_SUCH_PROC").has_value());
+  // An airport without CIFP, and an unknown procedure name, both yield Ok(nullopt).
+  {
+    auto miss = db->LookupProcedureDetail("KIKR", "ANYTHING");
+    REQUIRE(miss);
+    CHECK_FALSE(miss.value().has_value());
+  }
+  {
+    auto miss = db->LookupProcedureDetail("KJFK", "NO_SUCH_PROC");
+    REQUIRE(miss);
+    CHECK_FALSE(miss.value().has_value());
+  }
 }
 
 TEST_CASE("query: airway lookup returns directed segments", "[integration][query]") {
@@ -244,8 +253,8 @@ TEST_CASE("query: concurrent lookups on one database are race-free", "[integrati
         auto ai = db->LookupAirways({"Y28"});
         auto nd = db->LookupNavaidDetails({"DGC"});
         auto h = db->LookupHolds({"AE701"});
-        if (!w[0].empty() && !w[1].empty() && a[0] && p[0] && ai[0] && nd.size() == 1 &&
-            h.size() == 1) {
+        if (!w[0].empty() && !w[1].empty() && a[0] && p && p.value()[0] && ai[0] &&
+            nd.size() == 1 && h.size() == 1) {
           ok.fetch_add(1, std::memory_order_relaxed);
         }
       }

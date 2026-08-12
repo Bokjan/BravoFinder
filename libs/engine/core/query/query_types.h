@@ -32,6 +32,9 @@ struct AirportInfo {
   Coordinate coord{};
   int elevation_ft = 0;
   bool has_procedures = false;  // whether CIFP terminal procedures are available
+  // True when CIFP data exists but could not be read (corrupt segment). In that
+  // case has_procedures is false; route queries still surface kCacheCorrupt.
+  bool procedures_corrupt = false;
 };
 
 // One named terminal procedure (a single transition of a SID/STAR/approach).

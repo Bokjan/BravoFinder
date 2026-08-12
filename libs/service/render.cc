@@ -262,7 +262,8 @@ std::string RenderAirports(OutputFormat fmt, const std::vector<std::string>& ids
     const bf::AirportInfo& a = *results[i];
     os << a.icao << " (" << a.arinc424_icao_code << ")  " << a.coord.latitude << ", "
        << a.coord.longitude << "  elev " << a.elevation_ft << " ft"
-       << (a.has_procedures ? "  [has procedures]" : "") << "\n";
+       << (a.has_procedures ? "  [has procedures]" : "")
+       << (a.procedures_corrupt ? "  [procedures corrupt]" : "") << "\n";
   }
   return os.str();
 }
@@ -395,6 +396,39 @@ std::string RenderHolds(OutputFormat fmt, const std::vector<std::string>& ids,
         os << "  " << h.speed_limit_kt << " kt";
       }
       os << "\n";
+    }
+  }
+  return os.str();
+}
+
+std::string RenderMsa(OutputFormat fmt, const std::vector<std::string>& ids,
+                      const std::vector<std::optional<std::vector<bf::MsaSector>>>& results) {
+  if (fmt == OutputFormat::kJson) {
+    JsonBuf buf;
+    buf.writer().StartArray();
+    for (size_t i = 0; i < results.size(); ++i) {
+      if (results[i]) {
+        bf::WriteAirportMsaJson(buf.writer(), ids[i], *results[i]);
+      } else {
+        buf.writer().Null();
+      }
+    }
+    buf.writer().EndArray();
+    return buf.str();
+  }
+  std::ostringstream os;
+  for (size_t i = 0; i < ids.size(); ++i) {
+    if (!results[i]) {
+      os << SanitizeTextFragment(ids[i]) << ": not found\n";
+      continue;
+    }
+    os << SanitizeTextFragment(ids[i]) << ":\n";
+    for (const bf::MsaSector& s : *results[i]) {
+      os << "  center " << s.center.ident << " (" << s.center.arinc424_icao_code << ")\n";
+      for (const bf::MsaArc& a : s.arcs) {
+        os << "    from " << a.bearing_from << "°  alt FL" << a.alt_100ft << "  radius "
+           << a.radius_nm << " NM\n";
+      }
     }
   }
   return os.str();

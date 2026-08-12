@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/domain/msa.h"
 #include "core/query/query_types.h"
 
 namespace bf {
@@ -95,6 +96,8 @@ void WriteAirportJson(Writer& w, const AirportInfo& a) {
   w.Int(a.elevation_ft);
   w.Key("has_procedures");
   w.Bool(a.has_procedures);
+  w.Key("procedures_corrupt");
+  w.Bool(a.procedures_corrupt);
   w.EndObject();
 }
 
@@ -228,6 +231,37 @@ void WriteHoldJson(Writer& w, const HoldInfo& h) {
   w.Int(h.max_alt_ft);
   w.Key("speed_limit_kt");
   w.Int(h.speed_limit_kt);
+  w.EndObject();
+}
+
+// One airport's MSA payload: `{icao, sectors:[{center_ident, center_arinc424_icao_code,
+// arcs:[...]}]}`.
+template <class Writer>
+void WriteAirportMsaJson(Writer& w, std::string_view icao, const std::vector<MsaSector>& sectors) {
+  w.StartObject();
+  detail::WriteKeyStr(w, "icao", icao);
+  w.Key("sectors");
+  w.StartArray();
+  for (const MsaSector& s : sectors) {
+    w.StartObject();
+    detail::WriteKeyStr(w, "center_ident", s.center.ident);
+    detail::WriteKeyStr(w, "center_arinc424_icao_code", s.center.arinc424_icao_code);
+    w.Key("arcs");
+    w.StartArray();
+    for (const MsaArc& a : s.arcs) {
+      w.StartObject();
+      w.Key("bearing_from");
+      w.Int(a.bearing_from);
+      w.Key("alt_100ft");
+      w.Int(a.alt_100ft);
+      w.Key("radius_nm");
+      w.Int(a.radius_nm);
+      w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndArray();
   w.EndObject();
 }
 
