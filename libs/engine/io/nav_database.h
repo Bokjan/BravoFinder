@@ -14,18 +14,19 @@
 #include "core/domain/fixed_string.h"
 #include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
-#include "core/domain/procedure.h"
 #include "core/query/query_types.h"
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
-#include "io/cache/cifp_codec.h"
-#include "io/cache/nav_detail_codec.h"
+#include "io/loaders/loader_capabilities.h"
 
 namespace bf {
 
 class GraphBuilder;
 class Loader;
+struct CifpData;
+class CifpArchive;
+class NavDetailArchive;
 
 // How a CIFP procedure cache is loaded by OpenCached.
 enum class CifpLoad {
@@ -91,10 +92,18 @@ class NavDatabase {
   // provenance. (The X-Plane-only `build` stamp is no longer tracked.)
   uint32_t cycle() const { return cycle_; }
 
+  // Loader that produced this database (`bf build --loader` / bfdb header).
+  // Empty when unknown. Does not by itself change FindRoutes behaviour.
+  const std::string& source_loader() const { return source_loader_; }
+
+  // What the source can faithfully express (see LoaderCapabilities). Exposed for
+  // callers/UIs; FindRoutes does not currently degrade constraints from these.
+  const LoaderCapabilities& capabilities() const { return capabilities_; }
+
   // Find up to request.k candidate routes, ordered best-first, honoring the
-  // request's altitude/level constraints. Endpoints resolve as airport ICAO
-  // first, then waypoint ident; case-insensitive. Returns an Error if an
-  // endpoint is unknown or no route exists.
+  // request's altitude/level constraints. Endpoints are airport ICAO codes
+  // (case-insensitive); bare waypoint idents are rejected. Returns an Error if
+  // an endpoint is unknown or no route exists.
   Result<std::vector<Route>> FindRoutes(const RouteRequest& request) const;
 
   // Parse and validate a filed-flight-plan route string -- the reverse of
@@ -131,16 +140,19 @@ class NavDatabase {
       const std::vector<std::string>& icaos) const;
 
   // Published terminal procedures (SID/STAR/approach) by airport ICAO. nullopt
-  // when the airport is unknown or has no CIFP data.
-  std::vector<std::optional<AirportProcedures>> LookupProcedures(
+  // per entry when the airport is unknown or has no CIFP data. Returns
+  // Err(kCacheCorrupt) if any requested airport's cached CIFP segment is
+  // unreadable — never conflated with "no procedures".
+  Result<std::vector<std::optional<AirportProcedures>>> LookupProcedures(
       const std::vector<std::string>& icaos) const;
 
   // Per-leg detail of one named procedure at an airport. `procedure_name` is a
   // published name (e.g. "DEEZZ5"); the result holds every transition of that
   // name with its ordered legs (course/distance/altitude plus RNP, turn
-  // direction, and speed limit). nullopt when the airport is unknown, has no
-  // CIFP data, or publishes no procedure of that name. Case-insensitive.
-  std::optional<AirportProcedureDetail> LookupProcedureDetail(
+  // direction, and speed limit). Ok(nullopt) when the airport is unknown, has
+  // no CIFP data, or publishes no procedure of that name. Err(kCacheCorrupt)
+  // when the airport's CIFP segment is present but unreadable. Case-insensitive.
+  Result<std::optional<AirportProcedureDetail>> LookupProcedureDetail(
       const std::string& icao, const std::string& procedure_name) const;
 
   // Airways by designator (e.g. "Y28"). Returns every directed segment carrying
@@ -185,6 +197,8 @@ class NavDatabase {
 
   // AIRAC provenance, carried into the .bfdb container header.
   uint32_t cycle_ = 0;
+  std::string source_loader_;
+  LoaderCapabilities capabilities_{};
   std::unique_ptr<GraphBuilder> builder_;
   MoraGrid mora_;
   std::vector<MsaSector> msa_;
@@ -199,11 +213,12 @@ class NavDatabase {
   std::vector<std::pair<FixedName8, AirwayInfo>> airway_index_;
   // Optional CIFP procedure cache. When present, ProceduresFor fetches segments
   // from it instead of parsing CIFP/<ICAO>.dat files. Immutable after Open, so
-  // it needs no lock (its Fetch opens an independent ifstream per call).
-  std::optional<CifpArchive> cifp_archive_;
+  // it needs no lock (its Fetch opens an independent ifstream per call). Held
+  // as unique_ptr so this header can forward-declare CifpArchive (SDK surface).
+  std::unique_ptr<CifpArchive> cifp_archive_;
   // Optional navaid detail + hold cache, loaded eagerly at Open.
   // Immutable after Open; FindNavaids/FindHolds are const and lock-free.
-  std::optional<NavDetailArchive> detail_archive_;
+  std::unique_ptr<NavDetailArchive> detail_archive_;
   // When true, procedure_cache_ was fully populated at Open and is frozen: reads
   // hit existing entries only, so ProceduresFor skips the lock entirely (no
   // insert => no rehash => no data race). When false (on-demand), the cache is

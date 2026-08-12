@@ -141,21 +141,24 @@ add_library(bf::bravofinder ALIAS bravofinder)
 # ---------- Install / export (SDK distribution) --------------------------------
 # Public header allowlist: the FULL transitive include graph of nav_database.h
 # (the SDK entry point) plus the generated version.h. Consumers #including
-# nav_database.h reach every one of these, so all must ship. cifp_parser.h,
-# pread_file.h, nav_data.h are "internal" by intent but exposed transitively by
-# public headers; the clean fix (forward-declaring them away) is an API refactor
-# beyond this milestone. Verified: none pulls in <sqlite3.h> (sqlite_util.h is
-# NOT in the graph), so the SDK needs no sqlite3 headers.
+# nav_database.h reach every one of these, so all must ship. Archive codecs
+# (cifp_codec / nav_detail_codec) and pread_file / cifp_parser are implementation
+# details — NavDatabase holds them behind unique_ptr + forward declarations so
+# they are not part of the installed SDK. Verified: none of the installed headers
+# pulls in <sqlite3.h> (sqlite_util.h is NOT in the graph), so the SDK needs no
+# sqlite3 headers.
 if(BRAVOFINDER_INSTALL)
   install(TARGETS bravofinder EXPORT bravofinderTargets
           ARCHIVE DESTINATION lib)
 
   install(FILES core/result.h                          DESTINATION include/bf/core)
+  install(FILES core/base/attributes.h                 DESTINATION include/bf/core/base)
   install(FILES core/domain/arinc_codes.h             DESTINATION include/bf/core/domain)
   install(FILES core/domain/airport.h                  DESTINATION include/bf/core/domain)
   install(FILES core/domain/airway.h                   DESTINATION include/bf/core/domain)
   install(FILES core/domain/coordinate.h               DESTINATION include/bf/core/domain)
   install(FILES core/domain/encoding_scale.h           DESTINATION include/bf/core/domain)
+  install(FILES core/domain/fixed_string.h             DESTINATION include/bf/core/domain)
   install(FILES core/domain/hold_fix.h                 DESTINATION include/bf/core/domain)
   install(FILES core/domain/ident.h                    DESTINATION include/bf/core/domain)
   install(FILES core/domain/mora_grid.h                DESTINATION include/bf/core/domain)
@@ -169,11 +172,7 @@ if(BRAVOFINDER_INSTALL)
   install(FILES core/routing/route.h                   DESTINATION include/bf/core/routing)
   install(FILES core/routing/route_request.h           DESTINATION include/bf/core/routing)
   install(FILES io/nav_database.h                     DESTINATION include/bf/io)
-  install(FILES io/nav_data.h                         DESTINATION include/bf/io)
-  install(FILES io/cache/cifp_codec.h                  DESTINATION include/bf/io/cache)
-  install(FILES io/cache/nav_detail_codec.h            DESTINATION include/bf/io/cache)
-  install(FILES io/cache/pread_file.h                 DESTINATION include/bf/io/cache)
-  install(FILES io/loaders/xplane12/cifp_parser.h      DESTINATION include/bf/io/loaders/xplane12)
+  install(FILES io/loaders/loader_capabilities.h       DESTINATION include/bf/io/loaders)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/core/version.h
           DESTINATION include/bf/core)
 endif()

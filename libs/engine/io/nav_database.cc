@@ -47,6 +47,8 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   NavDatabase db;
   db.loader_ = std::move(loader).value();
   db.source_dir_ = source_dir;
+  db.source_loader_ = db.loader_->name();
+  db.capabilities_ = CapabilitiesForLoader(db.source_loader_);
   db.cycle_ = data.value().cycle;
   db.mora_ = std::move(data.value().mora);
   db.msa_ = std::move(data.value().msa);
@@ -65,7 +67,7 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   }
   // Build the detail archive from the same parse (navaid_details/hold_fixes are
   // still in `data`; mora/msa were moved out above but those two were not).
-  db.detail_archive_ = NavDetailArchive::FromData(data.value());
+  db.detail_archive_ = std::make_unique<NavDetailArchive>(NavDetailArchive::FromData(data.value()));
   db.BuildAirwayIndex();
   return Result<NavDatabase>::Ok(std::move(db));
 }
@@ -79,6 +81,8 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLo
 
   NavDatabase db;
   db.cycle_ = u.header.cycle;
+  db.source_loader_ = u.header.source_loader;
+  db.capabilities_ = CapabilitiesForLoader(db.source_loader_);
   db.mora_ = std::move(u.graph.mora);
   db.msa_ = std::move(u.graph.msa);
   db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromSnapshot(std::move(u.graph)));
@@ -105,13 +109,13 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLo
       db.cifp_eager_ = true;
       // The archive is not retained: everything is already in the cache.
     } else {
-      db.cifp_archive_ = std::move(u.cifp);
+      db.cifp_archive_ = std::make_unique<CifpArchive>(std::move(*u.cifp));
     }
   }
 
   // Navaid detail comes from the file's detail section, if present. Absence is fine.
   if (u.detail.has_value()) {
-    db.detail_archive_ = std::move(u.detail);
+    db.detail_archive_ = std::make_unique<NavDetailArchive>(std::move(*u.detail));
   }
 
   db.BuildAirwayIndex();
@@ -148,7 +152,7 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
   UnifiedCache::BuildInput input;
   input.graph = &snapshot;
   input.cifp = &cifp_procedures;
-  input.detail = detail_archive_.has_value() ? &detail_archive_.value() : nullptr;
+  input.detail = detail_archive_.get();
   input.header.cycle = cycle_;
   input.header.program_version = kBravoFinderVersion;
   input.header.source_loader = loader_->name();
@@ -194,7 +198,7 @@ Result<const CifpData*> NavDatabase::ProceduresFor(const std::string& icao) cons
   // NOT inserted as nullptr (that would permanently mask cache damage as
   // "no SID/STAR").
   std::unique_ptr<CifpData> stored;
-  if (cifp_archive_.has_value()) {
+  if (cifp_archive_) {
     Result<std::optional<CifpData>> fetched = cifp_archive_->Fetch(icao);
     if (!fetched) {
       BF_LOG_ERROR("CIFP fetch failed for {}: {}", icao, fetched.error().message);
