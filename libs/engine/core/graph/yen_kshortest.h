@@ -35,4 +35,15 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
                                                   const std::vector<SeededEndpoint>& goals, int k,
                                                   const SearchOptions& base_options);
 
+// Effective cost (distance + soft penalties + turn penalty) and geographic
+// distance of a full source..goal vertex path, including endpoint seed costs.
+// Returns false if any step is unusable under `options`. Used by Yen to score
+// stitched candidates and by forced-point (via) routing to re-cost across hop
+// seams so turn penalties at via fixes are not dropped.
+bool CostOfPathMulti(const NavGraph& graph, const std::vector<int>& path,
+                     const std::vector<double>& source_seed, const std::vector<double>& goal_seed,
+                     const std::vector<double>& source_bearing,
+                     const std::vector<double>& goal_bearing, const SearchOptions& options,
+                     double& cost, double& distance);
+
 }  // namespace bf

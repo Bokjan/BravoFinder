@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <queue>
@@ -31,12 +33,13 @@ namespace bf {
 namespace {
 
 // How one endpoint of a query attaches to the enroute graph. An airport with
-// procedures contributes several seeded connection fixes; a plain waypoint or a
-// DCT-fallback airport contributes one or a few. `airport_icao` is empty for a
-// bare waypoint endpoint. `has_procedures` records whether the airport actually
-// publishes procedures for this side (SID for departure; STAR or approach for
-// arrival), so a DCT fallback can be told apart from missing data: procedures
-// that exist but reach no on-network fix (radar vectors) still fall back to DCT.
+// procedures contributes several seeded connection fixes; a DCT-fallback
+// airport contributes one or a few. `airport_icao` is always set for a
+// successful plan (FindRoutes only accepts airport ICAO endpoints).
+// `has_procedures` records whether the airport actually publishes procedures
+// for this side (SID for departure; STAR or approach for arrival), so a DCT
+// fallback can be told apart from missing data: procedures that exist but
+// reach no on-network fix (radar vectors) still fall back to DCT.
 struct EndpointPlan {
   std::vector<Connection> connections;
   std::string airport_icao;  // empty if the endpoint is a plain waypoint
@@ -554,13 +557,22 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
     segments.push_back(std::move(cands));
   }
 
-  // Stitch one combination (one candidate index per segment) into a full path.
-  // Returns found=false if the segments do not meet or the result has a cycle.
+  // Overall endpoint seed/bearing tables so a stitched path can be re-costed
+  // with CostOfPathMulti: summing per-hop costs drops the turn penalty at each
+  // via seam (hop endpoints carry kNoBearing), which systematically under-costs
+  // sharp via handoffs.
+  const int n = graph.VertexCount();
+  const std::vector<double> source_seed = BuildSeedTable(sources, n);
+  const std::vector<double> goal_seed = BuildSeedTable(goals, n);
+  const std::vector<double> source_bearing = BuildBearingTable(sources, n);
+  const std::vector<double> goal_bearing = BuildBearingTable(goals, n);
+
+  // Stitch one combination (one candidate index per segment) into a full path
+  // and re-cost it under the full turn model. Returns found=false if the
+  // segments do not meet, the result has a cycle, or re-costing rejects it.
   auto stitch = [&](const std::vector<int>& pick) -> ShortestPath {
     ShortestPath out;
     std::vector<int> path;
-    double dist = 0.0;
-    double cost = 0.0;
     for (size_t h = 0; h < hops; ++h) {
       const ShortestPath& seg = segments[h][pick[h]];
       if (seg.vertices.empty()) {
@@ -583,8 +595,6 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
           }
         }
       }
-      dist += seg.distance_nm;
-      cost += seg.cost;
     }
     std::unordered_set<int> seen;
     seen.reserve(path.size());
@@ -592,6 +602,12 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
       if (!seen.insert(v).second) {
         return out;  // cycle at a seam -> not a simple route
       }
+    }
+    double cost = 0.0;
+    double dist = 0.0;
+    if (!CostOfPathMulti(graph, path, source_seed, goal_seed, source_bearing, goal_bearing, options,
+                         cost, dist)) {
+      return out;
     }
     out.vertices = std::move(path);
     out.distance_nm = dist;
@@ -601,14 +617,15 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
   };
 
   // Lazy K-way merge over the Cartesian product of segment candidates, ordered
-  // by the sum of per-segment costs. Start from the all-best pick and expand a
-  // neighbor per segment (increment one index) each time a pick is popped.
+  // by the re-costed full-path cost (not the sum of per-hop costs). Start from
+  // the all-best pick and expand a neighbor per segment each time a pick is
+  // popped.
   auto combo_cost = [&](const std::vector<int>& pick) {
-    double c = 0.0;
-    for (size_t h = 0; h < hops; ++h) {
-      c += segments[h][pick[h]].cost;
+    const ShortestPath stitched = stitch(pick);
+    if (!stitched.found) {
+      return std::numeric_limits<double>::infinity();
     }
-    return c;
+    return stitched.cost;
   };
   struct HeapItem {
     double cost;
@@ -633,8 +650,13 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
   };
   std::unordered_set<uint64_t> queued;
 
+  // Lazy K-way merge: combo_cost re-stitches, so skip infinite (invalid) starts.
   std::vector<int> start(hops, 0);
-  heap.push({combo_cost(start), start});
+  const double start_cost = combo_cost(start);
+  if (!std::isfinite(start_cost)) {
+    return results;
+  }
+  heap.push({start_cost, start});
   queued.insert(hash_pick(start));
 
   while (!heap.empty() && static_cast<int>(results.size()) < k) {
@@ -652,7 +674,10 @@ std::vector<ShortestPath> FindForcedPaths(const NavGraph& graph,
         std::vector<int> next = pick;
         next[h] += 1;
         if (queued.insert(hash_pick(next)).second) {
-          heap.push({combo_cost(next), next});
+          const double c = combo_cost(next);
+          if (std::isfinite(c)) {
+            heap.push({c, next});
+          }
         }
       }
     }
@@ -669,10 +694,11 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     return Result<Routes>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
 
-  // Resolve an endpoint into how it attaches to the network. An airport with
-  // CIFP procedures connects through them (procedure-first); without CIFP it
-  // falls back to DCT links to the nearest on-network waypoints (M1 behavior);
-  // a plain waypoint connects as itself.
+  // Resolve an airport endpoint into how it attaches to the network. With CIFP
+  // procedures: procedure-first connections; without CIFP: DCT links to the
+  // nearest on-network waypoints. Non-airport tokens leave connections empty
+  // so the caller reports an unknown-airport error (waypoint endpoints are not
+  // supported — idents are not globally unique).
   auto plan_endpoint = [&](const std::string& name, bool departure) -> Result<EndpointPlan> {
     const std::string up = ToUpper(name);
     EndpointPlan plan;
@@ -779,11 +805,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
       }
       return Result<EndpointPlan>::Ok(std::move(plan));
     }
-    // A bare ident is no longer accepted as a route endpoint: idents are not
-    // globally unique, and silently picking one region's match would put the
-    // whole route on the wrong endpoint. The caller must use an airport ICAO or
-    // a (ident, region) pair. With no airport and no ident hit, plan.connections
-    // stays empty, so the caller reports an "unknown endpoint" error.
+    // Not an airport ICAO: leave connections empty; the caller reports unknown
+    // departure/arrival. Waypoint / IDENT/REGION endpoints are intentionally
+    // unsupported (idents are not globally unique).
     return Result<EndpointPlan>::Ok(std::move(plan));
   };
 
@@ -800,7 +824,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   if (dep.connections.empty()) {
     return Result<Routes>::Err(Error(
         ErrorCode::kAirportNotFound,
-        "unknown departure: " + request.departure + " (use an airport ICAO code, e.g. KLAX)"));
+        "unknown departure airport: " + request.departure + " (expected an ICAO code, e.g. KLAX)"));
   }
   Result<EndpointPlan> arr_r = plan_endpoint(request.arrival, /*departure=*/false);
   if (!arr_r) {
@@ -813,9 +837,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
                                          " has no STAR matching '" + request.arrival_star + "'"));
   }
   if (arr.connections.empty()) {
-    return Result<Routes>::Err(
-        Error(ErrorCode::kAirportNotFound,
-              "unknown arrival: " + request.arrival + " (use an airport ICAO code, e.g. KLAX)"));
+    return Result<Routes>::Err(Error(
+        ErrorCode::kAirportNotFound,
+        "unknown arrival airport: " + request.arrival + " (expected an ICAO code, e.g. KLAX)"));
   }
 
   // Assemble the active constraints from the request.

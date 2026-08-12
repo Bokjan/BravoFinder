@@ -92,9 +92,9 @@ struct AirwayRule {
   double penalty_fraction = kDefaultPenaltyFraction;
 };
 
-// A route query: departure and arrival endpoints, each an airport ICAO code or
-// a waypoint ident, plus optional altitude/level preferences that drive the
-// constraint layer.
+// A route query: departure and arrival endpoints must be airport ICAO codes
+// (waypoint endpoints are not supported — idents are not globally unique).
+// Optional altitude/level preferences drive the constraint layer.
 struct RouteRequest {
   std::string departure{};
   std::string arrival{};
@@ -152,7 +152,10 @@ struct RouteRequest {
   // an ident ("PSB") or a full "IDENT/REGION" key ("PSB/K6"). The search is run
   // in segments (departure -> F1 -> ... -> Fn -> arrival) and stitched, so each
   // forced point appears in order. A bare ident with several regional matches
-  // resolves to the one adding the least detour (see FindRoutes).
+  // resolves to the one adding the least detour (see FindRoutes). When
+  // turn_penalty is enabled, each stitched candidate is re-costed across the
+  // whole path so turn cost at via seams is included (per-hop costs alone would
+  // miss it).
   std::vector<std::string> forced_points;
 };
 

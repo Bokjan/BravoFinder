@@ -125,6 +125,8 @@ struct Candidate {
   }
 };
 
+}  // namespace
+
 // Effective cost and geographic distance of a full source..goal path, including
 // both endpoints' seed costs. Returns false if any interior step is not a real
 // edge, is blocked by a constraint, or an endpoint is not actually seeded.
@@ -151,8 +153,6 @@ bool CostOfPathMulti(const NavGraph& graph, const std::vector<int>& path,
   distance = s + enroute_dist + g;
   return true;
 }
-
-}  // namespace
 
 std::vector<ShortestPath> FindKShortestPaths(const NavGraph& graph, int start, int goal, int k,
                                              const SearchOptions& base_options) {
