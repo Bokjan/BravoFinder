@@ -40,6 +40,11 @@ HandlerResult LookupNavaidDetails(const bf::NavDatabase& db, const std::vector<s
 HandlerResult LookupHolds(const bf::NavDatabase& db, const std::vector<std::string>& ids,
                           OutputFormat fmt);
 
+// Terminal-area MSA sectors by airport ICAO. Parallel optional results: nullopt
+// when the airport publishes no MSA (or the source lacks MSA data).
+HandlerResult LookupMsa(const bf::NavDatabase& db, const std::vector<std::string>& ids,
+                        OutputFormat fmt);
+
 // Per-leg detail of one named procedure. Status 404 when no such procedure.
 HandlerResult LookupProcedureLegs(const bf::NavDatabase& db, const std::string& airport,
                                   const std::string& procedure, OutputFormat fmt);

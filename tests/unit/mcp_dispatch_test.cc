@@ -122,8 +122,8 @@ TEST_CASE("mcp dispatcher: tools/list enumerates the tools plus list_cycles", "[
   rapidjson::Document doc = Parse(resp.body);
   REQUIRE(doc["result"]["tools"].IsArray());
   const rapidjson::Value& tools = doc["result"]["tools"];
-  // The nine shared tools plus the server-provided list_cycles.
-  CHECK(tools.Size() == 10);
+  // The ten shared tools plus the server-provided list_cycles.
+  CHECK(tools.Size() == 11);
   bool saw_find_routes = false;
   bool saw_list_cycles = false;
   bool find_routes_has_cycle = false;

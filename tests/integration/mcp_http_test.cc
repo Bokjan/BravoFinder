@@ -309,7 +309,7 @@ TEST_CASE("mcp-over-http end-to-end over a loopback socket", "[integration][mcp]
     REQUIRE(StatusOf(resp) == 200);
     rapidjson::Document doc = ParseBody(resp);
     REQUIRE(doc["result"]["tools"].IsArray());
-    CHECK(doc["result"]["tools"].Size() == 10);
+    CHECK(doc["result"]["tools"].Size() == 11);
   }
 
   SECTION("tools/call list_cycles returns the available cycles") {

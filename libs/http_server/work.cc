@@ -4,7 +4,6 @@
 #include "work.h"
 
 #include <exception>
-#include <format>
 #include <memory>
 #include <string>
 #include <utility>
@@ -33,11 +32,12 @@ void OnWork(uv_work_t* req) {
   auto* w = static_cast<WorkRequest*>(req->data);
   try {
     w->result = w->work();
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     // The closure should go through Result, but never let an unexpected
-    // exception cross the thread boundary: turn it into a 500.
+    // exception cross the thread boundary: turn it into a 500. Do not echo
+    // e.what() to clients (paths / internals may leak).
     w->result.status = kStatusInternalServerError;
-    w->result.body = JsonError(std::format("internal error: {}", e.what()));
+    w->result.body = JsonError("internal error");
   } catch (...) {
     w->result.status = kStatusInternalServerError;
     w->result.body = JsonError("internal error");

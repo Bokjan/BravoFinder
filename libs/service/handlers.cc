@@ -76,9 +76,10 @@ QueryHandler RequireObjectArgs(QueryHandler inner) {
 }
 
 // Parse a string-array argument. Returns nullopt if the member is absent OR
-// malformed (not an array, a non-string element, or more than kMaxIdListSize
-// entries). Callers that need to tell "absent" (skip) from "present but bad"
-// (reject) check HasKey themselves before deciding.
+// malformed (not an array, a non-string element, more than kMaxIdListSize
+// entries, or an entry longer than kMaxIdentStringLen). Callers that need to
+// tell "absent" (skip) from "present but bad" (reject) check HasKey themselves
+// before deciding.
 std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args,
                                                     std::string_view key) {
   const rapidjson::Value* arr_v = Member(args, key);
@@ -95,7 +96,11 @@ std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args
     if (!v.IsString()) {
       return std::nullopt;
     }
-    ids.push_back(JsonString(v));
+    std::string s = JsonString(v);
+    if (s.size() > kMaxIdentStringLen) {
+      return std::nullopt;  // over the per-id cap: treat as malformed so callers reject it
+    }
+    ids.push_back(std::move(s));
   }
   return ids;
 }
@@ -473,7 +478,7 @@ std::vector<NamedHandler> MakeHandlers() {
   // transport presents (find_routes, parse_route, then the batch lookups); the
   // HTTP transport keys off the names, not the order.
   std::vector<NamedHandler> handlers;
-  handlers.reserve(9);
+  handlers.reserve(10);
 
   handlers.push_back({std::string(kHandlerFindRoutes), RequireObjectArgs(FindRoutesHandler)});
   handlers.push_back({std::string(kHandlerParseRoute), RequireObjectArgs(ParseRouteHandler)});
@@ -486,6 +491,7 @@ std::vector<NamedHandler> MakeHandlers() {
   handlers.push_back(
       {std::string(kHandlerLookupNavaidDetail), MakeLookupAdapter(LookupNavaidDetails)});
   handlers.push_back({std::string(kHandlerLookupHolds), MakeLookupAdapter(LookupHolds)});
+  handlers.push_back({std::string(kHandlerLookupMsa), MakeLookupAdapter(LookupMsa)});
 
   return handlers;
 }

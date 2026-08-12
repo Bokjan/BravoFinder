@@ -47,6 +47,7 @@ using bf::service::kHandlerFindRoutes;
 using bf::service::kHandlerLookupAirports;
 using bf::service::kHandlerLookupAirways;
 using bf::service::kHandlerLookupHolds;
+using bf::service::kHandlerLookupMsa;
 using bf::service::kHandlerLookupNavaidDetail;
 using bf::service::kHandlerLookupProcedureLegs;
 using bf::service::kHandlerLookupProcedures;
@@ -80,18 +81,21 @@ using bf::service::kLevelLow;
 using bf::service::kLevelNone;
 using bf::service::kMatchExact;
 using bf::service::kMatchPrefix;
+using bf::service::kMaxIdentStringLen;
+using bf::service::kMaxIdListSize;
 using bf::service::kMaxK;
+using bf::service::kMaxRouteStringLen;
 
 // JSON-Schema for find_routes, built at runtime so maximum/maxItems and property
 // names track the shared caps / api_keys.h instead of duplicating literals.
 std::string FindRoutesSchema() {
   const auto max_rules = bf::AirwayRuleConstraint::kMaxRules;
   const auto max_u32 = std::numeric_limits<uint32_t>::max();
+  const std::string id_item =
+      std::string(R"({"type":"string","maxLength":)") + std::to_string(kMaxIdentStringLen) + "}";
   return std::string(R"({"type":"object","properties":{)") + JKey(kKeyDeparture) +
-         R"(:{"type":"string","description":"Departure airport ICAO or waypoint ident."},)" +
-         JKey(kKeyArrival) +
-         R"(:{"type":"string","description":"Arrival airport ICAO or waypoint ident."},)" +
-         JKey(kKeyMinFl) +
+         R"(:{"type":"string","description":"Departure airport ICAO code."},)" + JKey(kKeyArrival) +
+         R"(:{"type":"string","description":"Arrival airport ICAO code."},)" + JKey(kKeyMinFl) +
          R"(:{"type":"integer","description":"Lower bound of the cruise flight-level range, in hundreds of feet (e.g. 300 for FL300). May be given alone for a single level. Setting min_fl and/or max_fl enables altitude/MORA constraint filtering."},)" +
          JKey(kKeyMaxFl) +
          R"(:{"type":"integer","description":"Upper bound of the cruise flight-level range, in hundreds of feet (e.g. 400 for FL400). May be given alone for a single level."},)" +
@@ -108,8 +112,9 @@ std::string FindRoutesSchema() {
          R"(:{"type":"string","description":"Pin a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN. Empty=auto."},)" +
          JKey(kKeyArrivalStar) +
          R"(:{"type":"string","description":"Pin a specific STAR by name, e.g. LENDY6 or LENDY6.HAAYS. Empty=auto."},)" +
-         JKey(kKeyAvoidWaypoints) +
-         R"(:{"type":"array","items":{"type":"string"},"description":"Waypoints to route around, each an ident (BOTON) or IDENT/ARINC424_ICAO_CODE (BOTON/LF). A bare ident avoids all regions' matches."},)" +
+         JKey(kKeyAvoidWaypoints) + R"(:{"type":"array","maxItems":)" +
+         std::to_string(kMaxIdListSize) + R"(,"items":)" + id_item +
+         R"(,"description":"Waypoints to route around, each an ident (BOTON) or IDENT/ARINC424_ICAO_CODE (BOTON/LF). A bare ident avoids all regions' matches."},)" +
          JKey(kKeyAirwayRules) + R"(:{"type":"array","maxItems":)" + std::to_string(max_rules) +
          R"(,"description":"Restrict airways by ICAO region and designator. Each rule blocks or penalizes every airway LEG whose designator matches and whose either endpoint lies in a matching region. Matching is per-leg, not per-airway-name, because a designator is not unique to one physical airway (29.6% of names are reused by disjoint instances) -- a name-level ban would forbid same-named airways worldwide. Several rules may match one leg: any block rule wins, otherwise the penalize fractions sum. Both region_prefixes and designators are required on every rule; use [\"*\"] alone for 'any' on that side (an empty array is rejected). Replaces the former avoid_airways: 'avoid J60' is {\"region_prefixes\":[\"*\"],\"designators\":[\"J60\"],\"match\":\"exact\",\"action\":\"block\"}.","items":{"type":"object","properties":{)" +
          JKey(kKeyRegionPrefixes) +
@@ -120,8 +125,7 @@ std::string FindRoutesSchema() {
          JKey(kMatchPrefix) +
          R"(],"description":"How designators are compared; defaults to prefix. Use exact to name individual airways: 1371 designators are a strict prefix of another one, so prefix \"J60\" would also match J603/J604/J605, and \"A3\" would match 52 names. Use prefix for a category rule such as all J routes."},)" +
          JKey(kKeyAction) + R"(:{"type":"string","enum":[)" + JKey(kActionBlock) + "," +
-         JKey(kActionPenalize) +
-         R"(],"description":"block excludes matching legs outright; penalize (the default) adds a soft cost, keeping them usable. Prefer penalize for bulk region rules: block is an irreversible connectivity break and can leave an airport that depends on a single airway with no route at all."},)" +
+         JKey(kActionPenalize) + R"(],"description":"block excludes matching legs outright; penalize (the default) adds a soft cost, keeping them usable. Prefer penalize for bulk region rules: block is an irreversible connectivity break and can leave an airport that depends on a single airway with no route at all."},)" +
          JKey(kKeyPenaltyFraction) +
          R"(:{"type":"number","minimum":0,"description":"Soft penalty as a fraction of each leg's own length, used only when action is penalize. Defaults to )" +
          std::to_string(bf::kDefaultPenaltyFraction) +
@@ -129,20 +133,24 @@ std::string FindRoutesSchema() {
          JKey(kKeyRegionPrefixes) + "," + JKey(kKeyDesignators) + "]}}," + JKey(kKeyRandomSeed) +
          R"(:{"type":"integer","minimum":0,"maximum":)" + std::to_string(max_u32) +
          R"(,"description":"Seed for reproducible route diversity. The same seed always yields the same route; different seeds explore alternatives. Omit for the plain optimal route."},)" +
-         JKey(kKeyForcedPoints) +
-         R"(:{"type":"array","items":{"type":"string"},"description":"Ordered waypoints the route must pass through (via points), each an ident (PSB) or IDENT/ARINC424_ICAO_CODE (PSB/K6). The response echoes them resolved as IDENT/ARINC424_ICAO_CODE."}},)" +
+         JKey(kKeyForcedPoints) + R"(:{"type":"array","maxItems":)" +
+         std::to_string(kMaxIdListSize) + R"(,"items":)" + id_item +
+         R"(,"description":"Ordered waypoints the route must pass through (via points), each an ident (PSB) or IDENT/ARINC424_ICAO_CODE (PSB/K6). The response echoes them resolved as IDENT/ARINC424_ICAO_CODE."}},)" +
          R"("required":[)" + JKey(kKeyDeparture) + "," + JKey(kKeyArrival) + "]}";
 }
 
 std::string IdsSchema(std::string_view description) {
   return std::string(R"({"type":"object","properties":{)") + JKey(kKeyIds) +
-         R"(:{"type":"array","items":{"type":"string"},"description":")" +
-         std::string(description) + R"("}},"required":[)" + JKey(kKeyIds) + "]}";
+         R"(:{"type":"array","maxItems":)" + std::to_string(kMaxIdListSize) +
+         R"(,"items":{"type":"string","maxLength":)" + std::to_string(kMaxIdentStringLen) +
+         R"(},"description":")" + std::string(description) + R"("}},"required":[)" + JKey(kKeyIds) +
+         "]}";
 }
 
 std::string ParseRouteSchema() {
   return std::string(R"({"type":"object","properties":{)") + JKey(kKeyRoute) +
-         R"(:{"type":"string","description":"Filed route string, e.g. 'KJFK SID CANDR J60 PSB ... STAR KLAX'."}},)"
+         R"(:{"type":"string","maxLength":)" + std::to_string(kMaxRouteStringLen) +
+         R"(,"description":"Filed route string, e.g. 'KJFK SID CANDR J60 PSB ... STAR KLAX'."}},)"
          R"("required":[)" +
          JKey(kKeyRoute) + "]}";
 }
@@ -156,7 +164,7 @@ std::string ProcedureLegsSchema() {
          JKey(kKeyAirport) + "," + JKey(kKeyProcedure) + "]}";
 }
 
-// The nine tools' descriptions, in MCP display order. `name` must match a
+// The ten tools' descriptions, in MCP display order. `name` must match a
 // bf::service handler name; MakeTools() pairs them up. Schemas are filled from
 // SchemaFor() so property names share api_keys.h with the JSON-args adapter.
 struct ToolMetaDesc {
@@ -166,8 +174,8 @@ struct ToolMetaDesc {
 
 const ToolMetaDesc kToolMeta[] = {
     {kHandlerFindRoutes,
-     "Find up to k candidate routes between two endpoints (airport ICAO or "
-     "waypoint ident), honoring airway level and cruise-altitude constraints. "
+     "Find up to k candidate routes between two airport ICAO endpoints, "
+     "honoring airway level and cruise-altitude constraints. "
      "Returns an ICAO filed-flight-plan style route string plus per-leg detail."},
     {kHandlerParseRoute,
      "Validate and expand a filed-flight-plan route string (the reverse of "
@@ -207,6 +215,11 @@ const ToolMetaDesc kToolMeta[] = {
      "time/distance, turn direction, altitude window, speed limit). Each id "
      "returns a group of holds across all regions/airports at that fix. "
      "Requires a detail cache; empty otherwise."},
+    {kHandlerLookupMsa,
+     "Look up terminal-area Minimum Sector Altitude (MSA) sectors by airport "
+     "ICAO. Returns each sector's center fix and arcs (bearing_from, alt_100ft, "
+     "radius_nm). Batch: one result per id, null when the airport publishes no "
+     "MSA (or the source loader lacks MSA data, e.g. Fenix)."},
 };
 
 std::string SchemaFor(std::string_view name) {
@@ -237,6 +250,10 @@ std::string SchemaFor(std::string_view name) {
   }
   if (name == kHandlerLookupHolds) {
     return IdsSchema("One or more hold fix idents. Each result is a group parallel to this list.");
+  }
+  if (name == kHandlerLookupMsa) {
+    return IdsSchema(
+        "One or more airport ICAO codes. Results are parallel to this list (null when no MSA).");
   }
   return {};
 }

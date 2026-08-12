@@ -47,6 +47,7 @@ const Route kRoutes[] = {
     {bf::service::kHandlerLookupAirways, "/v1/airways"},
     {bf::service::kHandlerLookupNavaidDetail, "/v1/navaid-detail"},
     {bf::service::kHandlerLookupHolds, "/v1/holds"},
+    {bf::service::kHandlerLookupMsa, "/v1/msa"},
 };
 
 // Parse an optional ?cycle=NNNN out of the raw query string. Returns false if a

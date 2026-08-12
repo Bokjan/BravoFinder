@@ -28,10 +28,11 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
       "query", "Look up navigation data (waypoints, airports, procedures, airways)");
   query
       ->add_option("kind", a->kind,
-                   "What to look up: waypoint, airport, procedure, airway, navaid_detail, or hold")
+                   "What to look up: waypoint, airport, procedure, airway, navaid_detail, hold, or "
+                   "msa")
       ->required()
-      ->check(
-          CLI::IsMember({"waypoint", "airport", "procedure", "airway", "navaid_detail", "hold"}));
+      ->check(CLI::IsMember(
+          {"waypoint", "airport", "procedure", "airway", "navaid_detail", "hold", "msa"}));
   query
       ->add_option("id", a->ids,
                    "One or more idents / ICAO codes / airway names. For 'procedure', an "
@@ -76,6 +77,8 @@ void RegisterQuery(CLI::App& app, int& exit_code) {
       result = bf::service::LookupNavaidDetails(db.value(), a->ids, fmt);
     } else if (a->kind == "hold") {
       result = bf::service::LookupHolds(db.value(), a->ids, fmt);
+    } else if (a->kind == "msa") {
+      result = bf::service::LookupMsa(db.value(), a->ids, fmt);
     } else {  // procedure
       std::vector<bf::service::ProcedureSelector> selectors;
       selectors.reserve(a->ids.size());

@@ -25,11 +25,9 @@ using bf::test::NavDataDir;
 // NavDatabase is read-only after Open and FindRoutes is const, so a single
 // instance is safe to reuse; this avoids re-loading ~20 MB of data per case,
 // which dominated the suite's run time. Loads from the prebuilt bfdb cache.
-// Returns nullptr when the cache is absent so callers SKIP.
-const bf::NavDatabase* SharedDb() {
-  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb();
-  return db ? &db.value() : nullptr;
-}
+// Returns nullptr only when the cache is absent (kDataMissing) so callers SKIP;
+// format mismatch FAILs.
+const bf::NavDatabase* SharedDb() { return bf::test::SharedReadOnlyDbOrSkip(); }
 
 bf::RouteRequest MakeRequest(const std::string& dep, const std::string& arr) {
   bf::RouteRequest r;

@@ -39,8 +39,8 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
   auto a = std::make_shared<Args>();
 
   CLI::App* route = app.add_subcommand("route", "Find a route between two points");
-  route->add_option("departure", a->departure, "Departure ICAO or waypoint ident")->required();
-  route->add_option("arrival", a->arrival, "Arrival ICAO or waypoint ident")->required();
+  route->add_option("departure", a->departure, "Departure airport ICAO code")->required();
+  route->add_option("arrival", a->arrival, "Arrival airport ICAO code")->required();
   route->add_option("--data", a->data_dir, "Directory of X-Plane navigation data")
       ->capture_default_str();
   route->add_option("--db", a->db_path,
@@ -149,6 +149,11 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
       request.level = LevelPreference::kLow;
     } else if (a->level == "high") {
       request.level = LevelPreference::kHigh;
+    }
+    if (request.k > bf::service::kMaxK) {
+      bf::service::PrintError("{} must not exceed {} (got {})", "k", bf::service::kMaxK, request.k);
+      exit_code = EXIT_FAILURE;
+      return;
     }
 
     // Delegate to the shared query layer: it runs FindRoutes, renders in the

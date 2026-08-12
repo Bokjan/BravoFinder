@@ -97,7 +97,10 @@ TEST_CASE("mcp tool result carries elapsed_ms on success and zero on error", "[i
   // verbatim: non-zero on a successful query, zero on any error path.
   bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb();
   if (!db) {
-    SKIP("navigation data not found in '" << bf::test::NavDataDir() << "'");
+    if (db.error().code == bf::ErrorCode::kDataMissing) {
+      SKIP("navigation data not found in '" << bf::test::NavDataDir() << "'");
+    }
+    FAIL("prebuilt nav.bfdb present but OpenCached failed: " << db.error().message);
   }
   std::vector<bf::mcp::Tool> tools = bf::mcp::MakeTools();
   const bf::mcp::Tool* find_routes = nullptr;

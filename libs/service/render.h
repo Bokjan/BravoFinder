@@ -17,6 +17,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/domain/msa.h"
 #include "core/query/query_types.h"
 #include "core/routing/route.h"
 
@@ -59,6 +60,11 @@ std::string RenderNavaidDetails(OutputFormat fmt, const std::vector<std::string>
                                 const std::vector<std::vector<bf::NavaidDetailInfo>>& results);
 std::string RenderHolds(OutputFormat fmt, const std::vector<std::string>& ids,
                         const std::vector<std::vector<bf::HoldInfo>>& results);
+
+// Terminal-area MSA by airport ICAO. JSON: array parallel to ids — an object
+// `{icao, sectors:[...]}` or null. Text: one block per airport / "not found".
+std::string RenderMsa(OutputFormat fmt, const std::vector<std::string>& ids,
+                      const std::vector<std::optional<std::vector<bf::MsaSector>>>& results);
 
 // ---- Single procedure detail (lookup_procedure_legs) ------------------------
 // JSON: the procedure-detail object. Text: the per-transition / per-leg block.

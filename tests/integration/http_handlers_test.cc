@@ -21,10 +21,9 @@ namespace {
 
 using bf::test::NavDataDir;
 
-const bf::NavDatabase* SharedDb() {
-  static bf::Result<bf::NavDatabase> db = bf::test::OpenReadOnlyDb();
-  return db ? &db.value() : nullptr;
-}
+// Returns nullptr only when the cache is absent (kDataMissing) so callers SKIP;
+// format mismatch FAILs.
+const bf::NavDatabase* SharedDb() { return bf::test::SharedReadOnlyDbOrSkip(); }
 
 // The handlers indexed by name, built once.
 const std::unordered_map<std::string, bf::service::QueryHandler>& Handlers() {

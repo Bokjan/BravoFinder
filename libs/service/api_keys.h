@@ -22,6 +22,7 @@ inline constexpr std::string_view kHandlerLookupProcedureLegs = "lookup_procedur
 inline constexpr std::string_view kHandlerLookupAirways = "lookup_airways";
 inline constexpr std::string_view kHandlerLookupNavaidDetail = "lookup_navaid_detail";
 inline constexpr std::string_view kHandlerLookupHolds = "lookup_holds";
+inline constexpr std::string_view kHandlerLookupMsa = "lookup_msa";
 
 // ---- Top-level request argument keys ----
 
