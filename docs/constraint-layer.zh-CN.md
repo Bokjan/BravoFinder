@@ -82,7 +82,7 @@ struct EdgeContext {
 | `AirwayRuleConstraint` | 硬+软 | region × designator 规则匹配 | `airway_rules` 非空 |
 | `RandomizeConstraint` | 软 | `hash(seed, edge)` 派生的确定性抖动 | `random_seed` 已设 |
 
-另有一个**不走这个接口**的惩罚：转弯角度（`TurnPenalty`，见 [procedure-modeling](procedure-modeling.zh-CN.md)）。它是**路径相关**的——离开顶点 v 的代价取决于路径怎么进入 v——而 `Constraint::Evaluate` 只看单条边，拿不到入边信息。所以它被实现在 A\* 松弛循环内部（以及 Yen 的路径重定价里），而不是伪装成一个约束。这个边界值得记清：**约束层的表达力止于「单边函数」**，路径相关的规则必须进搜索循环。
+另有一个**不走这个接口**的惩罚：转弯角度（`TurnPenalty`，见 [procedure-modeling §9](procedure-modeling.zh-CN.md#9-转弯角度软惩罚turnpenalty)）。它是**路径相关**的——离开顶点 v 的代价取决于路径怎么进入 v——而 `Constraint::Evaluate` 只看单条边，拿不到入边信息。所以它被实现在 A\* 松弛循环内部（以及 Yen 的路径重定价里），而不是伪装成一个约束。这个边界值得记清：**约束层的表达力止于「单边函数」**，路径相关的规则必须进搜索循环。
 
 ## 5. 热路径纪律：字符串工作全部前置
 

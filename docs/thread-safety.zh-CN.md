@@ -57,7 +57,7 @@ mutex 放在 `unique_ptr` 里，是为了让 `NavDatabase` 保持可移动（`st
 
 A*/Yen 的所有状态都是**函数局部**的（`libs/engine/core/graph/astar.cc`、`yen_kshortest.cc`）：g/geo/prev/ closed 数组、优先队列、Yen 的候选集与 deviation 索引，全部在栈上、每次调用独立。特别地：
 
-- Yen 的 `SearchOptions` 里的 `node_blocked`/`edge_blocked` 禁集**按值捕获**，使 `std::function` 自包含、可跨线程持有，不指向任何循环局部集合；
+- Yen spur 的禁点/禁边走 `SearchOptions` 里的 **`NodeFilter` / `EdgeFilter`**（排序后的顶点/边键 + `binary_search`，可按值拷贝），不再用指向循环局部集合的 `std::function`——自包含、可跨线程持有；
 - heuristic memoization 表也是每次搜索/每次 Yen 调用独立构造，不同并发查询各建各的。
 
 所以搜索本身没有引入任何共享状态。
@@ -76,6 +76,6 @@ A*/Yen 的所有状态都是**函数局部**的（`libs/engine/core/graph/astar.
 
 - **一条契约**：Open 后只读 + const 并发查询；生命周期操作仍单线程。
 - **唯一共享可变态**是程序缓存，两种模式各自安全：on-demand 双检锁（只锁 map、指针跨 rehash 稳定、try_emplace 保先到），eager 冻结后无锁读。
-- **搜索期全函数局部**，禁集按值捕获，memo 表每次独立。
+- **搜索期全函数局部**，禁点/禁边用可拷贝的 `NodeFilter`/`EdgeFilter`，memo 表每次独立。
 - **CIFP Fetch 在共享只读句柄上定位读**（pread / `ReadFile`+`OVERLAPPED`），不碰共享游标。
 - 全部用 **tsan + 8 线程压测**锁死，且验证过测试能抓竞争。

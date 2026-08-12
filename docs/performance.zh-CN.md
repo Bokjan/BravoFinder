@@ -87,7 +87,7 @@ X-Plane 数据的解析 + 建图有固定成本（ARINC 424 解析尤重）。`b
 
 > 教训延续（第 4 节 gprof/perf 偏差）：A.3 的堆重分配 gprof 曾估 <1%（不采 malloc），perf 显示 alloc ~7%、实占更大——profiler 偏差第四次现身。A.8 则相反：cache-miss 率下降未必带来墙钟（OOO 隐藏），结构优化须以墙钟为准、cache 指标仅作诊断。
 
-**G5（ALT landmarks）已验证、待实现**：完美启发式探针（反向 Dijkstra 算精确剩余距离）显示更紧启发式可再砍 ~85% 扩展顶点（k=1 464→43、k=10 13898→2198）——chord 偏松是瓶颈，ALT 上限很高。但需 bump `format_version`（landmark 距离落 cache）+ 重建 bfdb，是独立大里程碑，留待后续规划实现。
+**G5（ALT landmarks）已实测并放弃（2026-08-12，issue #23 closed not planned）**：完美启发式探针仍表明更紧下界理论上可再砍 ~85% 扩展顶点，但可部署 ALT（geo FPS K=16、`max(ALT,chord)` 等）在本有向航路图上仅砍 pop ~30%，且 **k=1/3 墙钟未加速**（k=1 更慢；表 +~34 MB）。选点变体 / 加 K / 表内转弯罚均未翻盘。生产保持 chord；不 bump `format_version`。探针证明的是上限，不是「某种近似启发式一定能吃满」。
 
 ## 4. 已止步：profile 指向的固有成本
 

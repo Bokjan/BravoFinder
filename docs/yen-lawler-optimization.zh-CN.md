@@ -20,7 +20,7 @@ BravoFinder 用 Yen 算法求前 K 条候选航路（`FindKShortestPathsMulti`�
 
 k=1→3 有 **25 倍断崖**。瓶颈在 Yen 循环：k=10、路径 ~30 节点时约 **270 次 spur**，每次 spur 是一次完整的图搜索（~1–5ms）。而这些 spur 里**大量是重复计算**。
 
-> 注：另有一个正交优化——多源 heuristic 的 memoization（见 commit `ee3afb4`），把每次 spur 内部的 O(goals) haversine 扫描缓存掉。本文只讲 Lawler。
+> 注：另有一个正交优化——多源 heuristic 的 memoization（见 commit `ee3afb4`），把每次 spur 内部的 O(goals) 扫描缓存掉（今日实现是单位球弦长 chord，不再是 haversine）。本文只讲 Lawler。
 
 ## 2. Lawler 优化：只从 deviation node 起 spur
 
