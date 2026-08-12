@@ -1,6 +1,6 @@
 # 可插拔约束层：把「合规」做成一等公民
 
-> 航路的「能不能飞」从来不是单一判据：高度带、地形、方向、国别惯例、ATC 偏好，各自独立又要一起生效。这篇讲 BravoFinder 怎么把它们收进一个统一的约束框架，以及一条真实需求（issue #22 的国别航路过滤）如何暴露出「匹配粒度」这个比框架本身更棘手的问题。相关代码：`libs/engine/core/constraints/`、`libs/engine/core/graph/astar.cc`、`libs/engine/io/navdb/nav_database_routing.cc`。
+> 航路的「能不能飞」从来不是单一判据：高度带、地形、方向、国别惯例、ATC 偏好，各自独立又要一起生效。这篇讲 BravoFinder 怎么把它们收进一个统一的约束框架，以及一条真实需求（issue #22 的国别航路过滤）如何暴露出「匹配粒度」这个比框架本身更棘手的问题。相关代码：`libs/engine/core/constraints/`、`libs/engine/core/graph/astar.cc`、`libs/engine/io/navdb/nav_database.cc`、`libs/engine/io/navdb/constraint_assembly.cc`。
 >
 > 前置：[合规航路引擎](compliant-routing.zh-CN.md) 讲了为什么需要约束（地理最短 ≠ 可飞），本文讲这个框架长什么样、怎么扩展、扩展时会踩什么。
 
@@ -71,7 +71,7 @@ struct EdgeContext {
 
 ## 4. 六个内置约束
 
-`FindRoutes`（`nav_database_routing.cc`）按请求内容组装激活哪些约束——**没设的字段不付任何代价**，约束不进链：
+`FindRoutes`（`nav_database.cc`）经 `ConstraintAssembly` 按请求内容组装激活哪些约束——**没设的字段不付任何代价**，约束不进链：
 
 | 约束 | 类型 | 判据 | 激活条件 |
 |---|---|---|---|
@@ -121,7 +121,7 @@ return EdgeVerdict::Penalize(ctx.edge.distance_nm * frac);
 
 `core/constraints/` **不依赖 `io/`**。这不是洁癖，而是有实际后果的：约束需要按名字匹配（区域码、航路 designator），而名字表在 `GraphBuilder` 里（`io/build/`）。
 
-解法是把**解析器与约束分开**：解析器（`ResolveAvoidVertices` / `ResolveAirwayRules`）住在 `io/navdb/nav_database_routing.cc`，那里可以自由使用 `GraphBuilder`；约束只收解析产物（顶点索引数组、位掩码表）。所以约束类的构造函数签名里没有任何 `io/` 类型，`core/` 的编译不需要 `io/` 的头。
+解法是把**解析器与约束分开**：解析器（`ResolveAvoidVertices` / `ResolveAirwayRules`）住在 `io/navdb/constraint_assembly.cc`，那里可以自由使用 `GraphBuilder`；约束只收解析产物（顶点索引数组、位掩码表）。所以约束类的构造函数签名里没有任何 `io/` 类型，`core/` 的编译不需要 `io/` 的头。
 
 这也顺带解释了为什么解析阶段需要 `GraphBuilder::RegionOf(vertex)` 这个轻量访问器。原本只有 `IdentOf(vertex)`，它返回一个 owned `Ident`（materialize 出两个 `std::string`）——在 27.5 万次的循环里只为读一个字段而构造完整对象太重。`RegionOf` 直接返回紧凑 `FixedIdent` 里的 `string_view`，零构造。
 

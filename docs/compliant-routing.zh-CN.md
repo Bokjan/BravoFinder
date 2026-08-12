@@ -46,7 +46,7 @@ struct EdgeVerdict {
 
 ## 4. 内置约束
 
-`libs/engine/io/navdb/nav_database_routing.cc` 的 `FindRoutes` 按查询请求组装激活哪些约束——请求里没设的字段，对应约束不进链、零成本：
+`libs/engine/io/navdb/nav_database.cc` 的 `FindRoutes`（经 `ConstraintAssembly`）按查询请求组装激活哪些约束——请求里没设的字段，对应约束不进链、零成本：
 
 | 约束 | 类型 | 作用 |
 |---|---|---|

@@ -59,9 +59,8 @@ add_library(bravofinder STATIC
   io/build/graph_builder.cc
   io/build/procedure_connector.cc
   io/navdb/nav_database.cc
-  io/navdb/nav_database_routing.cc
-  io/navdb/nav_database_parse.cc
-  io/navdb/nav_database_query.cc
+  io/navdb/parse.cc
+  io/navdb/query.cc
   io/navdb/endpoint_planner.cc
   io/navdb/constraint_assembly.cc
   io/navdb/forced_router.cc

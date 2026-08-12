@@ -660,7 +660,7 @@ std::vector<Connection> ProcedureConnector::BuildDctFallback(const Coordinate& a
   // No gate restriction applies here: the gate rule exists so an enroute airway
   // cannot bypass a published procedure body by joining it near the threshold,
   // and a DCT connection has no procedure body to bypass. It is also mutually
-  // exclusive with procedure connections (see nav_database_routing.cc) -- this
+  // exclusive with procedure connections (see nav_database.cc FindRoutes) -- this
   // runs only when the airport exposed none -- so a near-field DCT fix is a
   // legitimate direct join by great-circle distance.
   std::vector<Connection> out;
