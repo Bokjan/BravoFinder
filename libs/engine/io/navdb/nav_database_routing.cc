@@ -25,32 +25,12 @@
 #include "core/graph/yen_kshortest.h"
 #include "core/routing/route_string.h"
 #include "io/build/graph_builder.h"
-#include "io/build/procedure_connector.h"
+#include "io/navdb/endpoint_planner.h"
 #include "io/navdb/nav_database.h"
 
 namespace bf {
 
 namespace {
-
-// How one endpoint of a query attaches to the enroute graph. An airport with
-// procedures contributes several seeded connection fixes; a DCT-fallback
-// airport contributes one or a few. `airport_icao` is always set for a
-// successful plan (FindRoutes only accepts airport ICAO endpoints).
-// `has_procedures` records whether the airport actually publishes procedures
-// for this side (SID for departure; STAR or approach for arrival), so a DCT
-// fallback can be told apart from missing data: procedures that exist but
-// reach no on-network fix (radar vectors) still fall back to DCT.
-struct EndpointPlan {
-  std::vector<Connection> connections;
-  std::string airport_icao;  // empty if the endpoint is a plain waypoint
-  bool used_procedures = false;
-  bool used_approach = false;
-  bool has_procedures = false;
-  // Set when the request named a SID/STAR that the airport does not publish (or
-  // whose fixes reach no on-network vertex): the caller reports an Error instead
-  // of silently falling back to DCT or another procedure.
-  bool named_procedure_unmatched = false;
-};
 
 // Format a procedure reference as "NAME.TRANSITION" (or just "NAME" when the
 // transition is empty / the common segment).
@@ -61,59 +41,6 @@ std::string FormatRef(const ProcedureRef& ref) {
   return ref.name + "." + ref.transition;
 }
 
-// Whether a procedure ref matches a requested selector. The selector is either
-// a bare name ("DEEZZ5", matches any transition) or "NAME.TRANSITION"
-// ("DEEZZ5.TOWIN", matches that transition exactly). Comparison is
-// case-sensitive (CIFP names are already upper-case).
-bool RefMatchesSelector(const ProcedureRef& ref, const std::string& selector) {
-  const size_t dot = selector.find('.');
-  if (dot == std::string::npos) {
-    return ref.name == selector;
-  }
-  return ref.name == selector.substr(0, dot) && ref.transition == selector.substr(dot + 1);
-}
-
-// Filter connections in place to only those procedures matching `selector`,
-// dropping any connection left with no matching procedure. Returns true if at
-// least one procedure survived. A no-op returning true when the selector is
-// empty (no name requested).
-bool FilterConnectionsByName(std::vector<Connection>& connections, const std::string& selector) {
-  if (selector.empty()) {
-    return true;
-  }
-  bool any = false;
-  for (Connection& c : connections) {
-    std::vector<ProcedureRef> kept;
-    for (const ProcedureRef& ref : c.procedures) {
-      if (RefMatchesSelector(ref, selector)) {
-        kept.push_back(ref);
-      }
-    }
-    c.procedures = std::move(kept);
-    if (!c.procedures.empty()) {
-      any = true;
-    }
-  }
-  if (any) {
-    // Drop connections that no longer carry any matching procedure so the search
-    // only seeds fixes reachable by the requested procedure.
-    std::vector<Connection> filtered;
-    for (Connection& c : connections) {
-      if (!c.procedures.empty()) {
-        filtered.push_back(std::move(c));
-      }
-    }
-    connections = std::move(filtered);
-  }
-  return any;
-}
-
-// Soft-prefer STAR splice over approach when both compete in the same arrival
-// pool (issue #30). Applied to search ranking / SeededEndpoint.cost only — never
-// written into Connection::seed_distance_nm (which stays geographic for MakeRoute
-// and reported distances). Pure no-STAR (#24) airports must not pay this bump.
-constexpr double kProcedurePreferNm = 15.0;
-
 const Connection* FindConnection(const EndpointPlan& plan, int fix_vertex) {
   for (const Connection& c : plan.connections) {
     if (c.fix_vertex == fix_vertex) {
@@ -121,90 +48,6 @@ const Connection* FindConnection(const EndpointPlan& plan, int fix_vertex) {
     }
   }
   return nullptr;
-}
-
-bool IsApproachFront(const Connection& c) {
-  return !c.procedures.empty() && c.procedures.front().type == ProcedureType::kApproach;
-}
-
-// True when the arrival pool still holds both STAR and approach refs (soft-prefer
-// was armed at build time and both sides survived Accumulate).
-bool SoftPreferStarActive(const EndpointPlan& plan) {
-  bool any_star = false;
-  bool any_apch = false;
-  for (const Connection& c : plan.connections) {
-    for (const ProcedureRef& ref : c.procedures) {
-      if (ref.type == ProcedureType::kApproach) {
-        any_apch = true;
-      } else if (ref.type == ProcedureType::kStar) {
-        any_star = true;
-      }
-    }
-  }
-  return any_star && any_apch;
-}
-
-double EffectiveSeedNm(const Connection& c, bool soft_prefer_star) {
-  double seed = c.seed_distance_nm;
-  if (soft_prefer_star && IsApproachFront(c)) {
-    seed += kProcedurePreferNm;
-  }
-  return seed;
-}
-
-// Fold `incoming` into `by_fix` by fix_vertex. Ranking uses effective seed
-// (approach + B when soft-prefer is on); stored seed_distance_nm stays raw.
-void MergeConnection(std::vector<Connection>& by_fix, Connection incoming, bool soft_prefer_star) {
-  for (Connection& c : by_fix) {
-    if (c.fix_vertex != incoming.fix_vertex) {
-      continue;
-    }
-    const size_t first_incoming = c.procedures.size();
-    for (ProcedureRef& ref : incoming.procedures) {
-      c.procedures.push_back(std::move(ref));
-    }
-    if (EffectiveSeedNm(incoming, soft_prefer_star) < EffectiveSeedNm(c, soft_prefer_star)) {
-      c.seed_distance_nm = incoming.seed_distance_nm;
-      c.bearing = incoming.bearing;
-      c.approach_bearing = incoming.approach_bearing;
-      c.splice_vertex = incoming.splice_vertex;
-      c.splice_leg_nm = incoming.splice_leg_nm;
-      if (first_incoming < c.procedures.size()) {
-        std::swap(c.procedures.front(), c.procedures[first_incoming]);
-      }
-    }
-    return;
-  }
-  by_fix.push_back(std::move(incoming));
-}
-
-void MergeAll(std::vector<Connection>& dst, std::vector<Connection> src, bool soft_prefer_star) {
-  for (Connection& c : src) {
-    MergeConnection(dst, std::move(c), soft_prefer_star);
-  }
-}
-
-void SortConnectionsBySeed(std::vector<Connection>& by_fix, bool soft_prefer_star) {
-  std::sort(by_fix.begin(), by_fix.end(),
-            [soft_prefer_star](const Connection& a, const Connection& b) {
-              const double sa = EffectiveSeedNm(a, soft_prefer_star);
-              const double sb = EffectiveSeedNm(b, soft_prefer_star);
-              if (sa != sb) {
-                return sa < sb;
-              }
-              return a.fix_vertex < b.fix_vertex;
-            });
-}
-
-std::vector<SeededEndpoint> ToSearchEndpoints(const std::vector<Connection>& connections,
-                                              bool soft_prefer_star) {
-  std::vector<SeededEndpoint> endpoints;
-  endpoints.reserve(connections.size());
-  for (const Connection& c : connections) {
-    endpoints.push_back(
-        SeededEndpoint{c.fix_vertex, EffectiveSeedNm(c, soft_prefer_star), c.bearing});
-  }
-  return endpoints;
 }
 
 Route MakeRoute(const GraphBuilder& builder, const NavGraph& graph, const ShortestPath& path,
@@ -694,124 +537,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     return Result<Routes>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
 
-  // Resolve an airport endpoint into how it attaches to the network. With CIFP
-  // procedures: procedure-first connections; without CIFP: DCT links to the
-  // nearest on-network waypoints. Non-airport tokens leave connections empty
-  // so the caller reports an unknown-airport error (waypoint endpoints are not
-  // supported — idents are not globally unique).
-  auto plan_endpoint = [&](const std::string& name, bool departure) -> Result<EndpointPlan> {
-    const std::string up = ToUpper(name);
-    EndpointPlan plan;
-    const int airport = builder_->VertexByAirport(up);
-    if (airport >= 0) {
-      plan.airport_icao = up;
-      const Coordinate apt = builder_->graph().CoordOf(airport);
-      Result<const CifpData*> cifp_r = ProceduresFor(up);
-      if (!cifp_r) {
-        return Result<EndpointPlan>::Err(std::move(cifp_r).error());
-      }
-      const CifpData* cifp = cifp_r.value();
-      if (cifp != nullptr) {
-        for (const Procedure& p : cifp->procedures) {
-          if (departure) {
-            if (p.type == ProcedureType::kSid) {
-              plan.has_procedures = true;
-              break;
-            }
-          } else if (p.type == ProcedureType::kStar || p.type == ProcedureType::kApproach) {
-            plan.has_procedures = true;
-            break;
-          }
-        }
-        const std::string& rwy = departure ? request.departure_runway : request.arrival_runway;
-        const std::string& sel = departure ? request.departure_sid : request.arrival_star;
-        if (departure) {
-          plan.connections = ProcedureConnector::BuildDeparture(*cifp, apt, *builder_, rwy);
-          if (!sel.empty()) {
-            if (!FilterConnectionsByName(plan.connections, sel)) {
-              // Named --sid: only accumulate matching off-network exit splices so
-              // splice_vertex/seed bind to the requested SID, not a merge winner.
-              plan.connections =
-                  ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, *builder_, rwy, sel);
-              if (plan.connections.empty()) {
-                plan.named_procedure_unmatched = true;
-                return Result<EndpointPlan>::Ok(std::move(plan));
-              }
-            }
-          } else if (plan.connections.empty()) {
-            plan.connections =
-                ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, *builder_, rwy);
-          }
-          plan.used_procedures = !plan.connections.empty();
-        } else {
-          plan.connections = ProcedureConnector::BuildArrival(*cifp, apt, *builder_, rwy);
-          // Named --star must match a STAR connection (on-net or splice); never
-          // silently fall through to approach IAFs (D1 / #30).
-          if (!sel.empty()) {
-            if (!FilterConnectionsByName(plan.connections, sel)) {
-              plan.connections =
-                  ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, *builder_, rwy, sel);
-              if (plan.connections.empty()) {
-                plan.named_procedure_unmatched = true;
-                return Result<EndpointPlan>::Ok(std::move(plan));
-              }
-            }
-            plan.used_procedures = true;
-          } else if (!plan.connections.empty()) {
-            // On-network published STAR gates — today's path; do not mix approach.
-            plan.used_procedures = true;
-          } else {
-            // Off-network published gates (or no STAR): STAR splice ∪ approach
-            // in one pool. Soft-prefer STAR only when splice candidates exist.
-            std::vector<Connection> pool =
-                ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, *builder_, rwy);
-            std::vector<Connection> apch =
-                ProcedureConnector::BuildApproachArrival(*cifp, apt, *builder_, rwy);
-            const bool soft_prefer = !pool.empty() && !apch.empty();
-            // STAR first, then approach: equal effective seeds keep STAR at front.
-            MergeAll(pool, std::move(apch), soft_prefer);
-            SortConnectionsBySeed(pool, soft_prefer);
-            plan.connections = std::move(pool);
-            // Plan-level flags are only meaningful for homogeneous pools; mixed
-            // STAR∪approach is classified per path from procedures.front().type.
-            bool any_star = false;
-            bool any_apch = false;
-            for (const Connection& c : plan.connections) {
-              for (const ProcedureRef& ref : c.procedures) {
-                if (ref.type == ProcedureType::kApproach) {
-                  any_apch = true;
-                } else if (ref.type == ProcedureType::kStar) {
-                  any_star = true;
-                }
-              }
-            }
-            plan.used_procedures = any_star && !any_apch;
-            plan.used_approach = any_apch && !any_star;
-          }
-        }
-      } else if (!(departure ? request.departure_sid : request.arrival_star).empty()) {
-        // A procedure was named but the airport has no CIFP data at all.
-        plan.named_procedure_unmatched = true;
-        return Result<EndpointPlan>::Ok(std::move(plan));
-      }
-      if (plan.connections.empty()) {
-        // No usable procedures: fall back to DCT links to the nearest
-        // on-network waypoints. The airport stays the route endpoint; the
-        // connecting leg shows "DCT" since no procedure was selected. Filter by
-        // direction: a departure needs an outbound-capable fix, an arrival an
-        // inbound-capable one (a STAR entry gate is often inbound-only).
-        plan.connections =
-            ProcedureConnector::BuildDctFallback(apt, *builder_, 5, /*arrival=*/!departure);
-      }
-      return Result<EndpointPlan>::Ok(std::move(plan));
-    }
-    // Not an airport ICAO: leave connections empty; the caller reports unknown
-    // departure/arrival. Waypoint / IDENT/REGION endpoints are intentionally
-    // unsupported (idents are not globally unique).
-    return Result<EndpointPlan>::Ok(std::move(plan));
-  };
+  const CifpLookup cifp_lookup = [this](const std::string& icao) { return ProceduresFor(icao); };
 
-  Result<EndpointPlan> dep_r = plan_endpoint(request.departure, /*departure=*/true);
+  Result<EndpointPlan> dep_r =
+      EndpointPlanner::Plan(*builder_, request, request.departure, /*departure=*/true, cifp_lookup);
   if (!dep_r) {
     return Result<Routes>::Err(std::move(dep_r).error());
   }
@@ -826,7 +555,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         ErrorCode::kAirportNotFound,
         "unknown departure airport: " + request.departure + " (expected an ICAO code, e.g. KLAX)"));
   }
-  Result<EndpointPlan> arr_r = plan_endpoint(request.arrival, /*departure=*/false);
+  Result<EndpointPlan> arr_r =
+      EndpointPlanner::Plan(*builder_, request, request.arrival, /*departure=*/false, cifp_lookup);
   if (!arr_r) {
     return Result<Routes>::Err(std::move(arr_r).error());
   }
@@ -901,9 +631,10 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   const NavGraph& graph = builder_->graph();
   options.node_filter = NodeFilter{builder_->first_airport_vertex(), graph.VertexCount(), nullptr};
   std::vector<SeededEndpoint> sources =
-      ToSearchEndpoints(dep.connections, /*soft_prefer_star=*/false);
-  const bool arr_soft_prefer = SoftPreferStarActive(arr);
-  std::vector<SeededEndpoint> goals = ToSearchEndpoints(arr.connections, arr_soft_prefer);
+      EndpointPlanner::ToSearchEndpoints(dep.connections, /*soft_prefer_star=*/false);
+  const bool arr_soft_prefer = EndpointPlanner::SoftPreferStarActive(arr);
+  std::vector<SeededEndpoint> goals =
+      EndpointPlanner::ToSearchEndpoints(arr.connections, arr_soft_prefer);
   // Drop any seeded connection fix the request asks to avoid: it would otherwise
   // slip through as a search start/end, which AvoidConstraint cannot catch.
   if (!avoid_vertices.empty()) {
@@ -1060,7 +791,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     // A* folds SeededEndpoint.cost into distance_nm; strip the soft-prefer bump
     // so reported totals stay geographic when an approach goal won the mixed pool.
     if (arr_soft_prefer && arr_kind == ConnectionKind::kTerminalTransition) {
-      route.total_distance_nm = std::max(0.0, route.total_distance_nm - kProcedurePreferNm);
+      route.total_distance_nm =
+          std::max(0.0, route.total_distance_nm - EndpointPlanner::kProcedurePreferNm);
       route.enroute_distance_nm =
           std::max(0.0, route.total_distance_nm - route.dep_distance_nm - route.arr_distance_nm);
     }

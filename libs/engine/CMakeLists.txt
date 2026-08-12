@@ -61,7 +61,8 @@ add_library(bravofinder STATIC
   io/navdb/nav_database.cc
   io/navdb/nav_database_routing.cc
   io/navdb/nav_database_parse.cc
-  io/navdb/nav_database_query.cc)
+  io/navdb/nav_database_query.cc
+  io/navdb/endpoint_planner.cc)
 
 # When a variant is selected, its headers must win over engine/core/graph/*.h. A
 # BEFORE include dir mirroring the "core/graph/" path shadows the two headers
