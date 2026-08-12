@@ -9,7 +9,7 @@
 #include "core/domain/procedure.h"
 #include "io/build/graph_builder.h"
 #include "io/cache/nav_detail_codec.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 
 namespace bf {
 

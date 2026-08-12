@@ -4,7 +4,7 @@
 
 ## 1. 背景：K-shortest 为什么慢
 
-BravoFinder 用 Yen 算法求前 K 条候选航路（`FindKShortestPathsMulti`，生产路径唯一入口 `libs/engine/io/nav_database.cc`）。Yen 的骨架是：
+BravoFinder 用 Yen 算法求前 K 条候选航路（`FindKShortestPathsMulti`，生产路径唯一入口 `libs/engine/io/navdb/nav_database.cc`）。Yen 的骨架是：
 
 - **A 集**：已接受的路径（最终结果）。
 - **B 集**：候选路径，按成本排序。

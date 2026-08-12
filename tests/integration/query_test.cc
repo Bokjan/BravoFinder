@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 #include "test_bfdb.h"
 
 namespace {

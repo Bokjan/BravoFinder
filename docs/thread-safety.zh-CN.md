@@ -1,6 +1,6 @@
 # 线程安全契约：一个数据库，多线程并发查询
 
-> 从一开始就立的设计约束，不是事后补丁。面向想在 Web / 批量场景并发调用 BravoFinder 的读者。相关代码：`libs/engine/io/nav_database.{h,cc}`、`libs/engine/io/cache/cifp_codec.*`、`libs/engine/core/graph/`。
+> 从一开始就立的设计约束，不是事后补丁。面向想在 Web / 批量场景并发调用 BravoFinder 的读者。相关代码：`libs/engine/io/navdb/nav_database.{h,cc}`、`libs/engine/io/cache/cifp_codec.*`、`libs/engine/core/graph/`。
 
 ## 1. 契约内容
 

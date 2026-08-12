@@ -20,7 +20,7 @@
 #include "io/cache/crc32c.h"
 #include "io/cache/unified_cache.h"
 #include "io/loaders/xplane12/cifp_parser.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 #include "test_xplane12.h"
 
 namespace {

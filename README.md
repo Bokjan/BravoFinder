@@ -13,7 +13,7 @@ A realistic, fully-compliant flight-route engine in modern C++20 — plus a CLI,
 
 ## Library
 
-BravoFinder is fundamentally a route-engine **library**; the CLI, MCP server, and REST server are front-ends built on `bf::bravofinder`. If you only want routing inside your own app, you don't need to build the front-ends. Each release publishes a prebuilt SDK — consume `bf::bravofinder` via `find_package(bravofinder)` or `FetchContent`, no source build required. The public entry point is `bf::NavDatabase` (`libs/engine/io/nav_database.h`).
+BravoFinder is fundamentally a route-engine **library**; the CLI, MCP server, and REST server are front-ends built on `bf::bravofinder`. If you only want routing inside your own app, you don't need to build the front-ends. Each release publishes a prebuilt SDK — consume `bf::bravofinder` via `find_package(bravofinder)` or `FetchContent`, no source build required. The public entry point is `bf::NavDatabase` (`libs/engine/io/navdb/nav_database.h`).
 
 ## Quick start
 

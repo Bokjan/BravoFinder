@@ -7,7 +7,7 @@
 #include "cli_common.h"
 #include "commands.h"
 #include "io/cache/bfdb_naming.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 #include "io_print.h"
 
 namespace bf::cli {

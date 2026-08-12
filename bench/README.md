@@ -78,7 +78,7 @@ gprof needs a `-pg` whole-program build, so it does not go through the CMake lib
 ```bash
 cat > /tmp/prof_drv.cc <<'CPP'
 #include "core/routing/route_request.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 int main(int argc, char** argv){
   auto nav = bf::NavDatabase::OpenCached(argc>1?argv[1]:"navdata/bfdb/nav.bfdb");
   if(!nav) return 1;

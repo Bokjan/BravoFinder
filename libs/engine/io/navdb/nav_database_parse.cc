@@ -12,7 +12,7 @@
 #include "core/routing/route_parser.h"
 #include "core/routing/route_string.h"
 #include "io/build/graph_builder.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 
 namespace bf {
 

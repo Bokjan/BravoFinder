@@ -24,7 +24,7 @@
 
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 
 namespace {
 

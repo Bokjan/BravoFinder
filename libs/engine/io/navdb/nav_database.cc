@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 
 #include <algorithm>
 #include <filesystem>

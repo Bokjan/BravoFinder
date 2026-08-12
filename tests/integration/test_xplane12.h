@@ -4,7 +4,7 @@
 #include <fstream>
 #include <string>
 
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 #include "test_db.h"
 
 namespace bf::test {

@@ -28,7 +28,7 @@
 
 #include "core/result.h"
 #include "io/cache/bfdb_inventory.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 
 namespace bf::service {
 

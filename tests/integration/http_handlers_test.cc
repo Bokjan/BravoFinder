@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "handlers.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 #include "queries.h"
 #include "rapidjson/document.h"
 #include "test_bfdb.h"

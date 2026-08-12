@@ -19,7 +19,7 @@
 #include "core/domain/msa.h"
 #include "core/routing/route.h"
 #include "http_status.h"
-#include "io/nav_database.h"
+#include "io/navdb/nav_database.h"
 #include "render.h"
 
 namespace bf::service {
