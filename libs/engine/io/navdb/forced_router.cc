@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/navdb/forced_router.h"
 
-#include <cmath>
 #include <cstdint>
-#include <limits>
 #include <queue>
 #include <unordered_set>
 #include <utility>
@@ -58,7 +56,8 @@ int ForcedRouter::ResolvePoint(const GraphBuilder& builder, const std::string& t
     is_airport = saw_airport;  // only matches were airports
     return -1;
   }
-  echo = builder.IdentOf(best).ident + "/" + builder.IdentOf(best).arinc424_icao_code;
+  const Ident id = builder.IdentOf(best);
+  echo = id.ident + "/" + id.arinc424_icao_code;
   return best;
 }
 
@@ -151,17 +150,12 @@ std::vector<ShortestPath> ForcedRouter::FindPaths(const NavGraph& graph,
   // Lazy K-way merge over the Cartesian product of segment candidates, ordered
   // by the re-costed full-path cost (not the sum of per-hop costs). Start from
   // the all-best pick and expand a neighbor per segment each time a pick is
-  // popped.
-  auto combo_cost = [&](const std::vector<int>& pick) {
-    const ShortestPath stitched = stitch(pick);
-    if (!stitched.found) {
-      return std::numeric_limits<double>::infinity();
-    }
-    return stitched.cost;
-  };
+  // popped. Each pick is stitched once when enqueued; the heap carries the path
+  // so pop does not re-stitch.
   struct HeapItem {
     double cost;
     std::vector<int> pick;
+    ShortestPath path;
     bool operator>(const HeapItem& o) const { return cost > o.cost; }
   };
   std::priority_queue<HeapItem, std::vector<HeapItem>, std::greater<>> heap;
@@ -182,35 +176,36 @@ std::vector<ShortestPath> ForcedRouter::FindPaths(const NavGraph& graph,
   };
   std::unordered_set<uint64_t> queued;
 
-  // Lazy K-way merge: combo_cost re-stitches, so skip infinite (invalid) starts.
-  std::vector<int> start(hops, 0);
-  const double start_cost = combo_cost(start);
-  if (!std::isfinite(start_cost)) {
+  auto enqueue = [&](std::vector<int> pick) {
+    if (!queued.insert(hash_pick(pick)).second) {
+      return;
+    }
+    ShortestPath stitched = stitch(pick);
+    if (!stitched.found) {
+      return;
+    }
+    const double c = stitched.cost;
+    heap.push(HeapItem{c, std::move(pick), std::move(stitched)});
+  };
+
+  enqueue(std::vector<int>(hops, 0));
+  if (heap.empty()) {
     return results;
   }
-  heap.push({start_cost, start});
-  queued.insert(hash_pick(start));
 
   while (!heap.empty() && static_cast<int>(results.size()) < k) {
-    const std::vector<int> pick = heap.top().pick;
+    HeapItem item = heap.top();
     heap.pop();
-
-    const ShortestPath stitched = stitch(pick);
-    if (stitched.found) {
-      results.push_back(stitched);
+    if (item.path.found) {
+      results.push_back(std::move(item.path));
     }
 
     // Enqueue the neighbors that advance one segment's candidate index.
     for (size_t h = 0; h < hops; ++h) {
-      if (pick[h] + 1 < static_cast<int>(segments[h].size())) {
-        std::vector<int> next = pick;
+      if (item.pick[h] + 1 < static_cast<int>(segments[h].size())) {
+        std::vector<int> next = item.pick;
         next[h] += 1;
-        if (queued.insert(hash_pick(next)).second) {
-          const double c = combo_cost(next);
-          if (std::isfinite(c)) {
-            heap.push({c, next});
-          }
-        }
+        enqueue(std::move(next));
       }
     }
   }

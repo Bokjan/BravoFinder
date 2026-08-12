@@ -325,7 +325,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     return Result<Routes>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
 
-  const CifpLookup cifp_lookup = [this](const std::string& icao) { return ProceduresFor(icao); };
+  // Keep the callable alive: CifpLookup is a non-owning function_ref.
+  const auto cifp_fn = [this](const std::string& icao) { return ProceduresFor(icao); };
+  const CifpLookup cifp_lookup{cifp_fn};
 
   Result<EndpointPlan> dep_r =
       EndpointPlanner::Plan(*builder_, request, request.departure, /*departure=*/true, cifp_lookup);

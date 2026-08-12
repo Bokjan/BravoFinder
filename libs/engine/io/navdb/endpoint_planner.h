@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
-#include <functional>
+#include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "core/result.h"
@@ -32,11 +33,34 @@ struct EndpointPlan {
   // whose fixes reach no on-network vertex): the caller reports an Error instead
   // of silently falling back to DCT or another procedure.
   bool named_procedure_unmatched = false;
+  // Armed when Plan built a mixed STAR∪approach arrival pool (issue #30). Written
+  // once at plan time so seeding / reported-distance strip do not re-derive it.
+  bool soft_prefer_star = false;
 };
 
-// Injected CIFP lookup so EndpointPlanner never touches NavDatabase's private
-// procedure cache (ProceduresFor stays private on NavDatabase).
-using CifpLookup = std::function<Result<const CifpData*>(const std::string& icao)>;
+// Non-owning CIFP lookup (function_ref style): binds an lvalue callable that must
+// outlive every Plan call using this handle. Avoids std::function heap/type-erase
+// on FindRoutes while still injecting ProceduresFor without exposing the private
+// procedure cache. Rvalue callables are deleted so a temporary cannot dangle.
+class CifpLookup {
+ public:
+  template <typename F, typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, CifpLookup>>>
+  explicit CifpLookup(F& f)
+      : obj_(const_cast<void*>(static_cast<const void*>(std::addressof(f)))),
+        invoke_([](void* p, const std::string& icao) -> Result<const CifpData*> {
+          return (*static_cast<F*>(p))(icao);
+        }) {}
+
+  template <typename F, typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, CifpLookup>>>
+  CifpLookup(F&&) = delete;
+
+  Result<const CifpData*> operator()(const std::string& icao) const { return invoke_(obj_, icao); }
+
+ private:
+  using Invoke = Result<const CifpData*> (*)(void*, const std::string&);
+  void* obj_ = nullptr;
+  Invoke invoke_ = nullptr;
+};
 
 // Plans airport → enroute connection fixes (SID/STAR/splice/DCT) for one
 // FindRoutes endpoint. Stateless; all entry points are static.
@@ -66,8 +90,7 @@ class EndpointPlanner {
   static std::vector<SeededEndpoint> ToSearchEndpoints(const std::vector<Connection>& connections,
                                                        bool soft_prefer_star);
 
-  // True when the arrival pool still holds both STAR and approach refs
-  // (soft-prefer was armed at build time and both sides survived Accumulate).
+  // True when Plan armed soft-prefer (EndpointPlan::soft_prefer_star).
   static bool SoftPreferStarActive(const EndpointPlan& plan);
 };
 

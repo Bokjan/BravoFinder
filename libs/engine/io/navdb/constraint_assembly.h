@@ -21,6 +21,14 @@ struct RouteRequest;
 // Owns the constraint objects whose addresses live in SearchOptions::constraints
 // for the duration of a FindRoutes search. Heap-backed unique_ptrs keep those
 // pointers valid across moves of this bundle (heap addresses do not change).
+//
+// Lifetime (do not stash across callers):
+// - `options.request` points at the RouteRequest passed to Build — that request
+//   must outlive every use of this bundle (including the search).
+// - `mora` (when non-null) holds a const reference into the MoraGrid passed to
+//   Build — that grid must outlive the bundle (typically NavDatabase::mora_).
+// FindRoutes keeps the bundle on the stack for the search only; do not return
+// or cache a ConstraintBundle beyond those two referents.
 struct ConstraintBundle {
   SearchOptions options;
   // Sorted, deduped avoid set — also used to prune seeded endpoints and reject
@@ -47,7 +55,8 @@ class ConstraintAssembly {
 
   // Assemble altitude / MORA / level / avoid / airway_rules / randomize /
   // turn_penalty / airport node_filter. Returns Err when airway_rules exceeds
-  // AirwayRuleConstraint::kMaxRules.
+  // AirwayRuleConstraint::kMaxRules. See ConstraintBundle lifetime notes:
+  // `request` and `mora` must outlive the returned bundle.
   static Result<ConstraintBundle> Build(const RouteRequest& request, const GraphBuilder& builder,
                                         const MoraGrid& mora);
 };

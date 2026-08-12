@@ -114,21 +114,31 @@ void SortConnectionsBySeed(std::vector<Connection>& by_fix, bool soft_prefer_sta
             });
 }
 
-}  // namespace
-
-bool EndpointPlanner::SoftPreferStarActive(const EndpointPlan& plan) {
+// Presence of STAR / approach refs across a connection pool (shared by plan-level
+// used_* flags and soft_prefer_star).
+struct ProcedurePresence {
   bool any_star = false;
   bool any_apch = false;
-  for (const Connection& c : plan.connections) {
+};
+
+ProcedurePresence ScanProcedureTypes(const std::vector<Connection>& connections) {
+  ProcedurePresence out;
+  for (const Connection& c : connections) {
     for (const ProcedureRef& ref : c.procedures) {
       if (ref.type == ProcedureType::kApproach) {
-        any_apch = true;
+        out.any_apch = true;
       } else if (ref.type == ProcedureType::kStar) {
-        any_star = true;
+        out.any_star = true;
       }
     }
   }
-  return any_star && any_apch;
+  return out;
+}
+
+}  // namespace
+
+bool EndpointPlanner::SoftPreferStarActive(const EndpointPlan& plan) {
+  return plan.soft_prefer_star;
 }
 
 std::vector<SeededEndpoint> EndpointPlanner::ToSearchEndpoints(
@@ -218,19 +228,10 @@ Result<EndpointPlan> EndpointPlanner::Plan(const GraphBuilder& builder, const Ro
           plan.connections = std::move(pool);
           // Plan-level flags are only meaningful for homogeneous pools; mixed
           // STAR∪approach is classified per path from procedures.front().type.
-          bool any_star = false;
-          bool any_apch = false;
-          for (const Connection& c : plan.connections) {
-            for (const ProcedureRef& ref : c.procedures) {
-              if (ref.type == ProcedureType::kApproach) {
-                any_apch = true;
-              } else if (ref.type == ProcedureType::kStar) {
-                any_star = true;
-              }
-            }
-          }
-          plan.used_procedures = any_star && !any_apch;
-          plan.used_approach = any_apch && !any_star;
+          const ProcedurePresence presence = ScanProcedureTypes(plan.connections);
+          plan.used_procedures = presence.any_star && !presence.any_apch;
+          plan.used_approach = presence.any_apch && !presence.any_star;
+          plan.soft_prefer_star = soft_prefer;
         }
       }
     } else if (!(departure ? request.departure_sid : request.arrival_star).empty()) {
