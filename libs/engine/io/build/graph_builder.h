@@ -13,7 +13,7 @@
 #include "core/graph/nav_graph.h"
 #include "core/result.h"
 #include "io/cache/graph_snapshot.h"
-#include "io/nav_data.h"
+#include "io/loaders/nav_data.h"
 
 namespace bf {
 

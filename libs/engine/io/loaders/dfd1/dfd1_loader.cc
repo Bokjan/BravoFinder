@@ -32,8 +32,8 @@
 #include "core/domain/waypoint.h"
 #include "core/result.h"
 #include "io/loaders/loader_constants.h"
+#include "io/loaders/nav_data.h"
 #include "io/loaders/sqlite_util.h"
-#include "io/nav_data.h"
 
 namespace bf {
 namespace {

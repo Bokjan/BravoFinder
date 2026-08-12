@@ -12,7 +12,7 @@
 #include "core/routing/route_parser.h"
 #include "core/routing/route_string.h"
 #include "io/build/graph_builder.h"
-#include "io/navdb/nav_database.h"
+#include "io/navdb/nav_database_impl.h"
 
 namespace bf {
 
@@ -51,7 +51,7 @@ void FinalizePhaseSplit(Route& route, bool dep_via_sid, bool arr_via_star) {
 }  // namespace
 
 Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
-  if (!builder_) {
+  if (!impl_ || !impl_->builder_) {
     return Result<Route>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
   const std::vector<std::string> tokens = TokenizeRoute(route_str);
@@ -59,7 +59,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     return Result<Route>::Err(Error(ErrorCode::kRouteParseError, "empty route string"));
   }
   // A filed route is bracketed by airports: departure ICAO first, arrival last.
-  if (builder_->VertexByAirport(tokens.front()) < 0) {
+  if (impl_->builder_->VertexByAirport(tokens.front()) < 0) {
     return Result<Route>::Err(
         Error(ErrorCode::kRouteParseError,
               "route must start with a departure airport ICAO (first token '" + tokens.front() +
@@ -70,7 +70,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
         Error(ErrorCode::kRouteParseError,
               "route has only a departure airport; expected an arrival airport and a connector"));
   }
-  if (builder_->VertexByAirport(tokens.back()) < 0) {
+  if (impl_->builder_->VertexByAirport(tokens.back()) < 0) {
     return Result<Route>::Err(Error(ErrorCode::kRouteParseError,
                                     "route must end with an arrival airport ICAO (last token '" +
                                         tokens.back() + "' is not a known airport)"));
@@ -85,7 +85,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
                                                "' has no connector (expected '" + tokens.front() +
                                                " DCT " + tokens.back() + "')"));
   }
-  const NavGraph& graph = builder_->graph();
+  const NavGraph& graph = impl_->builder_->graph();
 
   // Resolve a bare waypoint ident (or IDENT/REGION) to the match nearest a
   // reference coordinate; connectivity along the route disambiguates naturally
@@ -94,16 +94,17 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   auto resolve_fix = [&](const std::string& token, const Coordinate& ref) -> ResolvedFix {
     const size_t slash = token.find('/');
     if (slash != std::string::npos) {
-      const int v = builder_->VertexByIdent(Ident(token.substr(0, slash), token.substr(slash + 1)));
-      if (v < 0 || builder_->IsAirport(v)) {
+      const int v =
+          impl_->builder_->VertexByIdent(Ident(token.substr(0, slash), token.substr(slash + 1)));
+      if (v < 0 || impl_->builder_->IsAirport(v)) {
         return {};
       }
       return {v, graph.CoordOf(v)};
     }
     int best = -1;
     double best_d = 0.0;
-    for (const int v : builder_->VerticesByIdent(token)) {
-      if (builder_->IsAirport(v)) {
+    for (const int v : impl_->builder_->VerticesByIdent(token)) {
+      if (impl_->builder_->IsAirport(v)) {
         continue;
       }
       const double d = ref.DistanceTo(graph.CoordOf(v));
@@ -158,7 +159,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
           continue;  // DCT edge is not on any named airway
         }
         bool on_airway = false;
-        for (const std::string& d2 : SplitDesignators(builder_->AirwayName(e->airway_id))) {
+        for (const std::string& d2 : SplitDesignators(impl_->builder_->AirwayName(e->airway_id))) {
           if (d2 == name) {
             on_airway = true;
             break;
@@ -193,7 +194,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // --- Optional leading departure airport. ---
   size_t i = 0;
   std::string dep_airport;
-  if (builder_->VertexByAirport(tokens.front()) >= 0) {
+  if (impl_->builder_->VertexByAirport(tokens.front()) >= 0) {
     dep_airport = tokens.front();
     i = 1;
   }
@@ -202,7 +203,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   std::string arr_airport;
   bool arr_explicit = false;  // a STAR or explicit "DCT" precedes the airport
   size_t end = tokens.size();
-  if (end > i + 1 && builder_->VertexByAirport(tokens.back()) >= 0) {
+  if (end > i + 1 && impl_->builder_->VertexByAirport(tokens.back()) >= 0) {
     arr_airport = tokens.back();
     end = tokens.size() - 1;
     // The airport-append step below emits the final leg, so a trailing "DCT
@@ -217,8 +218,9 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // Reference coordinate for disambiguation: the departure airport if present,
   // else world origin (the first fix then resolves to its globally nearest
   // match, refined by connectivity on subsequent fixes).
-  Coordinate ref =
-      dep_airport.empty() ? Coordinate{} : graph.CoordOf(builder_->VertexByAirport(dep_airport));
+  Coordinate ref = dep_airport.empty()
+                       ? Coordinate{}
+                       : graph.CoordOf(impl_->builder_->VertexByAirport(dep_airport));
 
   // --- Optional leading SID and trailing STAR. ---
   // Helper: does `icao` publish a procedure of `type` named `proc_name`? Used to
@@ -229,7 +231,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     if (icao.empty()) {
       return Result<bool>::Ok(false);
     }
-    Result<const CifpData*> cifp_r = ProceduresFor(icao);
+    Result<const CifpData*> cifp_r = impl_->ProceduresFor(icao);
     if (!cifp_r) {
       return Result<bool>::Err(std::move(cifp_r).error());
     }
@@ -316,8 +318,8 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
   // shapes then fall through and fail cleanly in the enroute loop.
   if (!dep_airport.empty() && !arr_airport.empty() && end - i == 1 && tokens[i] == kDctToken &&
       !dep_via_sid && !arr_via_star) {
-    const int dep_v = builder_->VertexByAirport(dep_airport);
-    const int arr_v = builder_->VertexByAirport(arr_airport);
+    const int dep_v = impl_->builder_->VertexByAirport(dep_airport);
+    const int arr_v = impl_->builder_->VertexByAirport(arr_airport);
     const double d = graph.CoordOf(dep_v).DistanceTo(graph.CoordOf(arr_v));
     route.points.push_back(RoutePoint{dep_airport, graph.CoordOf(dep_v)});
     route.points.push_back(RoutePoint{arr_airport, graph.CoordOf(arr_v)});
@@ -337,7 +339,8 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
 
   auto add_point = [&](int vertex) {
     point_vertices.push_back(vertex);
-    route.points.push_back(RoutePoint{builder_->IdentOf(vertex).ident, graph.CoordOf(vertex)});
+    route.points.push_back(
+        RoutePoint{impl_->builder_->IdentOf(vertex).ident, graph.CoordOf(vertex)});
     prev_vertex = vertex;
     ref = graph.CoordOf(vertex);
   };
@@ -349,7 +352,7 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     // (which compares against the stored uppercase designator). Fix lookups
     // keep the original token so error messages show what the user typed.
     const std::string up_tok = ToUpper(tok);
-    const bool is_airway = FindAirway(up_tok) != nullptr;
+    const bool is_airway = impl_->FindAirway(up_tok) != nullptr;
 
     if (expect_fix) {
       // Expecting a fix. A leading connector before any fix is an error.
@@ -365,8 +368,8 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
       } else if (pending_connector == kDctToken || pending_connector.empty()) {
         // Direct leg from the previous fix.
         const double d = graph.CoordOf(prev_vertex).DistanceTo(rf.coord);
-        route.legs.push_back(RouteLeg{builder_->IdentOf(prev_vertex).ident,
-                                      builder_->IdentOf(rf.vertex).ident,
+        route.legs.push_back(RouteLeg{impl_->builder_->IdentOf(prev_vertex).ident,
+                                      impl_->builder_->IdentOf(rf.vertex).ident,
                                       std::string(kDctToken),
                                       d,
                                       {}});
@@ -378,13 +381,14 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
         if (chain.empty()) {
           return Result<Route>::Err(Error(ErrorCode::kRouteParseError,
                                           "airway '" + pending_connector + "' does not connect " +
-                                              builder_->IdentOf(prev_vertex).ident + " to " + tok));
+                                              impl_->builder_->IdentOf(prev_vertex).ident + " to " +
+                                              tok));
         }
         int hop_from = prev_vertex;
         for (const int v : chain) {
           const double d = graph.CoordOf(hop_from).DistanceTo(graph.CoordOf(v));
-          route.legs.push_back(RouteLeg{builder_->IdentOf(hop_from).ident,
-                                        builder_->IdentOf(v).ident,
+          route.legs.push_back(RouteLeg{impl_->builder_->IdentOf(hop_from).ident,
+                                        impl_->builder_->IdentOf(v).ident,
                                         pending_connector,
                                         d,
                                         {}});
@@ -443,12 +447,12 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
 
   // --- Prepend the departure airport / SID and append the arrival / STAR. ---
   if (!dep_airport.empty()) {
-    const int apt = builder_->VertexByAirport(dep_airport);
+    const int apt = impl_->builder_->VertexByAirport(dep_airport);
     const double d = graph.CoordOf(apt).DistanceTo(graph.CoordOf(point_vertices.front()));
     route.points.insert(route.points.begin(), RoutePoint{dep_airport, graph.CoordOf(apt)});
     route.legs.insert(route.legs.begin(),
                       RouteLeg{dep_airport,
-                               builder_->IdentOf(point_vertices.front()).ident,
+                               impl_->builder_->IdentOf(point_vertices.front()).ident,
                                dep_via_sid ? std::string(kSidToken) : std::string(kDctToken),
                                d,
                                {}});
@@ -456,10 +460,10 @@ Result<Route> NavDatabase::ParseRoute(const std::string& route_str) const {
     route.sid = sid_name;
   }
   if (!arr_airport.empty()) {
-    const int apt = builder_->VertexByAirport(arr_airport);
+    const int apt = impl_->builder_->VertexByAirport(arr_airport);
     const double d = graph.CoordOf(point_vertices.back()).DistanceTo(graph.CoordOf(apt));
     route.points.push_back(RoutePoint{arr_airport, graph.CoordOf(apt)});
-    route.legs.push_back(RouteLeg{builder_->IdentOf(point_vertices.back()).ident,
+    route.legs.push_back(RouteLeg{impl_->builder_->IdentOf(point_vertices.back()).ident,
                                   arr_airport,
                                   arr_via_star ? std::string(kStarToken) : std::string(kDctToken),
                                   d,

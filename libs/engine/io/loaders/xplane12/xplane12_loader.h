@@ -7,8 +7,8 @@
 
 #include "core/result.h"
 #include "io/loaders/loader.h"
+#include "io/loaders/nav_data.h"
 #include "io/loaders/xplane12/cifp_parser.h"
-#include "io/nav_data.h"
 
 namespace bf {
 

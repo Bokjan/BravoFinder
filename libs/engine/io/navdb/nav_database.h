@@ -3,29 +3,18 @@
 
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
-#include <string_view>
-#include <unordered_map>
 #include <vector>
 
-#include "core/base/attributes.h"
-#include "core/domain/fixed_string.h"
-#include "core/domain/mora_grid.h"
 #include "core/domain/msa.h"
 #include "core/query/query_types.h"
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
-#include "io/loaders/loader.h"
+#include "io/loaders/loader_capabilities.h"
 
 namespace bf {
-
-class GraphBuilder;
-struct CifpData;
-class CifpArchive;
-class NavDetailArchive;
 
 // How a CIFP procedure cache is loaded by OpenCached.
 enum class CifpLoad {
@@ -39,24 +28,30 @@ enum class CifpLoad {
 // and answers route queries. Self-contained with no global/static state, so
 // multiple instances (e.g. different AIRAC cycles) can coexist safely.
 //
+// Opaque to SDK consumers: implementation state and private helpers live behind
+// `impl_` (see the internal nav_database_impl.h, which is not installed).
+//
 // Thread-safety contract: after Open() succeeds, an instance is read-only except
 // for an internally synchronized procedure cache. EVERY const query method --
-// FindRoutes(), MsaForAirport(), ParseRoute(), the batch lookups (LookupWaypoints,
-// LookupAirports, LookupAirways, LookupHolds, ...) and ProceduresFor() -- is safe
-// to call concurrently from multiple threads on the SAME instance. The only shared
-// mutable state is procedure_cache_, which is guarded by cache_mutex_; everything
-// else (graph, MORA, MSA) is immutable after Open().
+// FindRoutes(), MsaForAirport(), ParseRoute(), and the batch lookups
+// (LookupWaypoints, LookupAirports, LookupAirways, LookupHolds, ...) -- is safe
+// to call concurrently from multiple threads on the SAME instance. The only
+// shared mutable state is the procedure cache inside Impl, guarded by its mutex;
+// everything else (graph, MORA, MSA) is immutable after Open().
 //
-// Moved-from instances are NOT queryable: the move ops are `= default`, so a
-// moved-from database has a null cache_mutex_ (a unique_ptr member) and any query
-// touching the procedure cache would null-deref. Current call sites never query a
-// moved-from instance; treat "moved from" as "consumed", not "reset for reuse".
+// Moved-from instances are NOT queryable: a moved-from database has a null
+// `impl_` and any query that needs state returns empty / "not loaded". Current
+// call sites never query a moved-from instance; treat "moved from" as
+// "consumed", not "reset for reuse".
 class NavDatabase {
  public:
   NavDatabase();
   ~NavDatabase();
   NavDatabase(NavDatabase&&) noexcept;
   NavDatabase& operator=(NavDatabase&&) noexcept;
+
+  NavDatabase(const NavDatabase&) = delete;
+  NavDatabase& operator=(const NavDatabase&) = delete;
 
   // Load navigation source data from `source_dir` and build the route graph.
   // `loader_name` selects the source loader (see MakeLoader / the loader
@@ -89,17 +84,17 @@ class NavDatabase {
   // AIRAC provenance parsed from the source data (or restored from a cache): the
   // cycle number (e.g. 2601). Zero when the source carried no parsable
   // provenance. (The X-Plane-only `build` stamp is no longer tracked.)
-  uint32_t cycle() const { return cycle_; }
+  uint32_t cycle() const;
 
   // Loader that produced this database (`bf build --loader` / bfdb header).
   // Empty when unknown. Does not by itself change FindRoutes behaviour.
-  const std::string& source_loader() const { return source_loader_; }
+  const std::string& source_loader() const;
 
   // What the source can faithfully express (see LoaderCapabilities). Taken from
   // the live loader on Open, or restored from the .bfdb header on OpenCached.
   // Exposed for callers/UIs; FindRoutes does not currently degrade constraints
   // from these.
-  const LoaderCapabilities& capabilities() const { return capabilities_; }
+  const LoaderCapabilities& capabilities() const;
 
   // Find up to request.k candidate routes, ordered best-first, honoring the
   // request's altitude/level constraints. Endpoints are airport ICAO codes
@@ -171,67 +166,8 @@ class NavDatabase {
   std::vector<std::vector<HoldInfo>> LookupHolds(const std::vector<std::string>& fix_idents) const;
 
  private:
-  // Load (and cache) an airport's CIFP procedures on demand. Ok(nullptr) if the
-  // airport has no procedures. Err(kCacheCorrupt) if a cached segment is present
-  // but unreadable/corrupt -- never cached as "no procedures". The cache
-  // accumulates across queries so a session of related queries pays each
-  // airport's parse cost only once. The source is the loaded CIFP archive if one
-  // is present (OpenCached path), else the loader parsing a source `.dat` on
-  // demand (Open path); if neither is available the airport simply has no
-  // procedures.
-  //
-  // Thread-safe: cache_mutex_ guards only the map lookup/insert, never the disk
-  // parse, so concurrent queries for different airports parse in parallel. The
-  // returned pointer stays valid for the database's lifetime: the cache is
-  // append-only (no erase) and stores unique_ptr values, so a CifpData's heap
-  // address is stable even when a concurrent insert rehashes the map.
-  Result<const CifpData*> ProceduresFor(const std::string& icao) const BF_LIFETIMEBOUND;
-
-  // Build the airway-name -> segments index by scanning every graph edge once.
-  // Called at the end of Open/OpenCached; the index is then frozen (read-only),
-  // so LookupAirways needs no lock (thread-safety contract: immutable after Open).
-  void BuildAirwayIndex();
-
-  // Binary-search airway_index_ by designator. Over-long names cannot match
-  // (designators are <=5 chars) and return null without asserting.
-  const AirwayInfo* FindAirway(std::string_view name) const;
-
-  // AIRAC provenance, carried into the .bfdb container header.
-  uint32_t cycle_ = 0;
-  std::string source_loader_;
-  LoaderCapabilities capabilities_{};
-  std::unique_ptr<GraphBuilder> builder_;
-  MoraGrid mora_;
-  std::vector<MsaSector> msa_;
-  // The source loader, and the source directory it parses. Both set only on the
-  // Open() path (where raw data is parsed); null/empty on the OpenCached() path,
-  // which reads only prebuilt caches and never needs a loader.
-  std::unique_ptr<Loader> loader_;
-  std::string source_dir_;
-  // Airway designator -> its directed segments. Built once at Open, then
-  // immutable, so reads are lock-free. Sorted by FixedName8 key for
-  // binary search (designators are <=5 chars; ~10k entries, cold-path lookup).
-  std::vector<std::pair<FixedName8, AirwayInfo>> airway_index_;
-  // Optional CIFP procedure cache. When present, ProceduresFor fetches segments
-  // from it instead of parsing CIFP/<ICAO>.dat files. Immutable after Open, so
-  // it needs no lock (its Fetch opens an independent ifstream per call). Held
-  // as unique_ptr so this header can forward-declare CifpArchive (SDK surface).
-  std::unique_ptr<CifpArchive> cifp_archive_;
-  // Optional navaid detail + hold cache, loaded eagerly at Open.
-  // Immutable after Open; FindNavaids/FindHolds are const and lock-free.
-  std::unique_ptr<NavDetailArchive> detail_archive_;
-  // When true, procedure_cache_ was fully populated at Open and is frozen: reads
-  // hit existing entries only, so ProceduresFor skips the lock entirely (no
-  // insert => no rehash => no data race). When false (on-demand), the cache is
-  // filled lazily under cache_mutex_.
-  bool cifp_eager_ = false;
-  // Procedure cache. In on-demand mode it is lazily filled by FindRoutes
-  // (logically const) under cache_mutex_; in eager mode it is filled once at
-  // Open, then read lock-free. The mutex is held in a unique_ptr so NavDatabase
-  // stays movable (std::mutex is not movable; the defaulted move operations need
-  // a movable member).
-  mutable std::unordered_map<std::string, std::unique_ptr<CifpData>> procedure_cache_;
-  mutable std::unique_ptr<std::mutex> cache_mutex_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace bf

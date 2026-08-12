@@ -9,7 +9,7 @@
 #include "core/domain/hold_fix.h"
 #include "core/domain/navaid_detail.h"
 #include "io/cache/byte_io.h"
-#include "io/nav_data.h"
+#include "io/loaders/nav_data.h"
 
 namespace {
 

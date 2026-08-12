@@ -14,7 +14,7 @@
 #include "io/cache/cifp_codec.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/nav_detail_codec.h"
-#include "io/nav_data.h"
+#include "io/loaders/nav_data.h"
 
 namespace {
 

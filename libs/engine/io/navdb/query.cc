@@ -9,14 +9,17 @@
 #include "core/domain/procedure.h"
 #include "io/build/graph_builder.h"
 #include "io/cache/nav_detail_codec.h"
-#include "io/navdb/nav_database.h"
+#include "io/navdb/nav_database_impl.h"
 
 namespace bf {
 
 std::vector<MsaSector> NavDatabase::MsaForAirport(const std::string& icao) const {
-  const std::string up = ToUpper(icao);
   std::vector<MsaSector> out;
-  for (const MsaSector& s : msa_) {
+  if (!impl_) {
+    return out;
+  }
+  const std::string up = ToUpper(icao);
+  for (const MsaSector& s : impl_->msa_) {
     if (s.airport_icao == up) {
       out.push_back(s);
     }
@@ -27,20 +30,21 @@ std::vector<MsaSector> NavDatabase::MsaForAirport(const std::string& icao) const
 std::vector<std::vector<WaypointInfo>> NavDatabase::LookupWaypoints(
     const std::vector<std::string>& idents) const {
   std::vector<std::vector<WaypointInfo>> out(idents.size());
-  if (!builder_) {
+  if (!impl_ || !impl_->builder_) {
     return out;
   }
   for (size_t i = 0; i < idents.size(); ++i) {
-    const std::vector<int> vertices = builder_->VerticesByIdent(ToUpper(idents[i]));
+    const std::vector<int> vertices = impl_->builder_->VerticesByIdent(ToUpper(idents[i]));
     for (const int v : vertices) {
       // Airports share the ident namespace but are looked up via LookupAirports;
       // skip them here so a bare ICAO does not masquerade as a waypoint match.
-      if (builder_->IsAirport(v)) {
+      if (impl_->builder_->IsAirport(v)) {
         continue;
       }
-      const Ident& id = builder_->IdentOf(v);
-      out[i].push_back(WaypointInfo{id.ident, id.arinc424_icao_code, builder_->graph().CoordOf(v),
-                                    builder_->KindOf(v), builder_->OnNetwork(v)});
+      const Ident& id = impl_->builder_->IdentOf(v);
+      out[i].push_back(WaypointInfo{id.ident, id.arinc424_icao_code,
+                                    impl_->builder_->graph().CoordOf(v), impl_->builder_->KindOf(v),
+                                    impl_->builder_->OnNetwork(v)});
     }
   }
   return out;
@@ -49,17 +53,17 @@ std::vector<std::vector<WaypointInfo>> NavDatabase::LookupWaypoints(
 std::vector<std::optional<AirportInfo>> NavDatabase::LookupAirports(
     const std::vector<std::string>& icaos) const {
   std::vector<std::optional<AirportInfo>> out(icaos.size());
-  if (!builder_) {
+  if (!impl_ || !impl_->builder_) {
     return out;
   }
   for (size_t i = 0; i < icaos.size(); ++i) {
     const std::string up = ToUpper(icaos[i]);
-    const int v = builder_->VertexByAirport(up);
+    const int v = impl_->builder_->VertexByAirport(up);
     if (v < 0) {
       continue;
     }
-    const Ident& id = builder_->IdentOf(v);
-    Result<const CifpData*> cifp = ProceduresFor(up);
+    const Ident& id = impl_->builder_->IdentOf(v);
+    Result<const CifpData*> cifp = impl_->ProceduresFor(up);
     bool has_procedures = false;
     bool procedures_corrupt = false;
     if (!cifp) {
@@ -71,8 +75,8 @@ std::vector<std::optional<AirportInfo>> NavDatabase::LookupAirports(
     }
     out[i] = AirportInfo{id.ident,
                          id.arinc424_icao_code,
-                         builder_->graph().CoordOf(v),
-                         builder_->ElevationOf(v),
+                         impl_->builder_->graph().CoordOf(v),
+                         impl_->builder_->ElevationOf(v),
                          has_procedures,
                          procedures_corrupt};
   }
@@ -84,7 +88,7 @@ Result<std::vector<std::optional<AirportProcedures>>> NavDatabase::LookupProcedu
   std::vector<std::optional<AirportProcedures>> out(icaos.size());
   for (size_t i = 0; i < icaos.size(); ++i) {
     const std::string up = ToUpper(icaos[i]);
-    Result<const CifpData*> cifp_r = ProceduresFor(up);
+    Result<const CifpData*> cifp_r = impl_->ProceduresFor(up);
     if (!cifp_r) {
       return Result<std::vector<std::optional<AirportProcedures>>>::Err(std::move(cifp_r).error());
     }
@@ -128,7 +132,7 @@ Result<std::optional<AirportProcedureDetail>> NavDatabase::LookupProcedureDetail
     const std::string& icao, const std::string& procedure_name) const {
   const std::string up_icao = ToUpper(icao);
   const std::string up_name = ToUpper(procedure_name);
-  Result<const CifpData*> cifp_r = ProceduresFor(up_icao);
+  Result<const CifpData*> cifp_r = impl_->ProceduresFor(up_icao);
   if (!cifp_r) {
     return Result<std::optional<AirportProcedureDetail>>::Err(std::move(cifp_r).error());
   }
@@ -173,7 +177,7 @@ std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
     const std::vector<std::string>& names) const {
   std::vector<std::optional<AirwayInfo>> out(names.size());
   for (size_t i = 0; i < names.size(); ++i) {
-    const AirwayInfo* info = FindAirway(ToUpper(names[i]));
+    const AirwayInfo* info = impl_->FindAirway(ToUpper(names[i]));
     if (info != nullptr) {
       out[i] = *info;
     }
@@ -184,11 +188,11 @@ std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
 std::vector<std::vector<NavaidDetailInfo>> NavDatabase::LookupNavaidDetails(
     const std::vector<std::string>& idents) const {
   std::vector<std::vector<NavaidDetailInfo>> out(idents.size());
-  if (!detail_archive_) {
+  if (!impl_ || !impl_->detail_archive_) {
     return out;
   }
   for (size_t i = 0; i < idents.size(); ++i) {
-    out[i] = detail_archive_->FindNavaids(ToUpper(idents[i]));
+    out[i] = impl_->detail_archive_->FindNavaids(ToUpper(idents[i]));
   }
   return out;
 }
@@ -196,11 +200,11 @@ std::vector<std::vector<NavaidDetailInfo>> NavDatabase::LookupNavaidDetails(
 std::vector<std::vector<HoldInfo>> NavDatabase::LookupHolds(
     const std::vector<std::string>& fix_idents) const {
   std::vector<std::vector<HoldInfo>> out(fix_idents.size());
-  if (!detail_archive_) {
+  if (!impl_ || !impl_->detail_archive_) {
     return out;
   }
   for (size_t i = 0; i < fix_idents.size(); ++i) {
-    out[i] = detail_archive_->FindHolds(ToUpper(fix_idents[i]));
+    out[i] = impl_->detail_archive_->FindHolds(ToUpper(fix_idents[i]));
   }
   return out;
 }

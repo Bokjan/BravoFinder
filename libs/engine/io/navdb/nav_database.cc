@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-#include "io/navdb/nav_database.h"
-
 #include <algorithm>
 #include <filesystem>
 #include <format>
@@ -31,14 +29,27 @@
 #include "io/navdb/constraint_assembly.h"
 #include "io/navdb/endpoint_planner.h"
 #include "io/navdb/forced_router.h"
+#include "io/navdb/nav_database_impl.h"
 #include "io/navdb/route_assembler.h"
 
 namespace bf {
 
-NavDatabase::NavDatabase() : cache_mutex_(std::make_unique<std::mutex>()) {}
+NavDatabase::NavDatabase() : impl_(std::make_unique<Impl>()) {}
 NavDatabase::~NavDatabase() = default;
 NavDatabase::NavDatabase(NavDatabase&&) noexcept = default;
 NavDatabase& NavDatabase::operator=(NavDatabase&&) noexcept = default;
+
+uint32_t NavDatabase::cycle() const { return impl_ ? impl_->cycle_ : 0; }
+
+const std::string& NavDatabase::source_loader() const {
+  static const std::string kEmpty;
+  return impl_ ? impl_->source_loader_ : kEmpty;
+}
+
+const LoaderCapabilities& NavDatabase::capabilities() const {
+  static const LoaderCapabilities kEmpty;
+  return impl_ ? impl_->capabilities_ : kEmpty;
+}
 
 Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
                                       const std::string& loader_name) {
@@ -51,21 +62,21 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
     return Result<NavDatabase>::Err(std::move(data).error());
   }
   NavDatabase db;
-  db.loader_ = std::move(loader).value();
-  db.source_dir_ = source_dir;
-  db.source_loader_ = db.loader_->name();
-  db.capabilities_ = db.loader_->capabilities();
-  db.cycle_ = data.value().cycle;
-  db.mora_ = std::move(data.value().mora);
-  db.msa_ = std::move(data.value().msa);
+  db.impl_->loader_ = std::move(loader).value();
+  db.impl_->source_dir_ = source_dir;
+  db.impl_->source_loader_ = db.impl_->loader_->name();
+  db.impl_->capabilities_ = db.impl_->loader_->capabilities();
+  db.impl_->cycle_ = data.value().cycle;
+  db.impl_->mora_ = std::move(data.value().mora);
+  db.impl_->msa_ = std::move(data.value().msa);
   Result<GraphBuilder> builder = GraphBuilder::Build(data.value());
   if (!builder) {
     return Result<NavDatabase>::Err(std::move(builder).error());
   }
-  db.builder_ = std::make_unique<GraphBuilder>(std::move(builder).value());
+  db.impl_->builder_ = std::make_unique<GraphBuilder>(std::move(builder).value());
   // Reject a build that overflowed the uint16 airway_id space (see
   // GraphBuilder::airway_overflow); real AIRAC data never triggers this.
-  if (db.builder_->airway_overflow()) {
+  if (db.impl_->builder_->airway_overflow()) {
     return Result<NavDatabase>::Err(
         Error(ErrorCode::kSerializationError,
               std::format("too many distinct airway names (> {}) for the uint16 airway_id space",
@@ -73,8 +84,9 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   }
   // Build the detail archive from the same parse (navaid_details/hold_fixes are
   // still in `data`; mora/msa were moved out above but those two were not).
-  db.detail_archive_ = std::make_unique<NavDetailArchive>(NavDetailArchive::FromData(data.value()));
-  db.BuildAirwayIndex();
+  db.impl_->detail_archive_ =
+      std::make_unique<NavDetailArchive>(NavDetailArchive::FromData(data.value()));
+  db.impl_->BuildAirwayIndex();
   return Result<NavDatabase>::Ok(std::move(db));
 }
 
@@ -86,12 +98,13 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLo
   UnifiedData& u = unified.value();
 
   NavDatabase db;
-  db.cycle_ = u.header.cycle;
-  db.source_loader_ = u.header.source_loader;
-  db.capabilities_ = u.header.capabilities;
-  db.mora_ = std::move(u.graph.mora);
-  db.msa_ = std::move(u.graph.msa);
-  db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromSnapshot(std::move(u.graph)));
+  db.impl_->cycle_ = u.header.cycle;
+  db.impl_->source_loader_ = u.header.source_loader;
+  db.impl_->capabilities_ = u.header.capabilities;
+  db.impl_->mora_ = std::move(u.graph.mora);
+  db.impl_->msa_ = std::move(u.graph.msa);
+  db.impl_->builder_ =
+      std::make_unique<GraphBuilder>(GraphBuilder::FromSnapshot(std::move(u.graph)));
 
   // CIFP procedures come from the file's CIFP section, if present. Its absence
   // is fine -- an airport then simply reports no procedures (the cached path
@@ -107,49 +120,50 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLo
       if (!all) {
         return Result<NavDatabase>::Err(std::move(all).error());
       }
-      db.procedure_cache_.reserve(all.value().size());
+      db.impl_->procedure_cache_.reserve(all.value().size());
       for (auto& entry : all.value()) {
-        db.procedure_cache_.emplace(entry.first,
-                                    std::make_unique<CifpData>(std::move(entry.second)));
+        db.impl_->procedure_cache_.emplace(entry.first,
+                                           std::make_unique<CifpData>(std::move(entry.second)));
       }
-      db.cifp_eager_ = true;
+      db.impl_->cifp_eager_ = true;
       // The archive is not retained: everything is already in the cache.
     } else {
-      db.cifp_archive_ = std::make_unique<CifpArchive>(std::move(*u.cifp));
+      db.impl_->cifp_archive_ = std::make_unique<CifpArchive>(std::move(*u.cifp));
     }
   }
 
   // Navaid detail comes from the file's detail section, if present. Absence is fine.
   if (u.detail.has_value()) {
-    db.detail_archive_ = std::make_unique<NavDetailArchive>(std::move(*u.detail));
+    db.impl_->detail_archive_ = std::make_unique<NavDetailArchive>(std::move(*u.detail));
   }
 
-  db.BuildAirwayIndex();
+  db.impl_->BuildAirwayIndex();
   return Result<NavDatabase>::Ok(std::move(db));
 }
 
 Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
-  if (!builder_) {
+  if (!impl_ || !impl_->builder_) {
     return Result<uint32_t>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
   // The CIFP section is mandatory: a cache without procedures cannot resolve
   // SID/STAR, so it is always written. Requires a loader (a database opened from
   // a cache has none).
-  if (loader_ == nullptr) {
+  if (impl_->loader_ == nullptr) {
     return Result<uint32_t>::Err(
         Error(ErrorCode::kDataMissing, "no loader (database opened from a cache)"));
   }
 
   // Graph section: the built graph plus MORA/MSA (owned by NavDatabase).
-  GraphSnapshot snapshot = builder_->ToSnapshot();
-  snapshot.mora = mora_;
-  snapshot.msa = msa_;
+  GraphSnapshot snapshot = impl_->builder_->ToSnapshot();
+  snapshot.mora = impl_->mora_;
+  snapshot.msa = impl_->msa_;
 
   // CIFP section: parse the full procedure set via the loader (~100 MB), then
   // hand the parsed per-airport data to the source-agnostic codec. Keeping the
   // parse in the loader means the cache layer never depends on any source's
   // on-disk layout.
-  Result<std::vector<AirportProcedureData>> procedures = loader_->LoadProcedures(source_dir_);
+  Result<std::vector<AirportProcedureData>> procedures =
+      impl_->loader_->LoadProcedures(impl_->source_dir_);
   if (!procedures) {
     return Result<uint32_t>::Err(std::move(procedures).error());
   }
@@ -158,12 +172,12 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
   UnifiedCache::BuildInput input;
   input.graph = &snapshot;
   input.cifp = &cifp_procedures;
-  input.detail = detail_archive_.get();
-  input.header.cycle = cycle_;
+  input.detail = impl_->detail_archive_.get();
+  input.header.cycle = impl_->cycle_;
   input.header.program_version = kBravoFinderVersion;
-  input.header.source_loader = loader_->name();
-  input.header.data_dir = source_dir_;
-  input.header.capabilities = loader_->capabilities();
+  input.header.source_loader = impl_->loader_->name();
+  input.header.data_dir = impl_->source_dir_;
+  input.header.capabilities = impl_->loader_->capabilities();
 
   Result<void> written = UnifiedCache::Build(out_path, input);
   if (!written) {
@@ -172,14 +186,7 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
   return Result<uint32_t>::Ok(static_cast<uint32_t>(cifp_procedures.size()));
 }
 
-Result<const CifpData*> NavDatabase::ProceduresFor(const std::string& icao) const {
-  // Moved-from instances have a null cache_mutex_ (the move ops are = default).
-  // They are never meant to be queried (see the class comment), but unlike
-  // LookupWaypoints/LookupAirports this path has no !builder_ early return, so
-  // guard the lock explicitly: return "no procedures" rather than null-deref.
-  if (!cache_mutex_) {
-    return Result<const CifpData*>::Ok(nullptr);
-  }
+Result<const CifpData*> NavDatabase::Impl::ProceduresFor(const std::string& icao) const {
   // Eager mode: the cache was fully populated at Open and is now frozen, so a
   // plain read needs no lock (no concurrent insert can rehash it). A miss means
   // the airport simply has no procedures.
@@ -229,7 +236,7 @@ Result<const CifpData*> NavDatabase::ProceduresFor(const std::string& icao) cons
   return Result<const CifpData*>::Ok(it->second.get());
 }
 
-void NavDatabase::BuildAirwayIndex() {
+void NavDatabase::Impl::BuildAirwayIndex() {
   if (!builder_) {
     return;
   }
@@ -305,7 +312,7 @@ void NavDatabase::BuildAirwayIndex() {
             [](const auto& a, const auto& b) { return a.first < b.first; });
 }
 
-const AirwayInfo* NavDatabase::FindAirway(std::string_view name) const {
+const AirwayInfo* NavDatabase::Impl::FindAirway(std::string_view name) const {
   Result<FixedName8> key_result = FixedName8::From(name);
   if (!key_result) {
     return nullptr;
@@ -322,16 +329,16 @@ const AirwayInfo* NavDatabase::FindAirway(std::string_view name) const {
 
 Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) const {
   using Routes = std::vector<Route>;
-  if (!builder_) {
+  if (!impl_ || !impl_->builder_) {
     return Result<Routes>::Err(Error(ErrorCode::kDataMissing, "database not loaded"));
   }
 
   // Keep the callable alive: CifpLookup is a non-owning function_ref.
-  const auto cifp_fn = [this](const std::string& icao) { return ProceduresFor(icao); };
+  const auto cifp_fn = [this](const std::string& icao) { return impl_->ProceduresFor(icao); };
   const CifpLookup cifp_lookup{cifp_fn};
 
-  Result<EndpointPlan> dep_r =
-      EndpointPlanner::Plan(*builder_, request, request.departure, /*departure=*/true, cifp_lookup);
+  Result<EndpointPlan> dep_r = EndpointPlanner::Plan(*impl_->builder_, request, request.departure,
+                                                     /*departure=*/true, cifp_lookup);
   if (!dep_r) {
     return Result<Routes>::Err(std::move(dep_r).error());
   }
@@ -346,8 +353,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         ErrorCode::kAirportNotFound,
         "unknown departure airport: " + request.departure + " (expected an ICAO code, e.g. KLAX)"));
   }
-  Result<EndpointPlan> arr_r =
-      EndpointPlanner::Plan(*builder_, request, request.arrival, /*departure=*/false, cifp_lookup);
+  Result<EndpointPlan> arr_r = EndpointPlanner::Plan(*impl_->builder_, request, request.arrival,
+                                                     /*departure=*/false, cifp_lookup);
   if (!arr_r) {
     return Result<Routes>::Err(std::move(arr_r).error());
   }
@@ -363,7 +370,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         "unknown arrival airport: " + request.arrival + " (expected an ICAO code, e.g. KLAX)"));
   }
 
-  Result<ConstraintBundle> constraints_r = ConstraintAssembly::Build(request, *builder_, mora_);
+  Result<ConstraintBundle> constraints_r =
+      ConstraintAssembly::Build(request, *impl_->builder_, impl_->mora_);
   if (!constraints_r) {
     return Result<Routes>::Err(std::move(constraints_r).error());
   }
@@ -371,7 +379,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   SearchOptions& options = constraints.options;
   const std::vector<int>& avoid_vertices = constraints.avoid_vertices;
 
-  const NavGraph& graph = builder_->graph();
+  const NavGraph& graph = impl_->builder_->graph();
   std::vector<SeededEndpoint> sources =
       EndpointPlanner::ToSearchEndpoints(dep.connections, /*soft_prefer_star=*/false);
   const bool arr_soft_prefer = EndpointPlanner::SoftPreferStarActive(arr);
@@ -403,8 +411,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   std::vector<int> forced;
   std::vector<std::string> forced_echo;
   if (!request.forced_points.empty()) {
-    const int dep_apt = builder_->VertexByAirport(ToUpper(request.departure));
-    const int arr_apt = builder_->VertexByAirport(ToUpper(request.arrival));
+    const int dep_apt = impl_->builder_->VertexByAirport(ToUpper(request.departure));
+    const int arr_apt = impl_->builder_->VertexByAirport(ToUpper(request.arrival));
     const Coordinate dep_coord =
         dep_apt >= 0 ? graph.CoordOf(dep_apt) : graph.CoordOf(sources.front().vertex);
     const Coordinate arr_coord =
@@ -414,8 +422,8 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     for (const std::string& token : request.forced_points) {
       std::string echo;
       bool is_airport = false;
-      const int v =
-          ForcedRouter::ResolvePoint(*builder_, token, dep_coord, arr_coord, echo, is_airport);
+      const int v = ForcedRouter::ResolvePoint(*impl_->builder_, token, dep_coord, arr_coord, echo,
+                                               is_airport);
       if (v < 0) {
         const std::string why =
             is_airport ? "' is an airport, not an enroute waypoint" : "' is not a known waypoint";
@@ -455,7 +463,7 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     return Result<Routes>::Err(Error(ErrorCode::kNoRoute, "no route between endpoints"));
   }
 
-  return Result<Routes>::Ok(RouteAssembler::Assemble(*builder_, graph, paths, dep, arr,
+  return Result<Routes>::Ok(RouteAssembler::Assemble(*impl_->builder_, graph, paths, dep, arr,
                                                      arr_soft_prefer, options, forced_echo));
 }
 

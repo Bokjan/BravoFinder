@@ -8,25 +8,10 @@
 
 #include "core/domain/procedure.h"
 #include "core/result.h"
-#include "io/nav_data.h"
+#include "io/loaders/loader_capabilities.h"
+#include "io/loaders/nav_data.h"
 
 namespace bf {
-
-// What a navigation-data source can faithfully express. Declared by each
-// Loader via `capabilities()`, written into the .bfdb container header at
-// `bf build`, and restored on OpenCached. FindRoutes does not currently degrade
-// constraints from these flags (callers / UIs may); they exist so consumers do
-// not assume every loader is compliance-equivalent.
-//
-// Defaults match the full X-Plane 12 / DFD model. Fenix clears airway_direction
-// (schema has no per-leg direction) and altitude_bands (segment FL limits are
-// not carried the same way). MSA is also absent from Fenix.
-struct LoaderCapabilities {
-  bool airway_direction = true;  // per-leg F/B/both; false => graph edges are bidirectional
-  bool altitude_bands = true;    // per-leg base_fl / top_fl from the source
-  bool mora_grid = true;         // global MORA grid present (may still be sparse)
-  bool msa_sectors = true;       // per-airport MSA sectors present
-};
 
 // One airport's parsed CIFP data, keyed by ICAO. LoadProcedures returns these in
 // loader-defined order; the ICAO identifies the airport.

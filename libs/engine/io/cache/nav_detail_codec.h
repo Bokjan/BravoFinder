@@ -13,7 +13,7 @@
 #include "core/domain/navaid_detail.h"
 #include "core/query/query_types.h"
 #include "core/result.h"
-#include "io/nav_data.h"
+#include "io/loaders/nav_data.h"
 
 namespace bf {
 

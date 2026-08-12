@@ -144,12 +144,12 @@ add_library(bf::bravofinder ALIAS bravofinder)
 # ---------- Install / export (SDK distribution) --------------------------------
 # Public header allowlist: the FULL transitive include graph of navdb/nav_database.h
 # (the SDK entry point) plus the generated version.h. Consumers #including
-# navdb/nav_database.h reach every one of these, so all must ship. Archive codecs
-# (cifp_codec / nav_detail_codec) and pread_file / cifp_parser are implementation
-# details — NavDatabase holds them behind unique_ptr + forward declarations so
-# they are not part of the installed SDK. Verified: none of the installed headers
-# pulls in <sqlite3.h> (sqlite_util.h is NOT in the graph), so the SDK needs no
-# sqlite3 headers.
+# navdb/nav_database.h reach every one of these, so all must ship. NavDatabase is
+# opaque (Pimpl): loader.h / loaders/nav_data.h / archive codecs / graph_builder stay
+# out of the install set. loader_capabilities.h is the thin public leaf for
+# NavDatabase::capabilities(). Verified: none of the installed headers pulls in
+# <sqlite3.h> (sqlite_util.h is NOT in the graph), so the SDK needs no sqlite3
+# headers.
 if(BRAVOFINDER_INSTALL)
   install(TARGETS bravofinder EXPORT bravofinderTargets
           ARCHIVE DESTINATION lib)
@@ -175,8 +175,7 @@ if(BRAVOFINDER_INSTALL)
   install(FILES core/routing/route.h                   DESTINATION include/bf/core/routing)
   install(FILES core/routing/route_request.h           DESTINATION include/bf/core/routing)
   install(FILES io/navdb/nav_database.h                DESTINATION include/bf/io/navdb)
-  install(FILES io/loaders/loader.h                    DESTINATION include/bf/io/loaders)
-  install(FILES io/nav_data.h                          DESTINATION include/bf/io)
+  install(FILES io/loaders/loader_capabilities.h       DESTINATION include/bf/io/loaders)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/core/version.h
           DESTINATION include/bf/core)
 endif()
