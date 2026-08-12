@@ -21,9 +21,9 @@ struct LoaderCapabilities {
 };
 
 // Map a loader registry name (or bfdb `source_loader` provenance) to capabilities.
-// Unknown names keep the full-capability defaults (conservative for new loaders
-// that have not been classified yet would be the opposite; we prefer "assume
-// rich" only for known-good names and document Fenix explicitly).
+// Unknown names keep the full-capability defaults: a new loader is assumed to
+// express every field until proven otherwise (only Fenix clears flags today, and
+// it is documented explicitly above).
 inline LoaderCapabilities CapabilitiesForLoader(std::string_view loader_name) {
   LoaderCapabilities caps;
   if (loader_name == "fenix") {

@@ -426,7 +426,7 @@ std::string RenderMsa(OutputFormat fmt, const std::vector<std::string>& ids,
     for (const bf::MsaSector& s : *results[i]) {
       os << "  center " << s.center.ident << " (" << s.center.arinc424_icao_code << ")\n";
       for (const bf::MsaArc& a : s.arcs) {
-        os << "    from " << a.bearing_from << "°  alt FL" << a.alt_100ft << "  radius "
+        os << "    from " << a.bearing_from << "°  alt " << (a.alt_100ft * 100) << " ft  radius "
            << a.radius_nm << " NM\n";
       }
     }
