@@ -122,6 +122,7 @@ RegionLocs ReadRegionLocs(const std::vector<uint8_t>& b) {
   skip_str();
   skip_str();
   skip_str();  // provenance
+  pos += 4;    // capabilities: 4x U8
   RegionLocs locs;
   locs.pool_len = u32();
   u32();  // pool_crc
@@ -163,6 +164,10 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   in.header.program_version = "3.3.0";
   in.header.source_loader = "xplane12";
   in.header.data_dir = "/data/navdata";
+  in.header.capabilities.airway_direction = true;
+  in.header.capabilities.altitude_bands = true;
+  in.header.capabilities.mora_grid = true;
+  in.header.capabilities.msa_sectors = false;  // non-default to prove round-trip
   REQUIRE(bf::UnifiedCache::Build(path, in));
 
   bf::Result<bf::UnifiedData> opened = bf::UnifiedCache::Open(path);
@@ -174,6 +179,10 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   CHECK(u.header.program_version == "3.3.0");
   CHECK(u.header.source_loader == "xplane12");
   CHECK(u.header.data_dir == "/data/navdata");
+  CHECK(u.header.capabilities.airway_direction);
+  CHECK(u.header.capabilities.altitude_bands);
+  CHECK(u.header.capabilities.mora_grid);
+  CHECK_FALSE(u.header.capabilities.msa_sectors);
 
   // Graph section
   REQUIRE(u.graph.coords.size() == 2);
@@ -257,12 +266,20 @@ TEST_CASE("unified: ReadHeader returns provenance without decoding sections",
   in.graph = &graph;
   in.header.cycle = 2603;
   in.header.source_loader = "xplane12";
+  in.header.capabilities.airway_direction = false;
+  in.header.capabilities.altitude_bands = false;
+  in.header.capabilities.mora_grid = true;
+  in.header.capabilities.msa_sectors = false;
   REQUIRE(bf::UnifiedCache::Build(path, in));
 
   bf::Result<bf::UnifiedHeader> h = bf::UnifiedCache::ReadHeader(path);
   REQUIRE(h);
   CHECK(h.value().cycle == 2603);
   CHECK(h.value().source_loader == "xplane12");
+  CHECK_FALSE(h.value().capabilities.airway_direction);
+  CHECK_FALSE(h.value().capabilities.altitude_bands);
+  CHECK(h.value().capabilities.mora_grid);
+  CHECK_FALSE(h.value().capabilities.msa_sectors);
 
   std::remove(path.c_str());
 }

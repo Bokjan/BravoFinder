@@ -8,7 +8,7 @@ A realistic, fully-compliant flight-route engine in modern C++20 — plus a CLI,
 
 - **It's a library first.** `libs/engine/` is a self-contained C++20 static library (`bf::bravofinder`) with no JSON or network dependency — embed it in any host app. The CLI, MCP server, and REST server are just consumers of it.
 - **Routes that read like filed flight plans.** v3 doesn't draw the geographic shortest path; it respects airway directionality, high/low airway levels, segment altitude bands, and terminal procedures (SID/STAR/approach).
-- **Pluggable navigation data.** One `Loader` interface abstracts the source format — X-Plane 12 `.dat` (default), DFD SQLite (`dfd1`/`dfd2`), and Fenix A320. Support a new format without touching the engine. Loaders are not compliance-equivalent: `NavDatabase::capabilities()` / `CapabilitiesForLoader` advertise what each source can faithfully express (see [Loader capabilities](#loader-capabilities)).
+- **Pluggable navigation data.** One `Loader` interface abstracts the source format — X-Plane 12 `.dat` (default), DFD SQLite (`dfd1`/`dfd2`), and Fenix A320. Support a new format without touching the engine. Loaders are not compliance-equivalent: `Loader::capabilities()` is written into the `.bfdb` header at build time and exposed via `NavDatabase::capabilities()` after open (see [Loader capabilities](#loader-capabilities)).
 - **Fast startup.** Compile a portable, little-endian binary cache (`.bfdb`) once per AIRAC cycle; subsequent loads are near-instant.
 
 ## Library
@@ -38,7 +38,7 @@ Navigation data is **not** included. It is copyrighted (Navigraph / Jeppesen), l
 
 ### Loader capabilities
 
-Not every loader carries the same fidelity. `bf::CapabilitiesForLoader` (and `NavDatabase::capabilities()` after open) exposes a small matrix so UIs and gateways do not assume every source is compliance-equivalent. `FindRoutes` does not currently auto-degrade constraints from these flags.
+Not every loader carries the same fidelity. Each `Loader` declares a `LoaderCapabilities` matrix (persisted in the `.bfdb` header by `bf build`, restored on `OpenCached`, and taken from the live loader on `Open`) so UIs and gateways do not assume every source is compliance-equivalent. `FindRoutes` does not currently auto-degrade constraints from these flags.
 
 | Loader | Airway direction (F/B) | Altitude bands (base/top FL) | MORA grid | MSA sectors |
 |--------|:----------------------:|:----------------------------:|:---------:|:-----------:|

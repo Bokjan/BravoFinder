@@ -113,7 +113,8 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   }
 
   // Header buffer: magic, version, section_count, cycle, provenance strings,
-  // pool_len. Built first so its size is known before section offsets.
+  // capabilities (4x U8), pool_len, pool_crc. Built first so its size is known
+  // before section offsets.
   std::vector<uint8_t> header;
   ByteWriter hw(header);
   hw.Bytes(reinterpret_cast<const uint8_t*>(kMagic), 4);
@@ -123,6 +124,10 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   hw.Str(input.header.program_version);
   hw.Str(input.header.source_loader);
   hw.Str(input.header.data_dir);
+  hw.U8(input.header.capabilities.airway_direction ? 1 : 0);
+  hw.U8(input.header.capabilities.altitude_bands ? 1 : 0);
+  hw.U8(input.header.capabilities.mora_grid ? 1 : 0);
+  hw.U8(input.header.capabilities.msa_sectors ? 1 : 0);
   hw.U32(static_cast<uint32_t>(pool_blob.size()));
   // pool_crc guards the shared string pool -- every section's string refs
   // resolve into it, so a pool bit-flip silently corrupts text across all
@@ -225,6 +230,10 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
   header.program_version = r.Str();
   header.source_loader = r.Str();
   header.data_dir = r.Str();
+  header.capabilities.airway_direction = r.U8() != 0;
+  header.capabilities.altitude_bands = r.U8() != 0;
+  header.capabilities.mora_grid = r.U8() != 0;
+  header.capabilities.msa_sectors = r.U8() != 0;
   if (!r.ok()) {
     return Result<UnifiedHeader>::Err(
         Error(ErrorCode::kCacheCorrupt, WithRebuildHint("corrupt .bfdb header")));
@@ -264,6 +273,12 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     f.read(reinterpret_cast<char*>(b), 4);
     v = static_cast<uint32_t>(b[0]) | (static_cast<uint32_t>(b[1]) << 8) |
         (static_cast<uint32_t>(b[2]) << 16) | (static_cast<uint32_t>(b[3]) << 24);
+    return static_cast<bool>(f);
+  };
+  auto readU8 = [&](uint8_t& v) {
+    unsigned char b = 0;
+    f.read(reinterpret_cast<char*>(&b), 1);
+    v = b;
     return static_cast<bool>(f);
   };
   auto readU64 = [&](uint64_t& v) {
@@ -317,6 +332,17 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
       !readStr(out.header.source_loader) || !readStr(out.header.data_dir)) {
     return bad("corrupt .bfdb header");
   }
+  uint8_t cap_airway = 0;
+  uint8_t cap_alt = 0;
+  uint8_t cap_mora = 0;
+  uint8_t cap_msa = 0;
+  if (!readU8(cap_airway) || !readU8(cap_alt) || !readU8(cap_mora) || !readU8(cap_msa)) {
+    return bad("corrupt .bfdb header");
+  }
+  out.header.capabilities.airway_direction = cap_airway != 0;
+  out.header.capabilities.altitude_bands = cap_alt != 0;
+  out.header.capabilities.mora_grid = cap_mora != 0;
+  out.header.capabilities.msa_sectors = cap_msa != 0;
   uint32_t pool_len = 0;
   if (!readU32(pool_len)) {
     return bad("corrupt .bfdb header");

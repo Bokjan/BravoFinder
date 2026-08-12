@@ -11,6 +11,7 @@
 #include "io/cache/cifp_codec.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/nav_detail_codec.h"
+#include "io/loaders/loader.h"
 
 namespace bf {
 
@@ -24,6 +25,9 @@ struct UnifiedHeader {
   std::string program_version;  // bf version that built this cache
   std::string source_loader;    // loader that produced the data (a name from the loader registry)
   std::string data_dir;         // the data dir used at build time (route default)
+  // Source fidelity flags from Loader::capabilities(), persisted at build so
+  // OpenCached does not re-derive them from the loader name.
+  LoaderCapabilities capabilities;
 };
 
 // The decoded contents of a unified `.bfdb`: the graph snapshot, an optional
@@ -45,7 +49,9 @@ struct UnifiedData {
 //
 // On-disk layout:
 //   [file header]  magic "BFDB", format_version, section_count, cycle,
-//                  program_version, source_loader, data_dir, pool_len, pool_crc
+//                  program_version, source_loader, data_dir,
+//                  capabilities (4x U8: airway_direction, altitude_bands,
+//                  mora_grid, msa_sectors; 0/1), pool_len, pool_crc
 //   [section table]  section_count * (type U32, crc U32, offset U64, length U64);
 //                    offset/length == 0 (and crc == 0) means the section is absent.
 //                    crc covers the section body bytes Open reads: the full body
@@ -72,7 +78,7 @@ class UnifiedCache {
   // wrong files, so that version is retired to force a rebuild (see CLAUDE.md,
   // "Protective (poison) format_version bump"). The reason for each bump lives in
   // the commit history, not in a comment here.
-  static constexpr uint32_t kFormatVersion = 17;
+  static constexpr uint32_t kFormatVersion = 18;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

@@ -54,7 +54,7 @@ Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,
   db.loader_ = std::move(loader).value();
   db.source_dir_ = source_dir;
   db.source_loader_ = db.loader_->name();
-  db.capabilities_ = CapabilitiesForLoader(db.source_loader_);
+  db.capabilities_ = db.loader_->capabilities();
   db.cycle_ = data.value().cycle;
   db.mora_ = std::move(data.value().mora);
   db.msa_ = std::move(data.value().msa);
@@ -88,7 +88,7 @@ Result<NavDatabase> NavDatabase::OpenCached(const std::string& bfdb_path, CifpLo
   NavDatabase db;
   db.cycle_ = u.header.cycle;
   db.source_loader_ = u.header.source_loader;
-  db.capabilities_ = CapabilitiesForLoader(db.source_loader_);
+  db.capabilities_ = u.header.capabilities;
   db.mora_ = std::move(u.graph.mora);
   db.msa_ = std::move(u.graph.msa);
   db.builder_ = std::make_unique<GraphBuilder>(GraphBuilder::FromSnapshot(std::move(u.graph)));
@@ -163,6 +163,7 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
   input.header.program_version = kBravoFinderVersion;
   input.header.source_loader = loader_->name();
   input.header.data_dir = source_dir_;
+  input.header.capabilities = loader_->capabilities();
 
   Result<void> written = UnifiedCache::Build(out_path, input);
   if (!written) {

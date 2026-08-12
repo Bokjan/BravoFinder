@@ -24,6 +24,16 @@ class FenixLoader final : public Loader {
   std::optional<CifpData> LoadProcedure(const std::string& source_dir,
                                         const std::string& icao) const override;
   std::string name() const override { return "fenix"; }
+
+  // Fenix schema has no per-leg airway direction or altitude bands, and does
+  // not publish MSA. MORA is still loaded when present in the .db3.
+  LoaderCapabilities capabilities() const override {
+    LoaderCapabilities caps;
+    caps.airway_direction = false;
+    caps.altitude_bands = false;
+    caps.msa_sectors = false;
+    return caps;
+  }
 };
 
 }  // namespace bf

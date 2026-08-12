@@ -26,6 +26,8 @@ class Dfd1Loader final : public Loader {
   std::optional<CifpData> LoadProcedure(const std::string& source_dir,
                                         const std::string& icao) const override;
   std::string name() const override { return "dfd1"; }
+
+  LoaderCapabilities capabilities() const override { return {}; }
 };
 
 }  // namespace bf

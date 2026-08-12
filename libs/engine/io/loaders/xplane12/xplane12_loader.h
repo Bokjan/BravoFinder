@@ -39,6 +39,8 @@ class XPlane12Loader final : public Loader {
                                         const std::string& icao) const override;
 
   std::string name() const override { return "xplane12"; }
+
+  LoaderCapabilities capabilities() const override { return {}; }
 };
 
 }  // namespace bf

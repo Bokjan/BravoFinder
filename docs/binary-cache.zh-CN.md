@@ -81,7 +81,9 @@ uint8  level        // AirwayLevel low/high/both 的原始 enum 值（三态互�
 
 ```
 [file header]   magic "BFDB", format_version, section_count, cycle,
-                program_version, source_loader, data_dir, pool_len, pool_crc
+                program_version, source_loader, data_dir,
+                capabilities（4×U8：airway_direction / altitude_bands / mora_grid / msa_sectors，取值 0/1）,
+                pool_len, pool_crc
 [section table] 目前 3 项，每项 (type U32, crc U32, offset U64, length U64)；
                 crc 为段体 CRC-32C，offset==length==0 表示该段缺席
 [global pool]   pool_len 字节，三段共用（见第 6 节），pool_crc 覆盖整池

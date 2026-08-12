@@ -18,12 +18,11 @@
 #include "core/result.h"
 #include "core/routing/route.h"
 #include "core/routing/route_request.h"
-#include "io/loaders/loader_capabilities.h"
+#include "io/loaders/loader.h"
 
 namespace bf {
 
 class GraphBuilder;
-class Loader;
 struct CifpData;
 class CifpArchive;
 class NavDetailArchive;
@@ -96,8 +95,10 @@ class NavDatabase {
   // Empty when unknown. Does not by itself change FindRoutes behaviour.
   const std::string& source_loader() const { return source_loader_; }
 
-  // What the source can faithfully express (see LoaderCapabilities). Exposed for
-  // callers/UIs; FindRoutes does not currently degrade constraints from these.
+  // What the source can faithfully express (see LoaderCapabilities). Taken from
+  // the live loader on Open, or restored from the .bfdb header on OpenCached.
+  // Exposed for callers/UIs; FindRoutes does not currently degrade constraints
+  // from these.
   const LoaderCapabilities& capabilities() const { return capabilities_; }
 
   // Find up to request.k candidate routes, ordered best-first, honoring the
