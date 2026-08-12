@@ -6,7 +6,7 @@ BravoFinder's MCP server: it exposes the `bf route` and `bf query` capabilities 
 
 - Transport: **stdio** (default — a local process the client spawns and talks to over stdin/stdout) or **HTTP** (`--transport http` — Streamable HTTP, 2025-03-26, on a TCP port `/mcp`, for remote / multi-client access). Both share the same protocol core and capabilities; only the byte transport differs.
 - Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK. Protocol version is negotiated at `initialize` (`2024-11-05` or `2025-03-26`). A message is either a single JSON-RPC request or a **batch** (a JSON array of requests); batch handling lives in the shared `Dispatcher`, so both transports accept it — stdio reads one batch per line and writes one batch response per line, HTTP carries a batch in one `POST /mcp` body.
-- Capabilities: the nine per-database tools below (mirroring the CLI `route` / `query` subcommands), plus a `list_cycles` tool.
+- Capabilities: the ten per-database tools below (mirroring the CLI `route` / `query` subcommands), plus a `list_cycles` tool.
 - Data: the server is pointed at a **directory** of prebuilt `.bfdb` caches and serves one or more AIRAC cycles from it. It never parses raw data or writes files.
 
 ## Multiple AIRAC cycles
@@ -56,9 +56,10 @@ bf-mcp --db-dir /path/to/caches
 # Serve MCP over HTTP instead of stdio (single endpoint POST/GET/DELETE /mcp).
 # HTTP-mode flags mirror bf-http: --host, --port, --worker-threads, --max-body,
 # --io-timeout (all ignored in the default stdio mode).
-bf-mcp --transport http --db-dir /path/to/caches --host 0.0.0.0 --port 8081
+bf-mcp --transport http --db-dir /path/to/caches --host 127.0.0.1 --port 8081
 ```
 
+HTTP defaults to loopback (`127.0.0.1`); pass `--host 0.0.0.0` only when you intentionally expose the port (no built-in auth).
 The HTTP transport is stateless-with-id: `initialize` returns a random `Mcp-Session-Id` header that the server does not track (every request is independent). `POST /mcp` carries a JSON-RPC request (single or batch) and answers `application/json`, or a single `text/event-stream` SSE event when the client's `Accept` header opts in; a notification-only body returns `202`. `GET /mcp` opens an SSE stream (a placeholder — no server-push today). `DELETE /mcp` acknowledges a session teardown. See [docs/http-service.zh-CN.md](../../docs/http-service.zh-CN.md) for the transport design.
 
 `bf-mcp` also honors `--version`, which prints the program version and exits before scanning any caches.
@@ -110,13 +111,14 @@ Every per-database tool also accepts an optional **`cycle`** (integer, e.g. `260
 | `lookup_airways` | `ids` (string[]) | — | Array parallel to `ids`; airway object or `null` |
 | `lookup_navaid_detail` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of region matches (empty if none) |
 | `lookup_holds` | `ids` (string[]) | — | Array parallel to `ids`; each element is an array of holds at that fix (empty if none) |
+| `lookup_msa` | `ids` (string[]) | — | Array parallel to `ids`; MSA object `{icao, sectors:[...]}` or `null` |
 | `list_cycles` | — | — | Array of `{cycle}`, newest first |
 
 ### `find_routes`
 
 Parameter semantics:
 
-- `departure` / `arrival`: airport ICAO or waypoint ident (case-insensitive).
+- `departure` / `arrival`: airport ICAO codes (case-insensitive). Waypoint endpoints are not supported.
 - `min_fl` / `max_fl`: inclusive cruise flight-level range (hundreds of feet), e.g. `min_fl=300, max_fl=400` for FL300–FL400; giving only one is a single level (e.g. only `min_fl=350` means FL350). Setting either enables altitude-band / MORA constraint filtering.
 - `level`: `none` (default) | `low` (prefer Victor low airways) | `high` (prefer Jet high airways); matched case-sensitively, and any other value (including mixed case such as `Low`) is rejected. An empty string is treated as `none`.
 - `k`: number of candidate routes (Yen K-shortest), default 1, must be ≥ 1.

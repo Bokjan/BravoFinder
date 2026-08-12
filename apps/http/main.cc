@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
 
   const char* env_dir = bf::GetEnv("BRAVOFINDER_NAVDATA");
   std::string db_dir = env_dir != nullptr ? env_dir : "navdata";
-  std::string host = "0.0.0.0";
+  std::string host = "127.0.0.1";
   int port = bf::http_server::kDefaultPort;
   int worker_threads = static_cast<int>(std::thread::hardware_concurrency());
   if (worker_threads <= 0) {

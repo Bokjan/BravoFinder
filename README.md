@@ -8,7 +8,7 @@ A realistic, fully-compliant flight-route engine in modern C++20 — plus a CLI,
 
 - **It's a library first.** `libs/engine/` is a self-contained C++20 static library (`bf::bravofinder`) with no JSON or network dependency — embed it in any host app. The CLI, MCP server, and REST server are just consumers of it.
 - **Routes that read like filed flight plans.** v3 doesn't draw the geographic shortest path; it respects airway directionality, high/low airway levels, segment altitude bands, and terminal procedures (SID/STAR/approach).
-- **Pluggable navigation data.** One `Loader` interface abstracts the source format — X-Plane 12 `.dat` (default), DFD SQLite (`dfd1`/`dfd2`), and Fenix A320. Support a new format without touching the engine.
+- **Pluggable navigation data.** One `Loader` interface abstracts the source format — X-Plane 12 `.dat` (default), DFD SQLite (`dfd1`/`dfd2`), and Fenix A320. Support a new format without touching the engine. Loaders are not compliance-equivalent: `NavDatabase::capabilities()` / `CapabilitiesForLoader` advertise what each source can faithfully express (see [Loader capabilities](#loader-capabilities)).
 - **Fast startup.** Compile a portable, little-endian binary cache (`.bfdb`) once per AIRAC cycle; subsequent loads are near-instant.
 
 ## Library
@@ -36,6 +36,18 @@ bf route EGLL LFPG --format json --level high -k 3
 
 Navigation data is **not** included. It is copyrighted (Navigraph / Jeppesen), licensed for recreational simulation use only, and must not be redistributed. Place your local data under `navdata/` (git-ignored).
 
+### Loader capabilities
+
+Not every loader carries the same fidelity. `bf::CapabilitiesForLoader` (and `NavDatabase::capabilities()` after open) exposes a small matrix so UIs and gateways do not assume every source is compliance-equivalent. `FindRoutes` does not currently auto-degrade constraints from these flags.
+
+| Loader | Airway direction (F/B) | Altitude bands (base/top FL) | MORA grid | MSA sectors |
+|--------|:----------------------:|:----------------------------:|:---------:|:-----------:|
+| `xplane12` | yes | yes | yes | yes |
+| `dfd1` / `dfd2` | yes | yes | yes | yes |
+| `fenix` | no (edges treated bidirectional) | no | yes (when present in `.db3`) | no |
+
+Fenix in particular lacks per-leg airway direction and altitude bands in its schema, and does not publish MSA — prefer X-Plane 12 or DFD when those constraints matter.
+
 ## Usage
 
 ### CLI (`bf`)
@@ -58,13 +70,14 @@ bf parse-route "KJFK SID CANDR Q480 HOTEE J80 MCI ... STAR KLAX" --db navdata/na
 # Look up navigation data (batch ids; JSON emits a parallel array)
 bf query waypoint --db navdata/nav_2601.bfdb NINOX DGC
 bf query airport  --db navdata/nav_2601.bfdb KJFK KLAX
+bf query msa      --db navdata/nav_2601.bfdb KJFK
 ```
 
-Endpoints are airport ICAO codes or waypoint idents. When procedure data is present, routes name the SID/STAR used and show `SID`/`STAR` connectors; `--format json` adds per-leg distances and an ordered `points[]` array. Run `bf route --help` / `bf query --help` for the full option list (runways, SID/STAR selection, via/avoid points, reproducible `--seed`, cache load mode).
+Endpoints are airport ICAO codes. When procedure data is present, routes name the SID/STAR used and show `SID`/`STAR` connectors; `--format json` adds per-leg distances and an ordered `points[]` array. Run `bf route --help` / `bf query --help` for the full option list (runways, SID/STAR selection, via/avoid points, reproducible `--seed`, cache load mode).
 
 ### MCP server (`bf-mcp`)
 
-Exposes `bf route` and `bf query` as MCP tools for LLM clients, over **stdio** (default) or **HTTP** (`--transport http`, Streamable HTTP 2025-03-26). It serves a directory of `.bfdb` caches and opens multiple AIRAC cycles lazily; every tool takes an optional `cycle`. Tools: `find_routes`, `parse_route`, the `lookup_*` batch lookups, `lookup_procedure_legs`, and `list_cycles`. Full reference and client config: [apps/mcp/README.md](apps/mcp/README.md).
+Exposes `bf route` and `bf query` as MCP tools for LLM clients, over **stdio** (default) or **HTTP** (`--transport http`, Streamable HTTP 2025-03-26). It serves a directory of `.bfdb` caches and opens multiple AIRAC cycles lazily; every tool takes an optional `cycle`. Tools: `find_routes`, `parse_route`, the `lookup_*` batch lookups (including `lookup_msa`), `lookup_procedure_legs`, and `list_cycles`. Full reference and client config: [apps/mcp/README.md](apps/mcp/README.md).
 
 ```bash
 BRAVOFINDER_NAVDATA=navdata bf-mcp                       # stdio, local client
@@ -96,4 +109,4 @@ A `tsan` preset verifies concurrency safety: `cmake --preset tsan && cmake --bui
 
 ## License
 
-Dual-licensed: the engine (`libs/engine/`) is **LGPL-3.0-or-later** ([`libs/engine/LICENSE`](libs/engine/LICENSE)); everything else is **MIT** ([`LICENSE.MIT`](LICENSE.MIT)). Third-party licenses: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). The engine is statically linked into `bf`/`bf-http`/`bf-mcp`; under the LGPL, modifying it means you may relink, and the complete corresponding source ships with every release. Contributing: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+Dual-licensed: the engine (`libs/engine/`) is **LGPL-3.0-or-later** ([`libs/engine/LICENSE`](libs/engine/LICENSE)); everything else is **MIT** ([`LICENSE.MIT`](LICENSE.MIT)). Third-party licenses: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). The engine is statically linked into `bf`/`bf-http`/`bf-mcp`; under the LGPL, modifying it means you may relink against a modified engine. The complete corresponding source is the git tag that matches the release (and the SDK ships `libs/engine/LICENSE` + `LICENSE.GPLv3` with headers and the static library). Contributing: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).

@@ -5,7 +5,7 @@ BravoFinder's HTTP query server: it exposes the `bf route` and `bf query` capabi
 ## What it is
 
 - Transport: **HTTP/1.1 + JSON** over a hand-rolled [libuv](https://github.com/libuv/libuv) (async I/O + worker threadpool) and [llhttp](https://github.com/nodejs/llhttp) (request parser) stack. One event-loop thread does all I/O; each route computation is offloaded to the threadpool, so one loop scales.
-- Capabilities: the nine query endpoints below (mirroring the CLI `route` / `query` subcommands), plus `/v1/cycles`, `/v1/version`, and the `/healthz` / `/readyz` probes.
+- Capabilities: the ten query endpoints below (mirroring the CLI `route` / `query` subcommands), plus `/v1/cycles`, `/v1/version`, and the `/healthz` / `/readyz` probes.
 - Data: pointed at a **directory** of prebuilt `.bfdb` caches; serves one or more AIRAC cycles from it. It never parses raw data or writes files.
 
 ## Build and run
@@ -15,10 +15,10 @@ cmake --preset release && cmake --build --preset release
 # binary: build/release/apps/http/bf-http
 
 # The directory is --db-dir, else BRAVOFINDER_NAVDATA, else navdata/.
-bf-http --db-dir /path/to/caches --host 0.0.0.0 --port 8080
+bf-http --db-dir /path/to/caches --host 127.0.0.1 --port 8080
 ```
 
-Flags: `--db-dir DIR`, `--host` (default `0.0.0.0`), `--port` (default `8080`), `--worker-threads N` (libuv threadpool size, default = hardware concurrency), `--max-body BYTES` (request body cap, default 1 MiB), `--io-timeout SEC` (header/body read + idle keep-alive timeout, default 30), and `--version` (prints the program version and exits). It fails fast (non-zero exit, reason on stderr) if the directory holds no usable `nav_<cycle>.bfdb`.
+Flags: `--db-dir DIR`, `--host` (default `127.0.0.1`; bind loopback by default — pass `0.0.0.0` only when you intentionally expose the port on all interfaces; there is no built-in auth), `--port` (default `8080`), `--worker-threads N` (libuv threadpool size, default = hardware concurrency), `--max-body BYTES` (request body cap, default 1 MiB), `--io-timeout SEC` (header/body read + idle keep-alive timeout, default 30), `--cifp-load` (`on-demand` or `eager`), and `--version` (prints the program version and exits). It fails fast (non-zero exit, reason on stderr) if the directory holds no usable `nav_<cycle>.bfdb`.
 
 ## Conventions
 
@@ -41,6 +41,7 @@ Flags: `--db-dir DIR`, `--host` (default `0.0.0.0`), `--port` (default `8080`), 
 | POST | `/v1/airways` | batch airway lookup | 200 |
 | POST | `/v1/navaid-detail` | batch navaid detail (grouped) | 200 |
 | POST | `/v1/holds` | batch holding-pattern lookup (grouped) | 200 |
+| POST | `/v1/msa` | batch terminal-area MSA lookup | 200 |
 | GET | `/v1/cycles` | list servable AIRAC cycles | 200 |
 | GET | `/v1/version` | program version (semver) | 200 |
 | GET | `/healthz` | liveness (process is up) | 200 |
@@ -65,7 +66,7 @@ Request body (`departure` and `arrival` required, the rest optional):
 }
 ```
 
-- `departure` / `arrival`: airport ICAO or waypoint ident (case-insensitive).
+- `departure` / `arrival`: airport ICAO codes (case-insensitive). Waypoint endpoints are not supported.
 - `min_fl` / `max_fl`: inclusive cruise flight-level range (hundreds of feet); give only one for a single level. Setting either enables altitude-band / MORA filtering.
 - `level`: `none` (default) | `low` (prefer Victor low airways) | `high` (prefer Jet high airways); matched case-sensitively, and any other value (including mixed case such as `Low`) is rejected with a 400. An empty string is treated as `none`.
 - `k`: number of candidate routes (Yen K-shortest), default 1, must be ≥ 1.
@@ -114,16 +115,18 @@ Request (all four non-grouped and grouped lookups): `{"ids": ["...", "..."]}`. T
 
 | Endpoint | Element on hit | On miss |
 |---|---|---|
-| `/v1/airports` | `{icao, arinc424_icao_code, lat, lon, elevation_ft, has_procedures}` | `null` |
+| `/v1/airports` | `{icao, arinc424_icao_code, lat, lon, elevation_ft, has_procedures, procedures_corrupt}` | `null` |
 | `/v1/procedures` | `{icao, procedures:[{type, name, transition, runway}]}` | `null` |
 | `/v1/airways` | `{name, segments:[{from, to, distance_nm, high, base_fl, top_fl}]}` | `null` |
 | `/v1/waypoints` | `WaypointInfo[]` — `{ident, arinc424_icao_code, lat, lon, kind, on_network}` | `[]` |
 | `/v1/navaid-detail` | `NavaidDetailInfo[]` — `{ident, arinc424_icao_code, kind, elev_ft, freq_raw, range_nm, heading}` | `[]` |
 | `/v1/holds` | `HoldInfo[]` — `{fix_ident, fix_arinc424_icao_code, airport_icao, inbound_course, leg_time_min, leg_dist_nm, turn_dir, min_alt_ft, max_alt_ft, speed_limit_kt}` | `[]` |
+| `/v1/msa` | `{icao, sectors:[{center_ident, center_arinc424_icao_code, arcs:[{bearing_from, alt_100ft, radius_nm}]}]}` | `null` |
 
 - The grouped lookups (`waypoints` / `navaid-detail` / `holds`) return an inner **array** per id (an ident recurs across regions), empty when unmatched.
 - `freq_raw` is kHz for NDBs, MHz×100 for VOR/DME/ILS. `airport_icao` is `ENRT` for enroute holds.
 - Status: missing/non-string `ids` → **400**; **every** id missing → **404** (a partial hit is 200).
+- MSA may be empty for every airport when the source loader lacks MSA data (e.g. Fenix); see `NavDatabase::capabilities().msa_sectors`.
 
 ### POST `/v1/procedure-legs`
 
@@ -170,7 +173,7 @@ Every non-2xx response body is `{"error":"<message>"}`.
 | **417** | `Expect: 100-continue` (interim 100 is not supported). |
 | **400** | `Transfer-Encoding: chunked` request body (refused; the server only accepts `Content-Length`). |
 | **500** | Unexpected server error. |
-| **503** | `/readyz` only: the newest cycle cannot be opened. |
+| **503** | `/readyz` when the newest cycle cannot be opened; also returned when the server is busy (inflight work queue full or `uv_queue_work` failed) with `{"error":"server busy"}`. |
 
 The distinction that matters: **400** = "you sent it wrong"; **422** = "you sent it right, but there is no answer".
 

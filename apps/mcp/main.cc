@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
   std::string db_dir = env ? env : "navdata";
 
   std::string transport = "stdio";
-  std::string host = "0.0.0.0";
+  std::string host = "127.0.0.1";
   int port = bf::http_server::kDefaultMcpPort;
   int worker_threads = static_cast<int>(std::thread::hardware_concurrency());
   if (worker_threads <= 0) {

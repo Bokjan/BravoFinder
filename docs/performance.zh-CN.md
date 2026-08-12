@@ -42,6 +42,8 @@ X-Plane 数据的解析 + 建图有固定成本（ARINC 424 解析尤重）。`b
 
 **优化分解**：四个版本同机、同数据、同工作负载对照（各版算法源码已固化入库，见 `bench/variants/`，用 `bench/decompose.sh` 一键复现，无需 checkout git 历史）：
 
+> **注意**：`bench/variants/` 是历史冻结快照，只用于复现下面这张分解表。测当前 HEAD 的性能请用 `bench/route_bench` 或 `bf route` 在 release 构建上重测，不要拿 variants 二进制与 HEAD 对比。
+
 - **baseline** —源自 commit `2918c86`（Yen，无 heuristic memoization、无 Lawler）；
 - **+memoize** —源自 commit `ee3afb4`（多目标 heuristic 跨 spur memoization）；
 - **+Lawler** —源自 commit `f7a42c9`（再叠加 Lawler：只从 deviation index 起 spur）；
