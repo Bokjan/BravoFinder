@@ -274,21 +274,13 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
   }
 
   sqlite3_stmt* stmt = s.value().get();
-  int skipped_long = 0;
-  PointDeduper seen;
+  PointDeduper seen(kLoaderName);
   Result<void> rows = ForEachRow(stmt, [&] {
     int id = ColumnInt(stmt, 0);
     std::string ident_str = ColumnText(stmt, 1);
     double lat = ColumnDouble(stmt, 2);
     double lon = ColumnDouble(stmt, 3);
     int nav_id = ColumnOptInt(stmt, 4);
-
-    if (ident_str.size() > FixedIdent::kIdentCap) {
-      BF_LOG_WARN("fenix: skipping waypoint '{}' (ident too long for FixedIdent, {} > {})",
-                  ident_str, ident_str.size(), FixedIdent::kIdentCap);
-      ++skipped_long;
-      return;
-    }
 
     std::string icao_code;
     auto rit = region_by_id.find(id);
@@ -307,6 +299,7 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
     // Fenix lists some points more than once (same ident/region/position under
     // different IDs); keep one vertex per physical point. Airway and procedure
     // references carry the row's position, so they resolve to the kept vertex.
+    // An over-long ident is skipped (with a warning) by the deduper.
     Ident key{ident_str, icao_code};
     const Coordinate coord{lat, lon};
     if (seen.Insert(key, coord)) {
@@ -315,9 +308,6 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
   });
   if (!rows) {
     return Result<void>::Err(rows.error());
-  }
-  if (skipped_long > 0) {
-    BF_LOG_WARN("fenix: {} waypoint(s) skipped (ident too long for FixedIdent)", skipped_long);
   }
   return Result<void>::Ok();
 }
@@ -469,17 +459,17 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
       return;
     }
 
-    AirwayConnection conn;
-    conn.from = fm->second.first;
-    conn.to = to->second.first;
-    conn.from_hint = fm->second.second;
-    conn.to_hint = to->second.second;
-    conn.segment.name = nm->second;
-    conn.segment.level = ParseAirwayLevel(level);
+    AirwayConnection leg;
+    leg.from = fm->second.first;
+    leg.to = to->second.first;
+    leg.from_hint = fm->second.second;
+    leg.to_hint = to->second.second;
+    leg.segment.name = nm->second;
+    leg.segment.level = ParseAirwayLevel(level);
     // Fenix schema does not encode per-segment direction restrictions;
     // default to bidirectional as in earth_awy.dat rows without 'F'/'B'.
-    conn.segment.direction = AirwayDirection::kBoth;
-    data.airways.push_back(conn);
+    leg.segment.direction = AirwayDirection::kBoth;
+    data.airways.push_back(std::move(leg));
   });
   if (!rows) {
     return Result<void>::Err(rows.error());
@@ -1092,6 +1082,8 @@ Result<std::vector<AirportProcedureData>> FenixLoader::LoadProcedures(
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(out));
 }
 
+namespace {
+
 // Load procedures for a single airport (LoadProcedure path).  Delegates to the
 // shared BuildAirportProcedures core with a one-element airport set, so it
 // produces byte-identical structures to the bulk LoadProcedures path.
@@ -1124,6 +1116,8 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
   }
   return it->second;
 }
+
+}  // namespace
 
 std::optional<CifpData> FenixLoader::LoadProcedure(const std::string& source_dir,
                                                    const std::string& icao) const {

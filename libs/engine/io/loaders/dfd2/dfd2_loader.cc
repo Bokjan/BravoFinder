@@ -92,7 +92,12 @@ Result<void> CheckV2Header(sqlite3* conn) {
   std::string dataset;
   if (stmt) {
     Result<bool> row = Step(stmt.value().get());
-    if (row && row.value()) {
+    if (!row) {
+      // The table exists but cannot be read (I/O error, corruption): report that,
+      // not "wrong database".
+      return Result<void>::Err(row.error());
+    }
+    if (row.value()) {
       dataset = ColumnText(stmt.value().get(), 0);
     }
   }
@@ -124,21 +129,23 @@ WaypointKind NavaidKindFromClass(const std::string& cls) {
 }
 
 // Parse a v2 MORA starting coordinate: VarChar like "N07"/"S90"/"W090"/"E179"
-// -> signed integer degrees.
-int ParseHemiCoord(const std::string& s) {
+// -> signed integer degrees, or nullopt when malformed (the caller skips the
+// row rather than filing its 30 cells under 0 degrees).
+std::optional<int> ParseHemiCoord(const std::string& s) {
   if (s.size() < 2) {
-    return 0;
+    return std::nullopt;
   }
   const char hemi = s[0];
   // Only N/S/E/W are valid hemispheres; anything else is malformed. Guarding it
   // stops an unexpected leading byte from being treated as a positive N/E value.
   if (hemi != 'N' && hemi != 'S' && hemi != 'E' && hemi != 'W') {
-    return 0;
+    return std::nullopt;
   }
   int value = 0;
-  const auto [ptr, ec] = std::from_chars(s.data() + 1, s.data() + s.size(), value);
-  if (ec != std::errc{}) {
-    return 0;  // non-numeric magnitude: let the caller skip this MORA row
+  const char* end = s.data() + s.size();
+  const auto [ptr, ec] = std::from_chars(s.data() + 1, end, value);
+  if (ec != std::errc{} || ptr != end) {
+    return std::nullopt;  // non-numeric or trailing junk ("N07X")
   }
   if (hemi == 'S' || hemi == 'W') {
     return -value;
@@ -452,8 +459,13 @@ Result<void> LoadGridMora(sqlite3* conn, NavData& data) {
     if (!q.empty()) {
       return;  // A/B/C/D quadrant: skip (blank row covers this cell at 1 degree)
     }
-    const int lat = ParseHemiCoord(ColumnText(stmt, 0));
-    const int lon0 = ParseHemiCoord(ColumnText(stmt, 1));
+    const std::optional<int> lat = ParseHemiCoord(ColumnText(stmt, 0));
+    const std::optional<int> lon0 = ParseHemiCoord(ColumnText(stmt, 1));
+    if (!lat || !lon0) {
+      BF_LOG_WARN("dfd2: skipping MORA row with malformed start '{}'/'{}'", ColumnText(stmt, 0),
+                  ColumnText(stmt, 1));
+      return;
+    }
     for (int i = 0; i < 30; ++i) {
       const std::string v = ColumnText(stmt, 3 + i);
       if (v.empty() || v == "UNK") {
@@ -465,7 +477,7 @@ Result<void> LoadGridMora(sqlite3* conn, NavData& data) {
         continue;  // non-numeric cell (not empty / not "UNK"): skip, keep no MORA
       }
       if (value > 0) {
-        data.mora.SetCell(lat, lon0 + i, static_cast<int16_t>(value));
+        data.mora.SetCell(*lat, *lon0 + i, static_cast<int16_t>(value));
       }
     }
   });
@@ -652,7 +664,7 @@ Result<std::unordered_map<std::string, std::vector<Runway>>> LoadAllRunways(sqli
   std::unordered_map<std::string, std::vector<Runway>> by_airport;
   const std::string sql = std::format(
       "SELECT airport_identifier, runway_identifier, runway_latitude, runway_longitude, "
-      "landing_threshold_elevation FROM {} ORDER BY airport_identifier",
+      "landing_threshold_elevation FROM {} ORDER BY airport_identifier, runway_identifier",
       kTblRunways);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
@@ -751,10 +763,11 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
     }
     flush_current();
   }
-  Result<SqliteStmt> rs =
-      Prepare(conn, std::format("SELECT runway_identifier, runway_latitude, runway_longitude, "
-                                "landing_threshold_elevation FROM {} WHERE airport_identifier = ?",
-                                kTblRunways));
+  Result<SqliteStmt> rs = Prepare(
+      conn, std::format("SELECT runway_identifier, runway_latitude, runway_longitude, "
+                        "landing_threshold_elevation FROM {} WHERE airport_identifier = ? ORDER BY "
+                        "runway_identifier",
+                        kTblRunways));
   if (rs) {
     sqlite3_stmt* stmt = rs.value().get();
     sqlite3_bind_text(stmt, 1, airport.c_str(), -1, SQLITE_TRANSIENT);
@@ -803,14 +816,18 @@ Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
     if (row.value()) {
       const std::string cyc = ColumnText(s.value().get(), 0);
       unsigned int cycle = 0;
-      std::from_chars(cyc.data(), cyc.data() + cyc.size(), cycle);
-      data.cycle = cycle;
+      // A non-numeric (or partially numeric) cycle leaves 0 ("no AIRAC
+      // provenance") rather than a half-parsed value. (Same as dfd1.)
+      const auto [ptr, ec] = std::from_chars(cyc.data(), cyc.data() + cyc.size(), cycle);
+      if (ec == std::errc{} && ptr == cyc.data() + cyc.size()) {
+        data.cycle = cycle;
+      }
     }
   }
 
   // Each per-table loader returns Result<void>; a step error (corruption, IO)
   // propagates as a load failure rather than silently producing partial data.
-  PointDeduper seen;
+  PointDeduper seen(kLoaderName);
   Result<void> load = Result<void>::Ok();
   load = LoadEnrouteWaypoints(conn.value(), data, seen);
   if (!load) {
@@ -910,6 +927,12 @@ Result<std::vector<AirportProcedureData>> Dfd2Loader::LoadProcedures(
     return Result<std::vector<AirportProcedureData>>::Err(runways.error());
   }
   MergeRunways(merged, runways.value());
+  // MergeRunways appends runway-only airports in hash-map order; sort so the
+  // output (and the .bfdb built from it) is reproducible run to run.
+  std::sort(merged.begin(), merged.end(),
+            [](const AirportProcedureData& a, const AirportProcedureData& b) {
+              return a.first < b.first;
+            });
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(merged));
 }
 

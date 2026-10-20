@@ -2,8 +2,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <random>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "io/cache/byte_io.h"
+#include "io/cache/cifp_codec.h"
 #include "io/cache/graph_codec.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/nav_detail_codec.h"
@@ -54,3 +58,18 @@ TEST_CASE("cache decoders: random and truncated bytes never crash", "[unit][code
 }
 
 }  // namespace
+
+TEST_CASE("CifpCodec::Encode rejects airport keys the reader cannot open", "[unit][codec_fuzz]") {
+  // OpenSection keys segments by FixedName8 (<= 7 chars) and rejects anything
+  // else, so a stray CIFP file stem written through would make a cache that can
+  // never be opened. The encoder must refuse it (and duplicates) up front.
+  auto encode = [](std::vector<std::pair<std::string, bf::CifpData>> in) {
+    std::vector<uint8_t> out;
+    bf::ByteWriter w(out);
+    bf::StringPool pool;
+    return bf::CifpCodec::Encode(in, w, pool);
+  };
+  CHECK(encode({{"KJFK", {}}, {"KLAX", {}}}));
+  CHECK_FALSE(encode({{"KJFK.backup", {}}}));
+  CHECK_FALSE(encode({{"KJFK", {}}, {"KJFK", {}}}));
+}

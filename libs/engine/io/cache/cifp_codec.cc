@@ -279,6 +279,26 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
     const std::string* icao;
     std::vector<uint8_t> body;
   };
+  // Reject an airport key OpenSection would refuse (it must form a FixedName8
+  // lookup key) here, at write time: otherwise `bf build` succeeds and writes a
+  // cache that can never be opened, and rebuilding as the error suggests repeats
+  // it. Duplicate keys are rejected too (lookup would pick one arbitrarily).
+  std::vector<std::string_view> keys;
+  keys.reserve(procedures.size());
+  for (const auto& [icao, data] : procedures) {
+    if (Result<FixedName8> key = FixedName8::From(icao); !key) {
+      return Result<uint32_t>::Err(
+          Error(ErrorCode::kInvalidArgument,
+                std::format("cannot encode CIFP for airport '{}': {}", icao, key.error().message)));
+    }
+    keys.push_back(icao);
+  }
+  std::sort(keys.begin(), keys.end());
+  if (auto dup = std::adjacent_find(keys.begin(), keys.end()); dup != keys.end()) {
+    return Result<uint32_t>::Err(
+        Error(ErrorCode::kInvalidArgument, std::format("duplicate CIFP airport '{}'", *dup)));
+  }
+
   std::vector<Entry> entries;
   entries.reserve(procedures.size());
   for (const auto& [icao, data] : procedures) {

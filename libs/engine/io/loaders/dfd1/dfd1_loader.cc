@@ -98,7 +98,12 @@ Result<void> CheckV1Header(sqlite3* conn) {
   std::string version;
   if (stmt) {
     Result<bool> row = Step(stmt.value().get());
-    if (row && row.value()) {
+    if (!row) {
+      // The table exists but cannot be read (I/O error, corruption): report that,
+      // not "wrong database".
+      return Result<void>::Err(row.error());
+    }
+    if (row.value()) {
       version = ColumnText(stmt.value().get(), 0);
     }
   }
@@ -144,16 +149,8 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, PointDeduper& se
     return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  int skipped = 0;
-  Result<void> result = ForEachRow(stmt, [&]() {
-    std::string id = ColumnText(stmt, 1);
-    if (id.size() > FixedIdent::kIdentCap) {
-      BF_LOG_WARN("dfd1: skipping waypoint '{}' (ident too long for FixedIdent, {} > {})", id,
-                  id.size(), FixedIdent::kIdentCap);
-      ++skipped;
-      return;
-    }
-    const Ident key(id, ColumnText(stmt, 0));
+  return ForEachRow(stmt, [&]() {
+    const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
     const std::optional<Coordinate> coord = ColumnCoord(stmt, 2, 3);
     if (!coord) {
       BF_LOG_WARN("dfd1: skipping '{}/{}' (no position)", key.ident, key.arinc424_icao_code);
@@ -163,10 +160,6 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, PointDeduper& se
       data.waypoints.push_back(Waypoint{key, *coord, WaypointKind::kFix});
     }
   });
-  if (skipped > 0) {
-    BF_LOG_WARN("dfd1: {} waypoint(s) skipped (ident too long for FixedIdent)", skipped);
-  }
-  return result;
 }
 
 Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, PointDeduper& seen) {
@@ -184,16 +177,8 @@ Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, PointDeduper& s
     return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
-  int skipped = 0;
-  Result<void> result = ForEachRow(stmt, [&]() {
-    std::string id = ColumnText(stmt, 1);
-    if (id.size() > FixedIdent::kIdentCap) {
-      BF_LOG_WARN("dfd1: skipping terminal waypoint '{}' (ident too long for FixedIdent, {} > {})",
-                  id, id.size(), FixedIdent::kIdentCap);
-      ++skipped;
-      return;
-    }
-    const Ident key(id, ColumnText(stmt, 0));
+  return ForEachRow(stmt, [&]() {
+    const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
     const std::optional<Coordinate> coord = ColumnCoord(stmt, 2, 3);
     if (!coord) {
       BF_LOG_WARN("dfd1: skipping '{}/{}' (no position)", key.ident, key.arinc424_icao_code);
@@ -203,10 +188,6 @@ Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, PointDeduper& s
       data.waypoints.push_back(Waypoint{key, *coord, WaypointKind::kFix});
     }
   });
-  if (skipped > 0) {
-    BF_LOG_WARN("dfd1: {} terminal waypoint(s) skipped (ident too long for FixedIdent)", skipped);
-  }
-  return result;
 }
 
 Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, PointDeduper& seen) {
@@ -559,7 +540,7 @@ Result<NavData> Dfd1Loader::LoadNavData(const std::string& source_dir) const {
 
   // Each per-table loader returns Result<void>; a step error (corruption, IO)
   // propagates as a load failure rather than silently producing partial data.
-  PointDeduper seen;
+  PointDeduper seen(kLoaderName);
   Result<void> load = Result<void>::Ok();
   load = LoadEnrouteWaypoints(conn.value(), data, seen);
   if (!load) {
@@ -666,6 +647,44 @@ void FillProcExtras(sqlite3_stmt* stmt, const ProcCols& c, ProcedureLeg& leg) {
   }
 }
 
+// Emit one Procedure leg from a row. Shared by the full-table and on-demand
+// paths so the two cannot drift.
+void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, Procedure& proc,
+               std::optional<int>& prev_seqno) {
+  const std::string wp_ident = ColumnText(stmt, c.wp_ident);
+  Result<FixedIdent> fixed = FixedIdent::FromParts(wp_ident, ColumnText(stmt, c.wp_icao));
+  if (!fixed) {
+    BF_LOG_WARN("dfd1: skipping procedure leg with ident '{}': {}", wp_ident,
+                fixed.error().message);
+    return;
+  }
+  ProcedureLeg leg;
+  leg.fix = std::move(fixed).value();
+  leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
+  leg.course_deg = static_cast<float>(ColumnDouble(stmt, c.course));  // DFD: degrees (not tenths)
+  // distance_flag 'D'=distance in nm, 'T'=time (no field for it), blank=none.
+  const std::string flag = ColumnText(stmt, c.dist_flag);
+  if (EqualsCode(flag, kDistTimeFlagDistance)) {
+    leg.distance_nm = static_cast<float>(ColumnDouble(stmt, c.dist_value));
+  }
+  leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
+                                 ColumnInt(stmt, c.alt2)));
+  FillProcExtras(stmt, c, leg);
+  proc.legs.push_back(std::move(leg));
+  // Consume the seqno column (previously relied on only by ORDER BY) to validate
+  // that legs arrive non-decreasing within a procedure -- the order the
+  // partitioning depends on. A decrease means a query that dropped the intended
+  // ORDER BY or corrupt source rows; warn rather than silently mispartition.
+  // prev_seqno is reset at each procedure flush.
+  const int seqno = ColumnInt(stmt, c.seqno);
+  if (prev_seqno && seqno < *prev_seqno) {
+    BF_LOG_WARN("dfd1: procedure {}/{}/{} leg seqno decreased ({} after {})",
+                ColumnText(stmt, c.airport), ColumnText(stmt, c.proc),
+                ColumnText(stmt, c.transition), seqno, *prev_seqno);
+  }
+  prev_seqno = seqno;
+}
+
 // Append legs/runways from one procedure table into `out` (per-airport). `type`
 // is fixed by the caller (sids->kSid, etc.). One full-table scan per table: the
 // rows are ordered by (airport, name, transition, route_type, seqno), so a
@@ -746,36 +765,7 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
       current.route_type = ParseRouteTypeToken(route);
       have_current = true;
     }
-    ProcedureLeg leg;
-    std::string wp_ident = ColumnText(stmt, c.wp_ident);
-    Result<FixedIdent> fixed = FixedIdent::FromParts(wp_ident, ColumnText(stmt, c.wp_icao));
-    if (!fixed) {
-      BF_LOG_WARN("dfd1: skipping procedure leg with ident '{}': {}", wp_ident,
-                  fixed.error().message);
-      return;
-    }
-    leg.fix = std::move(fixed).value();
-    leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
-    leg.course_deg = static_cast<float>(ColumnDouble(stmt, c.course));  // DFD: degrees (not tenths)
-    // distance_flag 'D'=distance in nm, 'T'=time (no field for it), blank=none.
-    const std::string flag = ColumnText(stmt, c.dist_flag);
-    if (EqualsCode(flag, kDistTimeFlagDistance)) {
-      leg.distance_nm = static_cast<float>(ColumnDouble(stmt, c.dist_value));
-    }
-    leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
-                                   ColumnInt(stmt, c.alt2)));
-    FillProcExtras(stmt, c, leg);
-    current.legs.push_back(std::move(leg));
-    // Consume the seqno column (previously relied on only by ORDER BY) to validate
-    // that legs arrive non-decreasing within a procedure -- the order the
-    // partitioning depends on. A decrease means a query that dropped the intended
-    // ORDER BY or corrupt source rows; warn rather than silently mispartition.
-    const int seqno = ColumnInt(stmt, c.seqno);
-    if (prev_seqno && seqno < *prev_seqno) {
-      BF_LOG_WARN("dfd1: procedure {}/{}/{} leg seqno decreased ({} after {})", airport, name,
-                  trans, seqno, *prev_seqno);
-    }
-    prev_seqno = seqno;
+    AppendLeg(stmt, c, current, prev_seqno);
   });
   if (!rows) {
     return Result<void>::Err(rows.error());
@@ -790,10 +780,11 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
 Result<std::unordered_map<std::string, std::vector<Runway>>> LoadAllRunways(sqlite3* conn) {
   std::unordered_map<std::string, std::vector<Runway>> by_airport;
   Result<SqliteStmt> s = Prepare(
-      conn, std::format(
-                "SELECT airport_identifier, runway_identifier, runway_latitude, runway_longitude, "
-                "landing_threshold_elevation FROM {} ORDER BY airport_identifier",
-                kTblRunways));
+      conn,
+      std::format(
+          "SELECT airport_identifier, runway_identifier, runway_latitude, runway_longitude, "
+          "landing_threshold_elevation FROM {} ORDER BY airport_identifier, runway_identifier",
+          kTblRunways));
   if (!s) {
     return Result<std::unordered_map<std::string, std::vector<Runway>>>::Err(s.error());
   }
@@ -867,6 +858,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
     current.type = type;
     bool have_current = false;
     std::string cur_name, cur_trans, cur_route;
+    std::optional<int> prev_seqno;  // reset per procedure; consumed by AppendLeg's order check
     auto flush_current = [&]() {
       if (have_current && !current.legs.empty()) {
         cifp.procedures.push_back(std::move(current));
@@ -874,6 +866,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
       current = Procedure{};
       current.type = type;
       have_current = false;
+      prev_seqno.reset();
     };
     Result<void> rows = ForEachRow(stmt, [&]() {
       const std::string name = ColumnText(stmt, c.proc);
@@ -896,25 +889,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
         current.route_type = ParseRouteTypeToken(route);
         have_current = true;
       }
-      ProcedureLeg leg;
-      std::string wp_ident2 = ColumnText(stmt, c.wp_ident);
-      Result<FixedIdent> fixed = FixedIdent::FromParts(wp_ident2, ColumnText(stmt, c.wp_icao));
-      if (!fixed) {
-        BF_LOG_WARN("dfd1: skipping procedure leg with ident '{}': {}", wp_ident2,
-                    fixed.error().message);
-        return;
-      }
-      leg.fix = std::move(fixed).value();
-      leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
-      leg.course_deg = static_cast<float>(ColumnDouble(stmt, c.course));
-      const std::string flag = ColumnText(stmt, c.dist_flag);
-      if (EqualsCode(flag, kDistTimeFlagDistance)) {
-        leg.distance_nm = static_cast<float>(ColumnDouble(stmt, c.dist_value));
-      }
-      leg.set_alt(ParseAltConstraint(ColumnText(stmt, c.alt_desc), ColumnInt(stmt, c.alt1),
-                                     ColumnInt(stmt, c.alt2)));
-      FillProcExtras(stmt, c, leg);
-      current.legs.push_back(std::move(leg));
+      AppendLeg(stmt, c, current, prev_seqno);
     });
     if (!rows) {
       return std::nullopt;  // step error: treat as load failure for this airport
@@ -922,10 +897,11 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
     flush_current();
   }
   // Runways for this airport.
-  Result<SqliteStmt> rs =
-      Prepare(conn, std::format("SELECT runway_identifier, runway_latitude, runway_longitude, "
-                                "landing_threshold_elevation FROM {} WHERE airport_identifier = ?",
-                                kTblRunways));
+  Result<SqliteStmt> rs = Prepare(
+      conn, std::format("SELECT runway_identifier, runway_latitude, runway_longitude, "
+                        "landing_threshold_elevation FROM {} WHERE airport_identifier = ? ORDER BY "
+                        "runway_identifier",
+                        kTblRunways));
   if (rs) {
     sqlite3_stmt* stmt = rs.value().get();
     sqlite3_bind_text(stmt, 1, airport.c_str(), -1, SQLITE_TRANSIENT);
@@ -1004,6 +980,12 @@ Result<std::vector<AirportProcedureData>> Dfd1Loader::LoadProcedures(
     return Result<std::vector<AirportProcedureData>>::Err(runways.error());
   }
   MergeRunways(merged, runways.value());
+  // MergeRunways appends runway-only airports in hash-map order; sort so the
+  // output (and the .bfdb built from it) is reproducible run to run.
+  std::sort(merged.begin(), merged.end(),
+            [](const AirportProcedureData& a, const AirportProcedureData& b) {
+              return a.first < b.first;
+            });
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(merged));
 }
 

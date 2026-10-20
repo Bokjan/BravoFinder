@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/loaders/xplane12/xplane12_loader.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
@@ -12,8 +13,10 @@
 #include <unordered_map>
 #include <utility>
 
+#include "core/base/log.h"
 #include "core/domain/airway.h"
 #include "core/domain/arinc_codes.h"
+#include "core/domain/fixed_string.h"
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/navaid_detail.h"
@@ -27,7 +30,10 @@ namespace {
 // X-Plane data files share a header: a one-char line ("I"/"A"), then a line
 // containing "Version", then data rows, terminated by a line "99". This reads
 // the file and invokes `parse_row` for each data row (as an istringstream),
-// skipping the header. Returns false if the file cannot be opened.
+// skipping the header. Returns false if the file cannot be opened. A row the
+// parser could not fully read (the stream is left failed, e.g. a truncated or
+// non-numeric field) is counted and reported once per file instead of passing
+// silently.
 template <class RowFn>
 bool ForEachDataRow(const std::string& path, RowFn parse_row) {
   std::ifstream in(path);
@@ -36,6 +42,7 @@ bool ForEachDataRow(const std::string& path, RowFn parse_row) {
   }
   std::string line;
   bool in_data = false;
+  int malformed = 0;
   while (std::getline(in, line)) {
     // Tolerate CRLF line endings: std::getline only strips '\n', leaving a
     // trailing '\r' that would make the literal "99" terminator check below
@@ -58,6 +65,12 @@ bool ForEachDataRow(const std::string& path, RowFn parse_row) {
     }
     std::istringstream row(line);
     parse_row(row);
+    if (row.fail()) {
+      ++malformed;
+    }
+  }
+  if (malformed > 0) {
+    BF_LOG_WARN("xplane12: {} malformed row(s) in {}", malformed, path);
   }
   return true;
 }
@@ -281,7 +294,7 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
   // Merge rows that are the same physical point (e.g. a co-located VOR and DME
   // share an ident) while keeping distinct same-key points such as per-airport
   // terminal fixes (earth_fix's terminal column names the owning airport).
-  PointDeduper seen;
+  PointDeduper seen("xplane12");
   // Positions by what an airway endpoint names, for the airway position hints.
   PointIndex index;
 
@@ -481,14 +494,26 @@ Result<std::vector<AirportProcedureData>> XPlane12Loader::LoadProcedures(
     if (!de.is_regular_file() || de.path().extension() != ".dat") {
       continue;
     }
-    // The ICAO is the file stem, e.g. "CIFP/KJFK.dat" -> "KJFK".
+    // The ICAO is the file stem, e.g. "CIFP/KJFK.dat" -> "KJFK". A stem that
+    // cannot be an airport key (a stray file such as "KJFK.backup.dat") is
+    // skipped: the cache could not store it.
     std::string icao = de.path().stem().string();
+    if (!FixedName8::From(icao)) {
+      BF_LOG_WARN("xplane12: skipping CIFP file '{}' (not an airport ICAO)", de.path().string());
+      continue;
+    }
     Result<CifpData> parsed = CifpParser::Parse(de.path().string(), LocatorFor(index, icao));
     if (!parsed) {
       continue;  // skip an unreadable file; not fatal for the set as a whole
     }
     out.emplace_back(std::move(icao), std::move(parsed).value());
   }
+  // directory_iterator order is filesystem-defined; sort so the output (and the
+  // .bfdb built from it) is reproducible across machines and runs.
+  std::sort(out.begin(), out.end(),
+            [](const AirportProcedureData& a, const AirportProcedureData& b) {
+              return a.first < b.first;
+            });
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(out));
 }
 

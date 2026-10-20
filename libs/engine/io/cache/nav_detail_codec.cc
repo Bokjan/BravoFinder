@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <tuple>
 
 #include "io/cache/byte_io.h"
 #include "io/cache/cache_messages.h"
@@ -240,25 +241,39 @@ NavDetailArchive NavDetailArchive::FromData(const NavData& data) {
   return archive;
 }
 
+namespace {
+
+// Total orders over every field, so Finalize yields the same array order
+// whether it runs on loader output (`--data`) or on a decoded cache (`--db`).
+// Ordering by the lookup key alone left same-key records (several holds at one
+// fix, same-key navaids) in whatever order std::sort produced from its input,
+// so the two paths listed them differently. The lookup key leads, so binary
+// search by key still works.
+bool NavaidBefore(const std::pair<Ident, NavaidDetailInfo>& a,
+                  const std::pair<Ident, NavaidDetailInfo>& b) {
+  return std::tie(a.first.ident, a.first.arinc424_icao_code, a.second.kind, a.second.freq_raw,
+                  a.second.elev_ft, a.second.range_nm, a.second.heading) <
+         std::tie(b.first.ident, b.first.arinc424_icao_code, b.second.kind, b.second.freq_raw,
+                  b.second.elev_ft, b.second.range_nm, b.second.heading);
+}
+
+bool HoldBefore(const HoldInfo& a, const HoldInfo& b) {
+  return std::tie(a.fix_ident, a.fix_arinc424_icao_code, a.airport_icao, a.inbound_course,
+                  a.leg_time_min, a.leg_dist_nm, a.turn_dir, a.min_alt_ft, a.max_alt_ft,
+                  a.speed_limit_kt) < std::tie(b.fix_ident, b.fix_arinc424_icao_code,
+                                               b.airport_icao, b.inbound_course, b.leg_time_min,
+                                               b.leg_dist_nm, b.turn_dir, b.min_alt_ft,
+                                               b.max_alt_ft, b.speed_limit_kt);
+}
+
+}  // namespace
+
 void NavDetailArchive::Finalize() {
-  // Sort both arrays for binary-search lookup.
-  std::sort(navaids_.begin(), navaids_.end(), [](const auto& a, const auto& b) {
-    if (a.first.ident != b.first.ident) {
-      return a.first.ident < b.first.ident;
-    }
-    return a.first.arinc424_icao_code < b.first.arinc424_icao_code;
-  });
-  assert(std::is_sorted(navaids_.begin(), navaids_.end(), [](const auto& a, const auto& b) {
-    if (a.first.ident != b.first.ident) {
-      return a.first.ident < b.first.ident;
-    }
-    return a.first.arinc424_icao_code < b.first.arinc424_icao_code;
-  }));
-  std::sort(holds_.begin(), holds_.end(),
-            [](const HoldInfo& a, const HoldInfo& b) { return a.fix_ident < b.fix_ident; });
-  assert(std::is_sorted(holds_.begin(), holds_.end(), [](const HoldInfo& a, const HoldInfo& b) {
-    return a.fix_ident < b.fix_ident;
-  }));
+  // Sort both arrays for binary-search lookup (by their leading key fields).
+  std::sort(navaids_.begin(), navaids_.end(), NavaidBefore);
+  std::sort(holds_.begin(), holds_.end(), HoldBefore);
+  assert(std::is_sorted(navaids_.begin(), navaids_.end(), NavaidBefore));
+  assert(std::is_sorted(holds_.begin(), holds_.end(), HoldBefore));
   loaded_ = true;
 }
 
