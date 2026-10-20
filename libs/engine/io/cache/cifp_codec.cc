@@ -26,6 +26,10 @@ static_assert(static_cast<int>(ProcedureType::kApproach) < 256, "ProcedureType e
 static_assert(static_cast<int>(PathTerminator::kUnknown) < 256, "PathTerminator exceeds U8");
 static_assert(static_cast<int>(AltConstraintKind::kBetween) < 256, "AltConstraintKind exceeds U8");
 
+// Bits of a procedure leg's wire flag byte.
+constexpr uint8_t kLegFlagMapt = 1u << 0;
+constexpr uint8_t kLegFlagCourseTrue = 1u << 1;
+
 // Wire-layout declarators for the fixed-length records in a segment and the
 // section directory. These exist ONLY so `sizeof` is the single source of truth
 // for the corruption fuses in DeserializeSegment / OpenSection: the wire format
@@ -51,7 +55,7 @@ struct WireProcedureLeg {
   uint16_t rnp_centinm;
   uint8_t turn_dir;
   uint16_t speed_limit_kt;
-  uint8_t is_mapt;  // 0/1; format_version >= 17
+  uint8_t flags;  // bit 0 is_mapt, bit 1 course_true; other bits must be 0
 };
 struct WireRunway {
   uint32_t ident_io, ident_il;
@@ -120,7 +124,8 @@ std::vector<uint8_t> SerializeSegment(const CifpData& data, StringPool& pool) {
       w.U16(leg.rnp_centinm);
       w.U8(static_cast<uint8_t>(leg.turn_dir));
       w.U16(leg.speed_limit_kt);
-      w.U8(leg.is_mapt ? 1 : 0);
+      w.U8(static_cast<uint8_t>((leg.is_mapt ? kLegFlagMapt : 0) |
+                                (leg.course_true ? kLegFlagCourseTrue : 0)));
     }
   }
   w.U32(static_cast<uint32_t>(data.runways.size()));
@@ -227,12 +232,13 @@ Result<CifpData> DeserializeSegment(std::span<const uint8_t> data, std::span<con
       leg.rnp_centinm = br.U16();
       leg.turn_dir = static_cast<char>(br.U8());
       leg.speed_limit_kt = br.U16();
-      // Wire is_mapt is 0/1 only; any other byte is corrupt (not "truthy").
-      const uint8_t mapt = br.U8();
-      if (mapt > 1) {
-        return bad("invalid procedure MAPT flag");
+      // Only the defined flag bits may be set; anything else is corrupt.
+      const uint8_t flags = br.U8();
+      if ((flags & ~(kLegFlagMapt | kLegFlagCourseTrue)) != 0) {
+        return bad("invalid procedure leg flags");
       }
-      leg.is_mapt = mapt != 0;
+      leg.is_mapt = (flags & kLegFlagMapt) != 0;
+      leg.course_true = (flags & kLegFlagCourseTrue) != 0;
     }
   }
   const uint32_t rwy_count = br.U32();

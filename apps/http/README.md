@@ -145,7 +145,7 @@ Request: `{"airport": "KJFK", "procedure": "DEEZZ5"}` (both required). Response 
 }
 ```
 
-Optional leg fields (`alt`, `rnp_nm`, `turn_dir`, `speed_limit_kt`) are omitted when absent (a leg like a `VA`/`VM` path terminator has no fix, so `fix` is `""`). `type` is lowercase (`sid` / `star` / `appch`). Status: missing `airport`/`procedure` → **400**; unknown airport, no CIFP data, or no such procedure → **404**.
+Optional leg fields (`alt`, `rnp_nm`, `turn_dir`, `speed_limit_kt`, and `course_true`, present as `true` when `course_deg` is a true course published in true-referenced airspace such as northern Canada or Greenland; otherwise it is magnetic) are omitted when absent (a leg like a `VA`/`VM` path terminator has no fix, so `fix` is `""`). `type` is lowercase (`sid` / `star` / `appch`). Status: missing `airport`/`procedure` → **400**; unknown airport, no CIFP data, or no such procedure → **404**.
 
 ### GET `/v1/cycles`
 

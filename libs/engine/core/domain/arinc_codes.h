@@ -18,7 +18,7 @@ inline constexpr char kWptDescEndOfAirway = 'E';
 inline constexpr char kTurnLeft = 'L';
 inline constexpr char kTurnRight = 'R';
 
-// DFD procedure leg course_flag: 'T' = true course (convert with airport magvar).
+// DFD procedure leg course_flag: 'T' = true course (kept as ProcedureLeg::course_true).
 inline constexpr char kCourseFlagTrue = 'T';
 
 // DFD procedure leg distance/time flag: 'D' = distance (NM), else time.

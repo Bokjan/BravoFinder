@@ -25,22 +25,39 @@ bool TerminatesAtFix(PathTerminator t) {
 }
 
 AltitudeConstraint ParseAltConstraint(std::string_view desc, int alt1, int alt2) {
+  const char d = desc.empty() ? ' ' : desc.front();
   AltitudeConstraint ac;
-  if (desc == "+") {
-    ac.kind = AltConstraintKind::kAtOrAbove;
-    ac.alt1_ft = alt1;
-  } else if (desc == "-") {
-    ac.kind = AltConstraintKind::kAtOrBelow;
-    ac.alt1_ft = alt1;
-  } else if (desc == "B") {
-    ac.kind = AltConstraintKind::kBetween;
-    ac.alt1_ft = alt1;  // upper
-    ac.alt2_ft = alt2;  // lower
-  } else if (alt1 != 0) {
-    // '@' or blank descriptor with an altitude present means "cross at".
-    ac.kind = AltConstraintKind::kAt;
-    ac.alt1_ft = alt1;
+  switch (d) {
+    case 'B':
+      ac.kind = AltConstraintKind::kBetween;
+      ac.alt1_ft = alt1;  // upper
+      ac.alt2_ft = alt2;  // lower
+      return ac;
+    case 'C':
+      if (alt2 != 0) {
+        ac.kind = AltConstraintKind::kAtOrAbove;
+        ac.alt1_ft = alt2;
+      }
+      return ac;
+    case '+':
+    case 'H':
+    case 'J':
+    case 'V':
+      ac.kind = AltConstraintKind::kAtOrAbove;
+      break;
+    case '-':
+    case 'Y':
+      ac.kind = AltConstraintKind::kAtOrBelow;
+      break;
+    default:
+      // '@', blank, G, I, X: "cross at".
+      ac.kind = AltConstraintKind::kAt;
+      break;
   }
+  if (alt1 == 0) {
+    return AltitudeConstraint{};  // a descriptor without an altitude restricts nothing
+  }
+  ac.alt1_ft = alt1;
   return ac;
 }
 

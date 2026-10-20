@@ -41,3 +41,39 @@ TEST_CASE("ParseRouteTypeToken: numeric and single-alpha", "[unit][procedure]") 
   CHECK(bf::ParseRouteTypeToken("") == 0);
   CHECK(bf::ParseRouteTypeToken("AB") == 0);
 }
+
+TEST_CASE("ParseAltConstraint: every ARINC 424 altitude descriptor", "[unit][procedure]") {
+  auto kind = [](const char* d, int a1, int a2) { return bf::ParseAltConstraint(d, a1, a2).kind; };
+  using K = bf::AltConstraintKind;
+  CHECK(kind("+", 2500, 0) == K::kAtOrAbove);
+  CHECK(kind("-", 4000, 0) == K::kAtOrBelow);
+  CHECK(kind("@", 3000, 0) == K::kAt);
+  CHECK(kind("", 3000, 0) == K::kAt);
+  CHECK(kind(" ", 3000, 0) == K::kAt);
+  // Glide-slope / intercept / step-down descriptors restrict field one; the
+  // second altitude is informational. H/J/V are "at or above", which the old
+  // parser showed as "at".
+  CHECK(kind("G", 2000, 2150) == K::kAt);
+  CHECK(kind("I", 2000, 2150) == K::kAt);
+  CHECK(kind("X", 2000, 1800) == K::kAt);
+  CHECK(kind("H", 2000, 2150) == K::kAtOrAbove);
+  CHECK(kind("J", 2000, 2150) == K::kAtOrAbove);
+  CHECK(kind("V", 2000, 1800) == K::kAtOrAbove);
+  CHECK(kind("Y", 2000, 1800) == K::kAtOrBelow);
+  CHECK(bf::ParseAltConstraint("J", 2000, 2150).alt1_ft == 2000);
+
+  const bf::AltitudeConstraint between = bf::ParseAltConstraint("B", 9000, 7000);
+  CHECK(between.kind == K::kBetween);
+  CHECK(between.alt1_ft == 9000);
+  CHECK(between.alt2_ft == 7000);
+
+  // 'C' restricts the SECOND field: at or above it.
+  const bf::AltitudeConstraint c = bf::ParseAltConstraint("C", 0, 5000);
+  CHECK(c.kind == K::kAtOrAbove);
+  CHECK(c.alt1_ft == 5000);
+
+  // No altitude: no restriction, whatever the descriptor.
+  CHECK(kind("+", 0, 0) == K::kNone);
+  CHECK(kind("", 0, 0) == K::kNone);
+  CHECK(kind("C", 0, 0) == K::kNone);
+}

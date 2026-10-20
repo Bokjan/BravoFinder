@@ -56,9 +56,10 @@ struct AirportProcedures {
 // sentinel: an empty `fix` for heading/altitude/manual-termination legs, empty
 // `alt`, rnp_nm 0, turn_dir '\0', speed_limit_kt 0.
 struct ProcedureLegInfo {
-  std::string fix{};        // terminating fix ident (empty for non-fix legs)
-  std::string path_term{};  // ARINC token, e.g. "TF", "RF"
-  double course_deg = 0.0;  // magnetic course
+  std::string fix{};         // terminating fix ident (empty for non-fix legs)
+  std::string path_term{};   // ARINC token, e.g. "TF", "RF"
+  double course_deg = 0.0;   // magnetic course, or true when course_true
+  bool course_true = false;  // course_deg is a true course (true-referenced airspace)
   double distance_nm = 0.0;
   std::string alt{};       // "@5000" / "+2500" / "-4000" / "3000-6000" / ""
   double rnp_nm = 0.0;     // required navigation performance, NM (0 = absent)

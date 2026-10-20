@@ -368,24 +368,6 @@ Result<void> LoadAirports(sqlite3* conn, NavData& data) {
   });
 }
 
-// Airport magnetic variation by ICAO, for converting course_flag='T' (true
-// course) legs to magnetic. Read by the procedure loaders only.
-Result<std::unordered_map<std::string, double>> LoadAirportMagvars(sqlite3* conn) {
-  std::unordered_map<std::string, double> out;
-  const std::string sql =
-      std::format("SELECT airport_identifier, magnetic_variation FROM {}", kTblAirports);
-  Result<SqliteStmt> s = Prepare(conn, sql);
-  if (!s) {
-    return Result<std::unordered_map<std::string, double>>::Err(s.error());
-  }
-  sqlite3_stmt* stmt = s.value().get();
-  Result<void> rows = ForEachRow(stmt, [&]() { out[ColumnText(stmt, 0)] = ColumnDouble(stmt, 1); });
-  if (!rows) {
-    return Result<std::unordered_map<std::string, double>>::Err(rows.error());
-  }
-  return Result<std::unordered_map<std::string, double>>::Ok(std::move(out));
-}
-
 Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
   const std::string sql = std::format(
       "SELECT region_code, icao_code, waypoint_identifier, inbound_holding_course, turn_direction, "
@@ -419,7 +401,7 @@ Result<void> LoadMsa(sqlite3* conn, NavData& data) {
   const std::string sql = std::format(
       "SELECT airport_identifier, msa_center, radius_limit, sector_bearing_1, sector_altitude_1, "
       "sector_bearing_2, sector_altitude_2, sector_bearing_3, sector_altitude_3, sector_bearing_4, "
-      "sector_altitude_4, sector_bearing_5, sector_altitude_5 FROM {}",
+      "sector_altitude_4, sector_bearing_5, sector_altitude_5, msa_center_icao_code FROM {}",
       kTblMsa);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
@@ -428,16 +410,20 @@ Result<void> LoadMsa(sqlite3* conn, NavData& data) {
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
     MsaSector sector;
-    sector.center = Ident{ColumnText(stmt, 1), {}};
+    sector.center = Ident{ColumnText(stmt, 1), ColumnText(stmt, 13)};
     sector.airport_icao = ColumnText(stmt, 0);
     const int radius = ColumnInt(stmt, 2);
     for (int i = 0; i < 5; ++i) {
-      const int bearing = ColumnInt(stmt, 3 + i * 2);
+      // v2 stores sector bearings as REAL in tens of degrees (26.5 = 265 deg,
+      // matching earth_msa.dat and v1); reading them as int truncated LSZH's
+      // 265/40/100/170 to 26/4/10/17.
+      const int bearing = static_cast<int>(std::lround(ColumnDouble(stmt, 3 + i * 2) * 10.0));
       const int alt = ColumnInt(stmt, 4 + i * 2);
       if (bearing == 0 && alt == 0) {
         break;
       }
-      sector.arcs.push_back(MsaArc{bearing, alt, radius});
+      // DFD writes a north sector boundary as 360; earth_msa.dat as 000.
+      sector.arcs.push_back(MsaArc{bearing % 360, alt, radius});
     }
     if (!sector.arcs.empty()) {
       data.msa.push_back(std::move(sector));
@@ -535,9 +521,8 @@ std::string ProcSql(std::string_view table, bool single_airport) {
   return sql;
 }
 
-// Emit one Procedure leg from a row. `magvar` converts true courses (course_flag
-// 'T'); magnetic courses ('M'/blank) are used as-is.
-void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& proc,
+// Emit one Procedure leg from a row.
+void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, Procedure& proc,
                std::optional<int>& prev_seqno) {
   const std::string wp_ident = ColumnText(stmt, c.wp_ident);
   Result<FixedIdent> fixed = FixedIdent::FromParts(wp_ident, ColumnText(stmt, c.wp_icao));
@@ -549,10 +534,11 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   ProcedureLeg leg;
   leg.fix = std::move(fixed).value();
   leg.path_term = ParsePathTerminator(ColumnText(stmt, c.path_term));
-  const double course = ColumnDouble(stmt, c.course);
-  const std::string flag = ColumnText(stmt, c.course_flag);
-  leg.course_deg =
-      static_cast<float>(EqualsCode(flag, kCourseFlagTrue) ? ToMagnetic(course, magvar) : course);
+  // course_flag 'T' marks a true course (true-referenced airspace); keep it as
+  // published and flag it rather than converting with the airport variation,
+  // so all loaders agree (X-Plane CIFP carries no variation to convert with).
+  leg.course_deg = static_cast<float>(ColumnDouble(stmt, c.course));
+  leg.course_true = EqualsCode(ColumnText(stmt, c.course_flag), kCourseFlagTrue);
   // v2 distance: distance_time holds the value, route_distance_... holds the flag.
   const std::string dflag = ColumnText(stmt, c.dist_flag);
   if (EqualsCode(dflag, kDistTimeFlagDistance)) {
@@ -593,10 +579,8 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   prev_seqno = seqno;
 }
 
-// Full-table scan appending per-airport procedures into `out`. magvar_by_airport
-// supplies the true->magnetic conversion for course_flag='T' legs.
+// Full-table scan appending per-airport procedures into `out`.
 Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType type,
-                           const std::unordered_map<std::string, double>& magvar_by_airport,
                            std::vector<AirportProcedureData>& out) {
   Result<SqliteStmt> s = Prepare(conn, ProcSql(table, /*single_airport=*/false));
   if (!s) {
@@ -610,7 +594,6 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
   bool have_current = false;
   std::string cur_airport, cur_name, cur_trans, cur_route;
   CifpData cifp;
-  double magvar = 0.0;
   std::optional<int> prev_seqno;  // reset per procedure; consumed by AppendLeg's order check
 
   auto flush_proc = [&]() {
@@ -638,11 +621,6 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
     if (airport != cur_airport) {
       flush_airport();
       cur_airport = airport;
-      if (auto it = magvar_by_airport.find(airport); it != magvar_by_airport.end()) {
-        magvar = it->second;
-      } else {
-        magvar = 0.0;
-      }
     } else if (have_current && (name != cur_name || trans != cur_trans || route != cur_route)) {
       flush_proc();
     }
@@ -660,7 +638,7 @@ Result<void> LoadProcTable(sqlite3* conn, std::string_view table, ProcedureType 
       current.route_type = ParseRouteTypeToken(route);
       have_current = true;
     }
-    AppendLeg(stmt, c, magvar, current, prev_seqno);
+    AppendLeg(stmt, c, current, prev_seqno);
   });
   if (!rows) {
     return Result<void>::Err(rows.error());
@@ -716,13 +694,7 @@ void MergeRunways(std::vector<AirportProcedureData>& out,
 // airport has no procedures/runways; a SQLite step error degrades to nullopt
 // too (this path is best-effort -- the full LoadProcedures path propagates such
 // errors).
-std::optional<CifpData> LoadAirportProcedures(
-    sqlite3* conn, const std::string& airport,
-    const std::unordered_map<std::string, double>& magvar_by_airport) {
-  double magvar = 0.0;
-  if (auto it = magvar_by_airport.find(airport); it != magvar_by_airport.end()) {
-    magvar = it->second;
-  }
+std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& airport) {
   CifpData cifp;
   const std::pair<std::string_view, ProcedureType> kTables[] = {
       {kTblSids, ProcedureType::kSid},
@@ -772,7 +744,7 @@ std::optional<CifpData> LoadAirportProcedures(
         current.route_type = ParseRouteTypeToken(route);
         have_current = true;
       }
-      AppendLeg(stmt, c, magvar, current, prev_seqno);
+      AppendLeg(stmt, c, current, prev_seqno);
     });
     if (!rows) {
       return std::nullopt;  // step error: treat as load failure for this airport
@@ -804,23 +776,6 @@ std::optional<CifpData> LoadAirportProcedures(
 }
 
 }  // namespace
-
-// Convert a true course to magnetic using the airport's magnetic variation.
-// magnetic = true - variation (variation: west negative, so magnetic > true west).
-// Defined at namespace scope (declared in the header) so the sign convention can
-// be locked by a unit test.
-// Degrees in a full circle; used to wrap magnetic variation into [0, 360).
-
-double ToMagnetic(double true_course, double magvar) {
-  double mag = true_course - magvar;
-  while (mag < 0.0) {
-    mag += kDegreesFullCircle;
-  }
-  while (mag >= kDegreesFullCircle) {
-    mag -= kDegreesFullCircle;
-  }
-  return mag;
-}
 
 Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
   Result<std::string> db_path = FindV2Db(source_dir);
@@ -920,24 +875,17 @@ Result<std::vector<AirportProcedureData>> Dfd2Loader::LoadProcedures(
   if (Result<void> header = CheckV2Header(conn.value()); !header) {
     return Result<std::vector<AirportProcedureData>>::Err(std::move(header).error());
   }
-  // magvar is needed for course_flag='T' legs; read just the (airport, magvar)
-  // pairs rather than re-running the full airports load.
-  Result<std::unordered_map<std::string, double>> magvar = LoadAirportMagvars(conn.value());
-  if (!magvar) {
-    return Result<std::vector<AirportProcedureData>>::Err(magvar.error());
-  }
-
   std::vector<AirportProcedureData> out;
   Result<void> load = Result<void>::Ok();
-  load = LoadProcTable(conn.value(), kTblSids, ProcedureType::kSid, magvar.value(), out);
+  load = LoadProcTable(conn.value(), kTblSids, ProcedureType::kSid, out);
   if (!load) {
     return Result<std::vector<AirportProcedureData>>::Err(load.error());
   }
-  load = LoadProcTable(conn.value(), kTblStars, ProcedureType::kStar, magvar.value(), out);
+  load = LoadProcTable(conn.value(), kTblStars, ProcedureType::kStar, out);
   if (!load) {
     return Result<std::vector<AirportProcedureData>>::Err(load.error());
   }
-  load = LoadProcTable(conn.value(), kTblIaps, ProcedureType::kApproach, magvar.value(), out);
+  load = LoadProcTable(conn.value(), kTblIaps, ProcedureType::kApproach, out);
   if (!load) {
     return Result<std::vector<AirportProcedureData>>::Err(load.error());
   }
@@ -975,26 +923,7 @@ std::optional<CifpData> Dfd2Loader::LoadProcedure(const std::string& source_dir,
   if (!conn) {
     return std::nullopt;
   }
-  // On-demand: read just this airport's magvar (one row) rather than the whole
-  // airports table.
-  std::unordered_map<std::string, double> magvar;
-  Result<SqliteStmt> ms = Prepare(
-      conn.value(),
-      std::format(
-          "SELECT airport_identifier, magnetic_variation FROM {} WHERE airport_identifier = ?",
-          kTblAirports));
-  if (ms) {
-    sqlite3_stmt* stmt = ms.value().get();
-    sqlite3_bind_text(stmt, 1, icao.c_str(), -1, SQLITE_TRANSIENT);
-    Result<bool> row = Step(stmt);
-    if (!row) {
-      return std::nullopt;  // step error: treat as load failure for this airport
-    }
-    if (row.value()) {
-      magvar[ColumnText(stmt, 0)] = ColumnDouble(stmt, 1);
-    }
-  }
-  return LoadAirportProcedures(conn.value(), icao, magvar);
+  return LoadAirportProcedures(conn.value(), icao);
 }
 
 }  // namespace bf

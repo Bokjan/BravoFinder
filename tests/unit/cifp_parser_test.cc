@@ -122,6 +122,39 @@ TEST_CASE("CIFP parser: course, distance, and altitude columns", "[unit][cifp]")
   CHECK(p.legs[0].alt_kind == bf::AltConstraintKind::kNone);
 }
 
+TEST_CASE("CIFP parser: true courses and flight-level altitudes", "[unit][cifp]") {
+  // Real cycle 2601 rows. BGTL (Thule) is in true-referenced airspace: "085T" is
+  // 85 degrees TRUE, not 8.5 magnetic tenths. LFTZ LANK2R's RUBIT carries
+  // "+FL070", which atoi read as 0.
+  const std::vector<std::string> lines = {
+      "SID:010,1,WENSA2,RW08T, , , , ,    , ,   ,CA, , , , , ,      ,    ,    ,085T,    ,+,00660,"
+      "     ,06500, ,   ,    ,   ,THT,BG,D, , , , , ;",
+      "SID:040,1,WENSA2,RW08T,WENSA,BG,E,A,EE  , ,   ,CF, ,THT,BG,D, ,      ,2645,0310,265T,0200, "
+      ",     ,     ,     , ,   ,    ,   , , , , , , , , ;",
+      "SID:020,2,LANK2R,ALL,RUBIT,LF,E,A,E   , ,   ,DF, , , , , ,      ,    ,    ,    ,    "
+      ",+,FL070,"
+      "     ,     , ,   ,    ,   , , , , , , , , ;",
+  };
+  const bf::CifpData data = bf::CifpParser::ParseLines(lines);
+  REQUIRE(data.procedures.size() == 2);
+  const auto& wensa = data.procedures[0].legs;
+  REQUIRE(wensa.size() == 2);
+  CHECK(wensa[0].course_true);
+  CHECK_THAT(wensa[0].course_deg, WithinAbs(85.0, 1e-6));
+  CHECK(wensa[1].course_true);
+  CHECK_THAT(wensa[1].course_deg, WithinAbs(265.0, 1e-6));
+  CHECK_THAT(wensa[1].distance_nm, WithinAbs(20.0, 1e-6));
+  const auto& rubit = data.procedures[1].legs;
+  REQUIRE(rubit.size() == 1);
+  CHECK(rubit[0].alt_kind == bf::AltConstraintKind::kAtOrAbove);
+  CHECK(rubit[0].alt1_ft == 7000);
+  CHECK_FALSE(rubit[0].course_true);
+
+  // A magnetic course stays tenths of a degree and unflagged.
+  const bf::CifpData deezz = bf::CifpParser::ParseLines(kDeezz5Rw31L);
+  CHECK_FALSE(deezz.procedures[0].legs[1].course_true);
+}
+
 TEST_CASE("CIFP parser: RNP, turn direction, and speed limit columns", "[unit][cifp]") {
   // Real cycle-2601 KJFK approach rows: an RF leg to JEVNI (right turn, RNP 0.30)
   // and a TF leg to PEEBO (speed limit 185 kt, RNP 0.30, no turn direction).

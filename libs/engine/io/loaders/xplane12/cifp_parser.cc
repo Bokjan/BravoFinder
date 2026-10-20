@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/loaders/xplane12/cifp_parser.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
@@ -17,6 +19,7 @@
 #include "core/domain/arinc_codes.h"
 #include "core/domain/fixed_string.h"
 #include "core/domain/nav_tokens.h"
+#include "io/loaders/loader_constants.h"
 
 namespace bf {
 
@@ -65,11 +68,11 @@ constexpr int kWptDesc = 8;        // ARINC 424 Waypoint Description Code (4 cha
 constexpr int kTurnDir = 9;        // turn direction: 'L'/'R' (or blank)
 constexpr int kRnp = 10;           // required navigation performance, ARINC-encoded
 constexpr int kPathTerm = 11;
-constexpr int kCourse = 20;      // magnetic course, tenths of a degree
+constexpr int kCourse = 20;      // course: "nnnn" magnetic tenths, or "nnnT" true degrees
 constexpr int kDistance = 21;    // leg distance, tenths of a nautical mile
 constexpr int kAltDesc = 22;     // altitude descriptor: + - @ B (or blank)
-constexpr int kAlt1 = 23;        // altitude one, feet
-constexpr int kAlt2 = 24;        // altitude two, feet (lower bound for 'B')
+constexpr int kAlt1 = 23;        // altitude one, feet or "FLnnn"
+constexpr int kAlt2 = 24;        // altitude two, feet or "FLnnn" (lower bound for 'B')
 constexpr int kSpeedLimit = 27;  // speed limit, knots (0/blank if none)
 // Row-length gate for a leg record. Intentionally 25 (not kSpeedLimit+1=28):
 // speed_limit is the only field past index 24, and FieldInt() bounds-checks its
@@ -77,16 +80,56 @@ constexpr int kSpeedLimit = 27;  // speed limit, knots (0/blank if none)
 // being dropped for lacking a trailing (optional) speed-limit column.
 constexpr int kMinLegFields = 25;
 
+// Parse the leading integer of `s` (an optional sign, then digits; trailing
+// characters such as a 'T' course suffix are ignored). Blank, non-numeric, or
+// out-of-range text yields 0 -- unlike atoi, which is undefined on overflow.
+int LeadingInt(std::string_view s) {
+  if (!s.empty() && s.front() == '+') {
+    s.remove_prefix(1);
+  }
+  int value = 0;
+  const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);
+  return ec == std::errc{} ? value : 0;
+}
+
 // Read a field as an integer, treating blank/non-numeric as 0.
 int FieldInt(const std::vector<std::string>& f, int idx) {
   if (idx < 0 || idx >= static_cast<int>(f.size())) {
     return 0;
   }
-  const std::string t = Trim(f[idx]);
-  if (t.empty()) {
+  return LeadingInt(Trim(f[idx]));
+}
+
+// Read an altitude field in feet. ARINC 424 writes altitudes at or above the
+// transition altitude as a flight level ("FL240"); atoi would read those as 0
+// and silently drop the restriction.
+int FieldAltitudeFt(const std::vector<std::string>& f, int idx) {
+  if (idx < 0 || idx >= static_cast<int>(f.size())) {
     return 0;
   }
-  return std::atoi(t.c_str());
+  const std::string t = Trim(f[idx]);
+  if (t.size() > 2 && t[0] == 'F' && t[1] == 'L') {
+    return LeadingInt(std::string_view(t).substr(2)) * kFeetPerFlightLevel;
+  }
+  return LeadingInt(t);
+}
+
+// A leg course: "nnnn" is a magnetic course in tenths of a degree; "nnnT" is a
+// TRUE course in whole degrees (true-referenced airspace). Reading the latter
+// as tenths made "085T" a magnetic 8.5 degrees.
+struct Course {
+  float deg = 0.0f;
+  bool is_true = false;
+};
+Course FieldCourse(const std::vector<std::string>& f, int idx) {
+  if (idx < 0 || idx >= static_cast<int>(f.size())) {
+    return {};
+  }
+  const std::string t = Trim(f[idx]);
+  if (!t.empty() && t.back() == 'T') {
+    return Course{static_cast<float>(LeadingInt(t)), true};
+  }
+  return Course{static_cast<float>(LeadingInt(t) / 10.0), false};
 }
 
 std::string FieldStr(const std::vector<std::string>& f, int idx) {
@@ -304,11 +347,17 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines, const Fix
       }
     }
     leg.path_term = ParsePathTerminator(FieldStr(f, kPathTerm));
-    leg.course_deg = static_cast<float>(FieldInt(f, kCourse) / 10.0);
+    const Course course = FieldCourse(f, kCourse);
+    leg.course_deg = course.deg;
+    leg.course_true = course.is_true;
     leg.distance_nm = static_cast<float>(FieldInt(f, kDistance) / 10.0);
-    leg.set_alt(ParseAltConstraint(FieldStr(f, kAltDesc), FieldInt(f, kAlt1), FieldInt(f, kAlt2)));
+    leg.set_alt(ParseAltConstraint(FieldStr(f, kAltDesc), FieldAltitudeFt(f, kAlt1),
+                                   FieldAltitudeFt(f, kAlt2)));
     leg.rnp_centinm = RnpCentinm(FieldStr(f, kRnp));
-    leg.speed_limit_kt = static_cast<uint16_t>(FieldInt(f, kSpeedLimit));
+    // uint16_t: clamp so a corrupt or negative field cannot wrap (as the SQLite
+    // loaders do).
+    leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(
+        FieldInt(f, kSpeedLimit), 0, static_cast<int>(std::numeric_limits<uint16_t>::max())));
     leg.turn_dir = TurnDir(FieldStr(f, kTurnDir));
     leg.is_mapt = IsMaptDesc(FieldStr(f, kWptDesc));
     current.legs.push_back(std::move(leg));

@@ -85,16 +85,13 @@ Result<std::string> FindFenixDb(const std::string& source_dir) {
 
 // ---- helpers (NULL-safe column access) ----------------------------------
 
-// ColumnInt returns 0 for NULL; use sqlite3_column_type to distinguish
-// a genuine zero from a NULL column.
-bool IsColumnNull(sqlite3_stmt* stmt, int col) {
-  return sqlite3_column_type(stmt, col) == SQLITE_NULL;
-}
+// ColumnInt returns 0 for NULL; this returns -1 so a NULL id/altitude can be
+// told from a genuine zero. Only used where every caller tests for > 0. Missing
+// double-valued fields (distance, hold leg time/length, speed) read as 0 via
+// ColumnDouble -- the "absent" convention of ProcedureLeg and HoldFix -- not -1,
+// which surfaced as "-1.0 NM" leg distances in procedure details.
 int ColumnOptInt(sqlite3_stmt* stmt, int col) {
-  return IsColumnNull(stmt, col) ? -1 : ColumnInt(stmt, col);
-}
-double ColumnOptDouble(sqlite3_stmt* stmt, int col) {
-  return IsColumnNull(stmt, col) ? -1.0 : ColumnDouble(stmt, col);
+  return ColumnIsNull(stmt, col) ? -1 : ColumnInt(stmt, col);
 }
 
 // ---- navaid type → WaypointKind ----------------------------------------
@@ -564,8 +561,8 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
       h.airport_icao = "ENRT";
     }
     h.inbound_course = ColumnDouble(stmt, 3);
-    h.leg_time_min = ColumnOptDouble(stmt, 4);
-    h.leg_dist_nm = ColumnOptDouble(stmt, 5);
+    h.leg_time_min = ColumnDouble(stmt, 4);
+    h.leg_dist_nm = ColumnDouble(stmt, 5);
     h.turn_dir = EqualsCode(ColumnText(stmt, 6), kTurnLeft) ? kTurnLeft : kTurnRight;
 
     int mn = ColumnOptInt(stmt, 7);
@@ -751,8 +748,11 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
         }
       }
 
+      // Like DFD v1, Fenix carries no true/magnetic flag: a true-referenced leg
+      // (e.g. BGTL WENSA2) arrives as magnetic course / 10 with nothing marking
+      // it, so it is read as published (course_true stays false).
       leg.course_deg = static_cast<float>(ColumnDouble(stmt, 3));
-      leg.distance_nm = static_cast<float>(ColumnOptDouble(stmt, 4));
+      leg.distance_nm = static_cast<float>(ColumnDouble(stmt, 4));
       leg.set_alt(ParseFenixAlt(ColumnText(stmt, 5)));
       std::string td = ColumnText(stmt, 6);
       // TurnDir: 'L'/'R' only; anything else ('E' ×114 in real data) becomes
@@ -760,7 +760,7 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
       leg.turn_dir = EqualsCode(td, kTurnLeft)    ? kTurnLeft
                      : EqualsCode(td, kTurnRight) ? kTurnRight
                                                   : '\0';
-      double spd = ColumnOptDouble(stmt, 8);
+      double spd = ColumnDouble(stmt, 8);
       // uint16_t: clamp to [0, 65535] so a corrupt out-of-range speed does not
       // wrap (matches dfd1/dfd2). Real speeds are well below this.
       leg.speed_limit_kt = static_cast<uint16_t>(std::clamp<double>(

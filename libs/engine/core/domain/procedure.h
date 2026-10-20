@@ -62,8 +62,8 @@ PathTerminator ParsePathTerminator(std::string_view token);
 // Short token for a path terminator (e.g. "TF"), for display/round-tripping.
 std::string PathTerminatorName(PathTerminator t);
 
-// The kind of altitude restriction a leg carries, from the CIFP altitude
-// descriptor column ('+', '-', '@'/blank, 'B').
+// The kind of altitude restriction a leg carries, derived from the ARINC 424
+// altitude descriptor column (see ParseAltConstraint for the full mapping).
 // Underlying uint8_t: packed into ProcedureLeg's trailing byte cluster (see
 // ProcedureLeg layout). Wire already stores alt kind as U8.
 enum class AltConstraintKind : uint8_t {
@@ -84,11 +84,19 @@ struct AltitudeConstraint {
   int alt2_ft = 0;
 };
 
-// Parse the altitude restriction from the descriptor and the two altitude
-// values. `desc` is '+', '-', '@'/blank, or 'B' (the CIFP/DFD altitude
-// descriptor); alt1/alt2 are feet as stored. Shared by the X-Plane CIFP parser
-// and the DFD SQLite loaders so the column-extraction differs but the
-// descriptor logic does not.
+// Parse the altitude restriction from the ARINC 424 altitude descriptor and the
+// two altitude values (feet). Shared by the X-Plane CIFP parser and the DFD
+// SQLite loaders so the column-extraction differs but the descriptor logic does
+// not. The restriction is the first altitude field's, per descriptor:
+//   '+'  and H/J/V (at or above, with a glide-slope / intercept / step-down
+//        altitude in field two)                             -> kAtOrAbove alt1
+//   '-'  and Y (at or below, step-down altitude in field two) -> kAtOrBelow alt1
+//   '@'/blank and G/I/X (at, with a glide-slope / intercept / vertical-angle
+//        altitude in field two)                             -> kAt alt1
+//   'B'  (between field one, upper, and field two, lower)   -> kBetween
+//   'C'  (at or above the SECOND field)                      -> kAtOrAbove alt2
+// The informational second altitude of G/H/I/J/V/X/Y is not a restriction and
+// is not kept. A descriptor with no altitude yields kNone.
 AltitudeConstraint ParseAltConstraint(std::string_view desc, int alt1, int alt2);
 
 // ARINC 424 Waypoint Description Code: character 4 (1-based) == 'M' marks the
@@ -118,7 +126,8 @@ int ParseRouteTypeToken(std::string_view token);
 // terminate at a fix leave `fix` empty and rely on course/distance.
 //
 // Layout is pinned at 44 bytes (align 4) for the ~765k-leg eager array:
-//   FixedIdent(12) + 2×float(8) + 2×float(8) + 2×int(8) + 2×u16(4) + 4×u8-ish(4).
+//   FixedIdent(12) + 2×float(8) + 2×float(8) + 2×int(8) + 2×u16(4) + 3×u8-ish(3)
+//   + one byte of flag bits (1).
 // course/distance are float: CIFP source quantum is 0.1, and seed/route A/B
 // confirmed no fingerprint drift (see research/2026-08-05_struct_layout_audit).
 // Wire (cifp_codec) stores F64 for course/distance and a U8 for is_mapt.
@@ -135,7 +144,7 @@ struct ProcedureLeg {
   // far below the vertex-match tolerance.
   float fix_lat = std::numeric_limits<float>::quiet_NaN();
   float fix_lon = std::numeric_limits<float>::quiet_NaN();
-  float course_deg = 0.0f;   // magnetic course (CIFP column, 0 if absent)
+  float course_deg = 0.0f;   // course (CIFP column, 0 if absent); magnetic unless course_true
   float distance_nm = 0.0f;  // route/leg distance (CIFP column, 0 if absent)
   int alt1_ft = 0;           // altitude constraint feet (see AltitudeConstraint)
   int alt2_ft = 0;
@@ -150,7 +159,11 @@ struct ProcedureLeg {
   char turn_dir = '\0';  // 'L'/'R' turn direction, or '\0' when unspecified.
   // Missed Approach Point: ARINC 424 Waypoint Description Code character 4
   // (1-based) == 'M'. Derived at load time; raw WD code is not retained.
-  bool is_mapt = false;
+  bool is_mapt : 1 = false;
+  // course_deg is a TRUE course: published so in true-referenced airspace
+  // (northern Canada, Greenland, Antarctica), where a magnetic course is not
+  // meaningful. Shares is_mapt's byte so the leg stays 44 bytes.
+  bool course_true : 1 = false;
 
   void set_alt(const AltitudeConstraint& a) {
     alt_kind = a.kind;

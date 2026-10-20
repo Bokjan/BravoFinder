@@ -456,7 +456,8 @@ std::string RenderProcedureDetail(OutputFormat fmt, const bf::AirportProcedureDe
       if (!leg.fix.empty()) {
         os << " " << leg.fix;
       }
-      os << std::setprecision(1) << "  crs " << leg.course_deg << "  " << leg.distance_nm << " NM";
+      os << std::setprecision(1) << "  crs " << leg.course_deg << (leg.course_true ? "T" : "")
+         << "  " << leg.distance_nm << " NM";
       if (!leg.alt.empty()) {
         os << "  alt " << leg.alt;
       }

@@ -176,6 +176,13 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
     }
     CHECK(enrt > 1000);
     CHECK(term > 1000);
+    // A NULL leg_length / leg_time is 0 ("absent"), never a -1 that renders as
+    // "-1.0 NM" / "-1 min".
+    for (const auto& h : fd.data.hold_fixes) {
+      if (h.leg_dist_nm < 0.0 || h.leg_time_min < 0.0) {
+        FAIL("negative hold leg at " << h.fix.ident);
+      }
+    }
   }
   SECTION("MORA") {
     // MORA cells are flight levels (hundreds of feet) keyed by signed geographic
@@ -237,6 +244,7 @@ TEST_CASE("fenix: LoadProcedure KJFK", "[integration][fenix]") {
       else if (leg.path_term == bf::PathTerminator::kUnknown)
         ++unk;
       if (leg.alt_kind != bf::AltConstraintKind::kNone) ++alt;
+      CHECK(leg.distance_nm >= 0.0f);  // NULL Distance is 0 ("absent"), never -1
     }
   CHECK(tf > 50);
   CHECK(unk == 0);

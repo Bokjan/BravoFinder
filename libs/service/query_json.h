@@ -142,6 +142,10 @@ void WriteProcedureDetailJson(Writer& w, const AirportProcedureDetail& d) {
       detail::WriteKeyStr(w, "path_term", leg.path_term);
       w.Key("course_deg");
       w.Double(leg.course_deg);
+      if (leg.course_true) {
+        w.Key("course_true");
+        w.Bool(true);
+      }
       w.Key("distance_nm");
       w.Double(leg.distance_nm);
       // Omit absent optional fields (sentinel values) to keep output lean.

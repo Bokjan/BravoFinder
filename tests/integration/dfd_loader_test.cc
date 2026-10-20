@@ -11,13 +11,16 @@
 #include <cmath>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "io/loaders/dfd1/dfd1_loader.h"
 #include "io/loaders/dfd2/dfd2_loader.h"
 #include "io/loaders/loader_registry.h"
 #include "io/loaders/xplane12/cifp_parser.h"
+#include "io/loaders/xplane12/xplane12_loader.h"
 #include "test_dfd1.h"
 #include "test_dfd2.h"
 #include "test_xplane12.h"
@@ -157,6 +160,48 @@ TEST_CASE("dfd2: LoadProcedure loads a single airport on demand", "[integration]
   REQUIRE(kjfk.has_value());
   CHECK(!kjfk->procedures.empty());
   CHECK(!kjfk->runways.empty());
+}
+
+TEST_CASE("dfd2/xplane: true-referenced courses and MSA bearings agree", "[integration][dfd]") {
+  // BGTL (Thule) publishes TRUE courses: DFD v2 flags them course_flag 'T', the
+  // X-Plane CIFP writes "085T". Both must yield 85 deg true -- not a magnetic
+  // conversion (DFD v2 used to apply the airport variation) and not 8.5 (X-Plane
+  // read "085T" as tenths). DFD v2 MSA sector bearings are REAL tens of degrees.
+  const std::string xp = EnsureXPlane12();  // captured before EnsureDfd2 overwrites env
+  const std::string d2 = EnsureDfd2();
+  if (d2.empty() || !HasCifp(xp, "BGTL")) {
+    SKIP("xplane12 CIFP and/or DFD v2 data not found");
+  }
+  std::optional<bf::CifpData> x = bf::XPlane12Loader().LoadProcedure(xp, "BGTL");
+  std::optional<bf::CifpData> d = bf::Dfd2Loader().LoadProcedure(d2, "BGTL");
+  REQUIRE(x.has_value());
+  REQUIRE(d.has_value());
+  auto first_leg = [](const bf::CifpData& c) -> const bf::ProcedureLeg* {
+    for (const bf::Procedure& p : c.procedures) {
+      if (p.name == "WENSA2" && p.transition_ident == "RW08T" && !p.legs.empty()) {
+        return &p.legs.front();
+      }
+    }
+    return nullptr;
+  };
+  for (const bf::ProcedureLeg* leg : {first_leg(*x), first_leg(*d)}) {
+    REQUIRE(leg != nullptr);
+    CHECK(leg->path_term == bf::PathTerminator::kCA);
+    CHECK(leg->course_true);
+    CHECK(leg->course_deg == Catch::Approx(85.0));
+  }
+
+  bf::Result<bf::NavData> nav = bf::Dfd2Loader().LoadNavData(d2);
+  REQUIRE(nav);
+  auto lszh = std::find_if(nav.value().msa.begin(), nav.value().msa.end(),
+                           [](const bf::MsaSector& m) { return m.airport_icao == "LSZH"; });
+  REQUIRE(lszh != nav.value().msa.end());
+  CHECK(lszh->center == bf::Ident("LSZH", "LS"));
+  std::vector<int> bearings;
+  for (const bf::MsaArc& a : lszh->arcs) {
+    bearings.push_back(a.bearing_from);
+  }
+  CHECK(bearings == std::vector<int>{265, 40, 100, 170});  // as in earth_msa.dat
 }
 
 // ---------------------------------------------------------------------------

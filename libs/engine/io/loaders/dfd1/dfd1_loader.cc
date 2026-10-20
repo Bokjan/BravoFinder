@@ -15,6 +15,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "core/base/log.h"
 #include "core/domain/airport.h"
@@ -424,24 +425,49 @@ Result<void> LoadHoldings(sqlite3* conn, NavData& data) {
 
 Result<void> LoadMsa(sqlite3* conn, NavData& data) {
   // 0=airport_identifier 1=msa_center 2=msa_center_latitude 3=msa_center_longitude
-  // 4=radius_limit 5..6=sector1(bearing,alt) 7..8=sector2 ...
+  // 4=radius_limit 5..6=sector1(bearing,alt) 7..8=sector2 ... 15=icao_code
   Result<SqliteStmt> s = Prepare(
       conn, std::format(
                 "SELECT airport_identifier, msa_center, msa_center_latitude, msa_center_longitude, "
                 "radius_limit, sector_bearing_1, sector_altitude_1, sector_bearing_2, "
                 "sector_altitude_2, sector_bearing_3, sector_altitude_3, sector_bearing_4, "
-                "sector_altitude_4, sector_bearing_5, sector_altitude_5 FROM {}",
+                "sector_altitude_4, sector_bearing_5, sector_altitude_5, icao_code FROM {}",
                 kTblMsa));
   if (!s) {
     return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
+  // v1 has no center-region column (v2's msa_center_icao_code). The center is a
+  // loaded point (navaid, fix, or the airport itself), so take the region of the
+  // same-ident point at the recorded center position; fall back to the record's
+  // icao_code (the airport's region, which differs from the center's in ~0.2%).
+  std::unordered_map<std::string, std::vector<std::pair<std::string, Coordinate>>> by_ident;
+  for (const Waypoint& w : data.waypoints) {
+    by_ident[w.ident.ident].emplace_back(w.ident.arinc424_icao_code, w.coord);
+  }
+  for (const Airport& a : data.airports) {
+    by_ident[a.icao].emplace_back(a.arinc424_icao_code, a.coord);
+  }
+  auto center_region = [&](const std::string& ident, const std::optional<Coordinate>& at,
+                           std::string fallback) {
+    auto it = by_ident.find(ident);
+    if (it == by_ident.end() || !at) {
+      return fallback;
+    }
+    for (const auto& [region, coord] : it->second) {
+      if (coord.DistanceTo(*at) < kSamePointNm) {
+        return region;
+      }
+    }
+    return fallback;
+  };
   return ForEachRow(stmt, [&]() {
     MsaSector sector;
-    // center latitude/longitude are available but MsaSector.center is an Ident
-    // with no coordinate slot (matching X-Plane, which also discards them); the
-    // center is resolved by name from the waypoint/navaid set.
-    sector.center = Ident{ColumnText(stmt, 1), {}};
+    // center latitude/longitude locate the center only; MsaSector.center is an
+    // Ident with no coordinate slot (matching X-Plane, which discards them).
+    const std::string center = ColumnText(stmt, 1);
+    sector.center =
+        Ident{center, center_region(center, ColumnCoord(stmt, 2, 3), ColumnText(stmt, 15))};
     sector.airport_icao = ColumnText(stmt, 0);
     const int radius = ColumnInt(stmt, 4);
     for (int i = 0; i < 5; ++i) {
@@ -450,7 +476,8 @@ Result<void> LoadMsa(sqlite3* conn, NavData& data) {
       if (bearing == 0 && alt == 0) {
         break;  // unused sector slot
       }
-      sector.arcs.push_back(MsaArc{bearing, alt, radius});
+      // DFD writes a north sector boundary as 360; earth_msa.dat as 000.
+      sector.arcs.push_back(MsaArc{bearing % 360, alt, radius});
     }
     if (!sector.arcs.empty()) {
       data.msa.push_back(std::move(sector));
@@ -588,15 +615,19 @@ namespace {
 // the SELECT defined in LoadProcTable. v2 reorders/renames some columns, so
 // Dfd2Loader defines its own layout; here is v1's.
 struct ProcCols {
-  int airport = 0;       // airport_identifier
-  int proc = 1;          // procedure_identifier
-  int route_type = 2;    // route_type (numeric for SID/STAR, alpha for IAP)
-  int transition = 3;    // transition_identifier
-  int seqno = 4;         // seqno
-  int wp_ident = 5;      // waypoint_identifier
-  int wp_icao = 6;       // waypoint_icao_code
-  int path_term = 7;     // path_termination
-  int course = 8;        // magnetic_course
+  int airport = 0;     // airport_identifier
+  int proc = 1;        // procedure_identifier
+  int route_type = 2;  // route_type (numeric for SID/STAR, alpha for IAP)
+  int transition = 3;  // transition_identifier
+  int seqno = 4;       // seqno
+  int wp_ident = 5;    // waypoint_identifier
+  int wp_icao = 6;     // waypoint_icao_code
+  int path_term = 7;   // path_termination
+  // magnetic_course. v1 has no course_flag: a true-referenced leg (v2 flag 'T',
+  // 693 legs in 2601, e.g. BGTL WENSA2) arrives as magnetic course / 10 (12.2
+  // for 122 deg) with nothing marking it, so it cannot be recovered here and is
+  // read as published. DFD v2 and X-Plane carry the flag (course_true).
+  int course = 8;
   int dist_value = 9;    // route_distance_holding_distance_time (REAL)
   int dist_flag = 10;    // distance_time (TEXT 'D'/'T'/blank)
   int alt_desc = 11;     // altitude_description

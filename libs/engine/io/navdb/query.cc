@@ -158,6 +158,7 @@ Result<std::optional<AirportProcedureDetail>> NavDatabase::LookupProcedureDetail
       info.fix = std::string(leg.fix.IdentView());
       info.path_term = PathTerminatorName(leg.path_term);
       info.course_deg = leg.course_deg;
+      info.course_true = leg.course_true;
       info.distance_nm = leg.distance_nm;
       info.alt = FormatAltToken(leg.alt());
       info.rnp_nm = leg.rnp_centinm / kCentiScale;
