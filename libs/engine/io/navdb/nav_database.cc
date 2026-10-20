@@ -187,6 +187,15 @@ Result<uint32_t> NavDatabase::WriteUnified(const std::string& out_path) const {
 }
 
 Result<const CifpData*> NavDatabase::Impl::ProceduresFor(const std::string& icao) const {
+  // Only a real airport of this database can have procedures. A client-supplied
+  // id that is not one -- a typo, an arbitrary 32-character string -- returns
+  // "none" without touching the cache: the on-demand cache keys on the caller's
+  // string, so caching every miss would let any caller grow it without bound
+  // (~125 B per distinct id). A genuine airport that has no CIFP file is still
+  // cached as a nullptr, which is bounded by the airport count.
+  if (!builder_ || !FixedName8::From(icao) || builder_->VertexByAirport(icao) < 0) {
+    return Result<const CifpData*>::Ok(nullptr);
+  }
   // Eager mode: the cache was fully populated at Open and is now frozen, so a
   // plain read needs no lock (no concurrent insert can rehash it). A miss means
   // the airport simply has no procedures.
