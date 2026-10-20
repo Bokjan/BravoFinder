@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -13,6 +14,15 @@ namespace bf {
 // matched / non-preferred edges out of the optimal route while leaving them
 // usable when no alternative exists.
 inline constexpr double kDefaultPenaltyFraction = 0.5;
+
+// Farthest a single request may chain forced ("via") points. Each point is
+// another search hop -- with N points the router runs N+1 K-shortest searches --
+// so the cost is linear in a caller-controlled number; 16 is far past any real
+// flight plan (a departure and arrival route cross a handful of named fixes at
+// most) and keeps one request's work bounded. A repeated point is rejected
+// outright (it can never yield a simple route: the hop would have to leave the
+// fix and come back).
+inline constexpr std::size_t kMaxForcedPoints = 16;
 
 // Preferred airway level when both high and low options exist.
 enum class LevelPreference {

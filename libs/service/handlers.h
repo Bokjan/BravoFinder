@@ -49,10 +49,15 @@ inline constexpr int kErrorStatusThreshold = 400;
 // Max entries in any request ID array (forced_points, avoid_waypoints, lookup
 // ids, and each airway_rule's region_prefixes/designators lists).
 inline constexpr size_t kMaxIdListSize = 256;
+// Max forced ("via") points per find_routes call. Each one adds a search hop, so
+// this rides on bf::kMaxForcedPoints rather than the generic list cap; kept here
+// so the adapter's 400 message and the MCP schema maximum stay in step with it.
+inline constexpr size_t kMaxForcedPoints = bf::kMaxForcedPoints;
 // Max accepted flight level (hundreds of feet). FL600 is above any civil cruise.
 inline constexpr int kMaxFl = 600;
-// Cap on Yen K-shortest alternatives per find_routes call (server protection;
-// the CLI does not enforce this).
+// Cap on Yen K-shortest alternatives per find_routes call, enforced here in the
+// adapter and again by the CLI (apps/cli/cmd_route.cc) so both front-ends give
+// the same answer. The typed entry itself does not cap k.
 inline constexpr int kMaxK = 15;
 // Max length for ICAO / procedure / runway / SID / STAR / airway-rule idents
 // (and similar short strings). Far above any real ident; rejects pathological

@@ -99,21 +99,14 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
   route
       ->add_option("--via", a->via,
                    "Force the route through these waypoint(s), in order; ident or "
-                   "IDENT/ARINC424_ICAO_CODE. Repeatable.")
+                   "IDENT/ARINC424_ICAO_CODE. Repeatable, at most " +
+                       std::to_string(bf::service::kMaxForcedPoints) + " points.")
       ->allow_extra_args(false);
 
   route->callback([a, &exit_code]() {
-    // With --db, load the prebuilt cache (milliseconds); otherwise parse and
-    // build from the data directory. On the cached path, procedures come from
-    // the same unified .bfdb; on the raw path, --data locates CIFP files for
-    // on-demand procedure parsing.
-    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
-    if (!db) {
-      bf::service::PrintError(db.error().message);
-      exit_code = EXIT_FAILURE;
-      return;
-    }
-
+    // Validate every option before touching the data: OpenForRead on the raw
+    // path is a full parse and graph build (seconds, gigabytes), so a typo in
+    // --alt or --airway-filter must not pay for it first.
     RouteRequest request;
     request.departure = a->departure;
     request.arrival = a->arrival;
@@ -152,6 +145,23 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
     }
     if (request.k > bf::service::kMaxK) {
       bf::service::PrintError("{} must not exceed {} (got {})", "k", bf::service::kMaxK, request.k);
+      exit_code = EXIT_FAILURE;
+      return;
+    }
+    if (request.forced_points.size() > bf::service::kMaxForcedPoints) {
+      bf::service::PrintError("{} must not exceed {} (got {})", "--via",
+                              bf::service::kMaxForcedPoints, request.forced_points.size());
+      exit_code = EXIT_FAILURE;
+      return;
+    }
+
+    // With --db, load the prebuilt cache (milliseconds); otherwise parse and
+    // build from the data directory. On the cached path, procedures come from
+    // the same unified .bfdb; on the raw path, --data locates CIFP files for
+    // on-demand procedure parsing.
+    Result<NavDatabase> db = OpenForRead(a->db_path, a->data_dir, a->cifp_load);
+    if (!db) {
+      bf::service::PrintError(db.error().message);
       exit_code = EXIT_FAILURE;
       return;
     }

@@ -419,6 +419,11 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   // else from the first seeded connection fix.
   std::vector<int> forced;
   std::vector<std::string> forced_echo;
+  if (request.forced_points.size() > kMaxForcedPoints) {
+    return Result<Routes>::Err(Error(ErrorCode::kRouteParseError,
+                                     std::format("at most {} forced points are supported (got {})",
+                                                 kMaxForcedPoints, request.forced_points.size())));
+  }
   if (!request.forced_points.empty()) {
     const int dep_apt = impl_->builder_->VertexByAirport(ToUpper(request.departure));
     const int arr_apt = impl_->builder_->VertexByAirport(ToUpper(request.arrival));
@@ -442,6 +447,14 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
       if (std::binary_search(avoid_vertices.begin(), avoid_vertices.end(), v)) {
         return Result<Routes>::Err(Error(ErrorCode::kRouteParseError,
                                          "forced point '" + token + "' is also in the avoid list"));
+      }
+      // A repeated point cannot be part of a simple route (the hop between two
+      // visits has to leave it and come straight back), and it doubles the
+      // search work, so reject it up front: the same fix named twice, or two
+      // spellings ("PSB" and "PSB/K6") that resolve to the same vertex.
+      if (std::find(forced.begin(), forced.end(), v) != forced.end()) {
+        return Result<Routes>::Err(
+            Error(ErrorCode::kRouteParseError, "forced point '" + token + "' is repeated"));
       }
       forced.push_back(v);
       forced_echo.push_back(echo);

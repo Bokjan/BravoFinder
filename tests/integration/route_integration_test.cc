@@ -437,6 +437,39 @@ TEST_CASE("real data: an unknown forced point is an error", "[integration]") {
   CHECK_FALSE(r);
 }
 
+TEST_CASE("real data: a repeated forced point is rejected", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // The same fix named twice, and the ident/pair spellings of one fix, both
+  // resolve to the same vertex; the hop between the two visits would have to
+  // leave the fix and come straight back, so the request is refused instead of
+  // burning a search on it.
+  for (const std::vector<std::string>& forced :
+       {std::vector<std::string>{"DBL", "DBL"}, std::vector<std::string>{"DBL", "DBL/K2"}}) {
+    bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+    req.forced_points = forced;
+    bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+    REQUIRE_FALSE(r);
+    CHECK(r.error().message.find("repeated") != std::string::npos);
+  }
+}
+
+TEST_CASE("real data: more forced points than the cap are rejected", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // One more than the cap fails before any search runs, so the placeholder
+  // idents never need to resolve.
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.forced_points.assign(bf::kMaxForcedPoints + 1, "DBL");
+  bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+  REQUIRE_FALSE(r);
+  CHECK(r.error().message.find("forced points") != std::string::npos);
+}
+
 TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

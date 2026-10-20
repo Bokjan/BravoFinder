@@ -76,18 +76,19 @@ QueryHandler RequireObjectArgs(QueryHandler inner) {
 }
 
 // Parse a string-array argument. Returns nullopt if the member is absent OR
-// malformed (not an array, a non-string element, more than kMaxIdListSize
-// entries, or an entry longer than kMaxIdentStringLen). Callers that need to
-// tell "absent" (skip) from "present but bad" (reject) check HasKey themselves
+// malformed (not an array, a non-string element, more than `max_size` entries,
+// or an entry longer than kMaxIdentStringLen). Callers that need to tell
+// "absent" (skip) from "present but bad" (reject) check HasKey themselves
 // before deciding.
 std::optional<std::vector<std::string>> ParseIdList(const rapidjson::Value& args,
-                                                    std::string_view key) {
+                                                    std::string_view key,
+                                                    size_t max_size = kMaxIdListSize) {
   const rapidjson::Value* arr_v = Member(args, key);
   if (!arr_v || !arr_v->IsArray()) {
     return std::nullopt;
   }
   const rapidjson::Value& arr = *arr_v;
-  if (arr.Size() > kMaxIdListSize) {
+  if (arr.Size() > max_size) {
     return std::nullopt;  // over the cap: treat as malformed so callers reject it
   }
   std::vector<std::string> ids;
@@ -392,9 +393,9 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
   }
   // Cap k as well: each extra path costs a full spur A* search, so an unbounded k
   // (e.g. 2e9) would pin a worker for a long time and let a few requests exhaust
-  // the threadpool. kMaxK far exceeds any real "give me alternatives" use. (The
-  // CLI does not enforce this cap -- it is a server-protection concern -- so the
-  // cap lives here in the adapter, not in the typed entry.)
+  // the threadpool. kMaxK far exceeds any real "give me alternatives" use. The
+  // typed entry itself does not cap k; both front-ends do, here and in
+  // apps/cli/cmd_route.cc.
   if (request.k > kMaxK) {
     return {JsonError(std::format("{} must not exceed {}", kKeyK, kMaxK)), kStatusBadRequest};
   }
@@ -437,10 +438,10 @@ HandlerResult FindRoutesHandler(const rapidjson::Value& args, const NavDatabase&
     request.random_seed = seed_v->GetUint();
   }
   if (HasKey(args, kKeyForcedPoints)) {
-    auto v = ParseIdList(args, kKeyForcedPoints);
+    auto v = ParseIdList(args, kKeyForcedPoints, kMaxForcedPoints);
     if (!v) {
       return {JsonError(std::format("{} must be an array of at most {} strings", kKeyForcedPoints,
-                                    kMaxIdListSize)),
+                                    kMaxForcedPoints)),
               kStatusBadRequest};
     }
     request.forced_points = std::move(*v);

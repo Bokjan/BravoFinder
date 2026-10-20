@@ -134,7 +134,7 @@ std::string FindRoutesSchema() {
          R"(:{"type":"integer","minimum":0,"maximum":)" + std::to_string(max_u32) +
          R"(,"description":"Seed for reproducible route diversity. The same seed always yields the same route; different seeds explore alternatives. Omit for the plain optimal route."},)" +
          JKey(kKeyForcedPoints) + R"(:{"type":"array","maxItems":)" +
-         std::to_string(kMaxIdListSize) + R"(,"items":)" + id_item +
+         std::to_string(kMaxForcedPoints) + R"(,"items":)" + id_item +
          R"(,"description":"Ordered waypoints the route must pass through (via points), each an ident (PSB) or IDENT/ARINC424_ICAO_CODE (PSB/K6). The response echoes them resolved as IDENT/ARINC424_ICAO_CODE."}},)" +
          R"("required":[)" + JKey(kKeyDeparture) + "," + JKey(kKeyArrival) + "]}";
 }
