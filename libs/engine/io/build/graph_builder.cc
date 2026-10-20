@@ -5,11 +5,13 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "core/domain/coordinate.h"
 #include "core/domain/nav_tokens.h"
 
 namespace bf {
@@ -70,6 +72,40 @@ class GraphBuilder::DegreeGrid {
       }
     }
     return out;
+  }
+
+  // A lower bound on the great-circle distance from `c` to any point outside
+  // the cells Near(c, radius_deg) visits, in NM; +infinity once those cells
+  // cover the whole globe. The visited square spans latitudes
+  // [lat0 - r, lat0 + r + 1) and longitudes [lon0 - r, lon0 + r + 1). A point
+  // north or south of it is at least the latitude gap away (the arc along a
+  // meridian is the shortest); a point east or west of it lies beyond a
+  // bounding meridian, and the distance to that meridian's great circle is
+  // asin(cos(lat) * sin(dlon)). The second term is what makes high latitudes
+  // correct: there a degree of longitude spans far less than 60 NM.
+  static double OutsideLowerBoundNm(const Coordinate& c, int radius_deg) {
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    constexpr double kDegToRad = kPi / kDegreesHalfCircle;
+    constexpr double kQuarterCircle = kDegreesHalfCircle / 2.0;
+    const double lat0 = std::floor(c.latitude);
+    const double lon0 = std::floor(c.longitude);
+    const double r = radius_deg;
+    const double south = lat0 - r;
+    const double north = lat0 + r + 1.0;
+    double gap_rad = kInf;
+    if (south > -kQuarterCircle) {
+      gap_rad = std::min(gap_rad, (c.latitude - south) * kDegToRad);
+    }
+    if (north < kQuarterCircle) {
+      gap_rad = std::min(gap_rad, (north - c.latitude) * kDegToRad);
+    }
+    if (2.0 * r + 1.0 < kDegreesFullCircle) {
+      const double dlon =
+          std::min({c.longitude - (lon0 - r), (lon0 + r + 1.0) - c.longitude, kQuarterCircle});
+      const double s = std::cos(c.latitude * kDegToRad) * std::sin(dlon * kDegToRad);
+      gap_rad = std::min(gap_rad, std::asin(std::clamp(s, 0.0, 1.0)));
+    }
+    return gap_rad == kInf ? kInf : gap_rad * kEarthRadiusNm;
   }
 
  private:
@@ -322,14 +358,16 @@ std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int cou
   std::vector<std::pair<double, int>> scored;
 
   if (grid_) {
-    // Expand the cell search radius until enough on-network candidates are
-    // found. The geometric progression reaches a whole-globe scan (radius 180)
-    // so sparse regions (poles / mid-ocean) still return the global nearest set
-    // -- matching the previous O(V) scan exactly, so route output stays
-    // bit-identical. In practice radius 2-4 already yields far more than `count`
-    // candidates, so the loop exits early and never touches most of the graph.
-    // A dedup set is needed because antimeridian wrapping can make a large
-    // radius visit the same cell twice.
+    // Expand the cell search radius until the `count` nearest candidates found
+    // so far are provably the global nearest: the count-th distance must lie
+    // strictly inside the lower bound on anything the search has not visited.
+    // Merely having `count` candidates is not enough -- a square of degree
+    // cells is not a disc, and at high latitude it is a narrow sliver east to
+    // west, so an unvisited cell can hold a closer point. The geometric
+    // progression ends in a whole-globe scan (radius 180), so the result always
+    // matches a full O(V) scan. In practice radius 2-4 already settles it, so
+    // the loop never touches most of the graph. A dedup set is needed because
+    // antimeridian wrapping can make a large radius visit the same cell twice.
     std::unordered_set<int> seen;
     for (int radius : {2, 4, 8, 16, 32, 64, 128, 180}) {
       scored.clear();
@@ -340,7 +378,13 @@ std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int cou
         }
       }
       if (static_cast<int>(scored.size()) >= count) {
-        break;
+        std::nth_element(scored.begin(), scored.begin() + (count - 1), scored.end());
+        // A small slack absorbs the rounding between the bound and haversine;
+        // the strict test keeps a tie on the boundary from settling early.
+        constexpr double kSlackNm = 1e-6;
+        if (scored[count - 1].first < DegreeGrid::OutsideLowerBoundNm(coord, radius) - kSlackNm) {
+          break;
+        }
       }
     }
   } else {

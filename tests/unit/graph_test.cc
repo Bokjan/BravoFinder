@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: MIT
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cmath>
+#include <cstdint>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "core/constraints/altitude_constraints.h"
+#include "core/domain/coordinate.h"
 #include "core/domain/fixed_string.h"
 #include "core/domain/procedure.h"
 #include "core/graph/astar.h"
@@ -597,6 +603,92 @@ TEST_CASE("off-network published STAR/SID gates produce DCT-splice proxies", "[u
       for (const bf::ProcedureRef& ref : conn.procedures) {
         CHECK(ref.name == "STARB");
       }
+    }
+  }
+}
+
+}  // namespace
+
+namespace {
+
+// A network of two-way airway pairs (each pair "<name>A" <-> "<name>B"), so
+// every listed point is on-network in both directions.
+bf::GraphBuilder MakePairNetwork(const std::vector<bf::Coordinate>& coords) {
+  bf::NavData d;
+  bf::AirwaySegment seg;
+  seg.name = "Q1";
+  seg.direction = bf::AirwayDirection::kBoth;
+  for (size_t i = 0; i < coords.size(); ++i) {
+    std::string id = "P";
+    for (size_t n = i; id.size() < 5; n /= 26) {
+      id += static_cast<char>('A' + n % 26);
+    }
+    d.waypoints.push_back(bf::Waypoint{bf::Ident(id, "ZZ"), coords[i], bf::WaypointKind::kFix});
+    if (i % 2 == 1) {
+      d.airways.push_back({d.waypoints[i - 1].ident, d.waypoints[i].ident, seg});
+    }
+  }
+  return MakeBuilder(d);
+}
+
+// The reference answer: the `count` nearest on-network vertices by a full scan,
+// ties broken on vertex id.
+std::vector<int> BruteNearest(const bf::GraphBuilder& builder, const bf::Coordinate& at,
+                              int count) {
+  std::vector<std::pair<double, int>> scored;
+  for (int v = 0; v < builder.graph().VertexCount(); ++v) {
+    if (builder.HasOutbound(v)) {
+      scored.emplace_back(at.DistanceTo(builder.graph().CoordOf(v)), v);
+    }
+  }
+  std::sort(scored.begin(), scored.end());
+  std::vector<int> out;
+  for (int i = 0; i < count && i < static_cast<int>(scored.size()); ++i) {
+    out.push_back(scored[i].second);
+  }
+  return out;
+}
+
+TEST_CASE("NearestOnNetwork finds a closer fix in an unvisited cell at high latitude",
+          "[unit][graph]") {
+  // At 60.9N the first search square spans 2.5 degrees of longitude to the
+  // west (about 73 NM) but six southern points 160 NM away already fill it.
+  // The closest fix sits just past the west edge, about 76 NM away; stopping
+  // as soon as the square holds enough candidates would miss it.
+  std::vector<bf::Coordinate> coords;
+  for (int i = 0; i < 6; ++i) {
+    coords.push_back(bf::Coordinate{58.2, 9.0 + 0.5 * i});
+  }
+  coords.push_back(bf::Coordinate{60.9, 7.9});
+  coords.push_back(bf::Coordinate{60.9, 7.8});
+  const bf::GraphBuilder builder = MakePairNetwork(coords);
+  const bf::Coordinate at{60.9, 10.5};
+  const std::vector<int> got = builder.NearestOnNetwork(at, 5, /*inbound=*/false);
+  CHECK(got == BruteNearest(builder, at, 5));
+  REQUIRE_FALSE(got.empty());
+  CHECK(builder.graph().CoordOf(got.front()).longitude == 7.9);
+}
+
+TEST_CASE("NearestOnNetwork matches a full scan across latitudes", "[unit][graph]") {
+  // A deterministic scatter (a fixed linear congruential generator, so the case
+  // is reproducible) over the whole globe, then queries at every tenth degree
+  // band, including the polar caps and the antimeridian.
+  uint64_t state = 12345;
+  const auto next = [&state] {
+    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return static_cast<double>(state >> 11) / static_cast<double>(1ULL << 53);
+  };
+  std::vector<bf::Coordinate> coords;
+  for (int i = 0; i < 4000; ++i) {
+    const double lat = std::asin(2.0 * next() - 1.0) * 180.0 / bf::kPi;  // uniform on the sphere
+    coords.push_back(bf::Coordinate{lat, -180.0 + 360.0 * next()});
+  }
+  const bf::GraphBuilder builder = MakePairNetwork(coords);
+  for (double lat = -89.5; lat < 90.0; lat += 10.0) {
+    for (double lon : {-179.7, -60.2, 0.0, 33.3, 179.8}) {
+      const bf::Coordinate at{lat, lon};
+      CAPTURE(lat, lon);
+      CHECK(builder.NearestOnNetwork(at, 5, /*inbound=*/false) == BruteNearest(builder, at, 5));
     }
   }
 }
