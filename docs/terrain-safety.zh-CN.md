@@ -77,14 +77,19 @@ MORA 通过[可插拔约束框架](compliant-routing.zh-CN.md)接入搜索，是
 ```cpp
 EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest& request) const override {
   if (!request.altitude.has_value()) return EdgeVerdict::Allow();  // 没给高度,不管
-  const int16_t mora = grid_.MoraAt(ctx.to_coord);
-  if (mora == 0) return EdgeVerdict::Allow();                      // 未知格,无下限
+  const int16_t mora = MaxMoraAlongLeg(ctx.from_coord, ctx.to_coord);  // 沿途所有格的最大值
+  if (mora == 0) return EdgeVerdict::Allow();                      // 沿途全是未知格,无下限
   if (request.altitude->max_fl < mora) return EdgeVerdict::Block(); // 连顶都低于 MORA
   return EdgeVerdict::Allow();
 }
 ```
 
-即：一条边进入的格子若 MORA 高于你区间的**上限**，这条边就飞不安全，搜索直接看不到它。这样选出的航路能全程保持在地形/障碍之上——而不只是几何最短。
+即：一条边**经过的任何一个格子**若 MORA 高于你区间的**上限**，这条边就飞不安全，搜索直接看不到它。这样选出的航路能全程保持在地形/障碍之上——而不只是几何最短。
+
+「经过的格子」要算全，两处容易漏：
+
+- **按格遍历，不按点采样**。早先沿航段每 0.5° 取一个点查格子，看上去比 1° 网格细，但斜穿时会漏掉只被切到一个角的格子——例如 (0.1, 0)→(1.1, 1.0) 在经度 0.9 处就进入了 (1, 0) 格，而中点 (0.6, 0.5) 仍在 (0, 0)。现在用网格遍历（每次走到最先碰到的那条格线，跨入相邻格），访问次数恰好等于跨过的格线数，一个格都不会漏，也不需要三角函数。
+- **长航段沿大圆走，不沿纬线走**。经纬度直线插值在高纬长航段上会偏离大圆：70°N 上一条东西跨 40° 的航段，大圆中点在约 71.1°N，经纬度直线却一直贴着 70°N。所以经纬度跨度超过 5° 的航段先沿大圆（球面线性插值）切成每段不超过 5° 弧长的小段，再对每小段做网格遍历；5° 以内的小段与大圆的偏差只有百分之一度量级。绝大多数航路边都在 5° 以内，热路径上不碰三角函数。
 
 ## 5. 一个诚实的近似：MORA 是 MSL，FL 是气压高度
 

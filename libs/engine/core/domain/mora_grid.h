@@ -67,6 +67,20 @@ class MoraGrid {
     return idx >= 0 ? cells_[idx] : 0;
   }
 
+  // The MORA flight level of the cell whose south-west corner is the integer
+  // (lat, lon), or 0 if unknown. Longitude wraps (lon 180 is lon -180, 181 is
+  // -179), so a caller walking an unwrapped track across the antimeridian can
+  // pass its raw cell index; latitude 90 is the +89 row, and anything beyond
+  // the poles is unknown.
+  int16_t MoraAtCell(int lat, int lon) const {
+    if (lat == 90) {
+      lat = 89;
+    }
+    const int wrapped = ((lon + 180) % kLonCount + kLonCount) % kLonCount - 180;
+    const int idx = Index(lat, wrapped);
+    return idx >= 0 ? cells_[idx] : 0;
+  }
+
   bool Empty() const { return populated_ == 0; }
 
   // The raw cell array (row-major, size kLatCount * kLonCount) for

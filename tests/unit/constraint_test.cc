@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -177,6 +179,60 @@ TEST_CASE("MORA: a high cell on the antimeridian crossing still blocks", "[unit]
   bf::EdgeContext ctx{MakeEdge(0, 0, false), bf::Coordinate{0.5, 179.2},
                       bf::Coordinate{0.5, -179.4}};
   CHECK_FALSE(c.Evaluate(ctx, WithAltitude(200)).allowed);  // below the FL300 floor
+}
+
+TEST_CASE("MORA: a cell the leg only clips at a corner still counts", "[unit][constraint]") {
+  // (0.1, 0.0) -> (1.1, 1.0) crosses into row 1 at lon 0.9, so it passes
+  // through cell (1, 0) before reaching (1, 1). Point sampling at the leg's
+  // midpoint saw only (0, 0) and the endpoints' cells and missed it.
+  bf::MoraGrid grid;
+  grid.SetCell(1, 0, 300);
+  bf::MoraConstraint c(grid);
+  bf::EdgeContext ctx{MakeEdge(0, 0, false), bf::Coordinate{0.1, 0.0}, bf::Coordinate{1.1, 1.0}};
+  CHECK_FALSE(c.Evaluate(ctx, WithAltitude(200)).allowed);
+}
+
+TEST_CASE("MORA: a long leg follows its great circle, not the parallel", "[unit][constraint]") {
+  // A 40-degree east-west leg along 70N: its great circle bulges to about
+  // 71.1N mid-way, through row 71, which the lat/lon chord along 70N never
+  // touches.
+  bf::MoraGrid grid;
+  grid.SetCell(71, 0, 300);
+  bf::MoraConstraint c(grid);
+  bf::EdgeContext ctx{MakeEdge(0, 0, false), bf::Coordinate{70.5, -20.0},
+                      bf::Coordinate{70.5, 20.0}};
+  CHECK_FALSE(c.Evaluate(ctx, WithAltitude(200)).allowed);
+  // And the far side of the bulge stays clear: row 72 is never reached.
+  bf::MoraGrid far;
+  far.SetCell(72, 0, 300);
+  bf::MoraConstraint c_far(far);
+  CHECK(c_far.Evaluate(ctx, WithAltitude(200)).allowed);
+}
+
+TEST_CASE("MORA: every cell a short leg passes through is seen", "[unit][constraint]") {
+  // Deterministic random legs of up to 4 degrees; a high cell placed under any
+  // point of the leg (found by fine stepping) must block it.
+  uint64_t state = 0x5EED;
+  const auto next = [&state] {
+    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return static_cast<double>(state >> 11) / static_cast<double>(1ULL << 53);
+  };
+  for (int trial = 0; trial < 300; ++trial) {
+    const bf::Coordinate a{-60.0 + 120.0 * next(), -179.0 + 358.0 * next()};
+    const bf::Coordinate b{a.latitude + 8.0 * next() - 4.0, a.longitude + 8.0 * next() - 4.0};
+    const double t = next();
+    const bf::Coordinate p{a.latitude + (b.latitude - a.latitude) * t,
+                           a.longitude + (b.longitude - a.longitude) * t};
+    bf::MoraGrid grid;
+    const int lon = static_cast<int>(std::floor(p.longitude));
+    grid.SetCell(static_cast<int>(std::floor(p.latitude)), lon >= 180 ? lon - 360 : lon, 300);
+    bf::MoraConstraint c(grid);
+    // b may sit past +/-180; the constraint sees the wrapped coordinate.
+    const bf::Coordinate b_wrapped{b.latitude, std::remainder(b.longitude, 360.0)};
+    bf::EdgeContext ctx{MakeEdge(0, 0, false), a, b_wrapped};
+    CAPTURE(trial, a.latitude, a.longitude, b.latitude, b.longitude, t);
+    CHECK_FALSE(c.Evaluate(ctx, WithAltitude(200)).allowed);
+  }
 }
 
 TEST_CASE("MORA grid floors negative coordinates correctly", "[unit][constraint]") {
