@@ -52,7 +52,13 @@ bool CostOfPath(const NavGraph& graph, const std::vector<int>& path, const Searc
   distance = 0.0;
   const size_t m = path.size();
   if (m < 2) {
-    return true;  // no edges; CostOfPathMulti handles the endpoint seeds
+    // No edges; CostOfPathMulti handles the endpoint seeds. A source that is
+    // also the goal still turns from the procedure's inbound heading onto its
+    // outbound one, and A* charges that turn, so the re-cost must as well.
+    if (options.turn_penalty.enabled && src_bearing >= 0.0 && goal_bearing >= 0.0) {
+      cost += options.turn_penalty(TurnAngleDeg(src_bearing, goal_bearing));
+    }
+    return true;
   }
   // Honor caller/Yen node and edge bans the same way the A* hot loop does, so a
   // re-cost cannot accept a path the search would have refused (or vice versa).

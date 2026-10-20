@@ -315,17 +315,20 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
         continue;
       }
       // Turn-angle penalty for leaving u toward v: the heading the path arrived
-      // on (inb_u) vs. the heading of edge u->v. Computed only when enabled and
-      // when u has a known inbound (sources without a procedure heading, and
-      // the very first edge out of a fresh source, fall back to no penalty).
-      // The outbound bearing is reused as v's inbound, so each relaxation pays
-      // exactly one atan2 and the inbound is never recomputed downstream.
+      // on (inb_u) vs. the heading of edge u->v. Only a source without a
+      // procedure heading has no inbound, so only its first edge goes unpriced.
+      // The outbound bearing is computed whenever the penalty is enabled, even
+      // when inb_u is unknown, because it becomes v's inbound: dropping it there
+      // would leave every later turn on the path unpriced as well. Each
+      // relaxation pays exactly one atan2 and the inbound is never recomputed.
       double turn_cost = 0.0;
       double outb = kNoBearing;
-      if (turn.enabled && inb_u >= 0.0) {
+      if (turn.enabled) {
         const Coordinate v_coord = graph.CoordOf(v);
         outb = u_coord.BearingTo(v_coord);
-        turn_cost = turn(TurnAngleDeg(inb_u, outb));
+        if (inb_u >= 0.0) {
+          turn_cost = turn(TurnAngleDeg(inb_u, outb));
+        }
       }
       const double tentative = ws.G(u) + e->distance_nm + extra_cost + turn_cost;
       if (tentative < ws.G(v)) {

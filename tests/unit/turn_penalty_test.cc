@@ -2,9 +2,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <utility>
+#include <vector>
 
 #include "core/domain/coordinate.h"
 #include "core/graph/astar.h"
+#include "core/graph/yen_kshortest.h"
 #include "io/build/graph_builder.h"
 
 using Catch::Matchers::WithinRel;
@@ -153,4 +155,100 @@ TEST_CASE("A* turn penalty steers off a reversing SID exit", "[unit][turn_penalt
     // The 180-degree reversal at S1 is priced into cost but the route exists.
     CHECK(p.cost > p.distance_nm);
   }
+}
+
+namespace {
+
+// A source with no heading, two ways to G (all airways forward-only):
+//
+//   S (0,0) -> A (0,1) -> G (0,0.5)      90 NM, reverses 180 degrees at A
+//   S (0,0) -> C (1.2,0.25) -> G         ~147 NM, a ~156-degree turn at C
+//
+// S-A-G is shorter but its reversal at A is the dearer turn.
+bf::GraphBuilder MakeMidPathReversalGraph() {
+  bf::NavData d;
+  auto wp = [](const char* id, double lat, double lon) {
+    return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{lat, lon}, bf::WaypointKind::kFix};
+  };
+  d.waypoints = {wp("S", 0.0, 0.0), wp("A", 0.0, 1.0), wp("G", 0.0, 0.5), wp("C", 1.2, 0.25)};
+  bf::AirwaySegment seg;
+  seg.name = "Q1";
+  seg.direction = bf::AirwayDirection::kForward;
+  d.airways = {
+      {bf::Ident("S", "ZZ"), bf::Ident("A", "ZZ"), seg},
+      {bf::Ident("A", "ZZ"), bf::Ident("G", "ZZ"), seg},
+      {bf::Ident("S", "ZZ"), bf::Ident("C", "ZZ"), seg},
+      {bf::Ident("C", "ZZ"), bf::Ident("G", "ZZ"), seg},
+  };
+  auto result = bf::GraphBuilder::Build(d);
+  REQUIRE(result);
+  return std::move(result).value();
+}
+
+}  // namespace
+
+TEST_CASE("A* prices mid-path turns when the source has no heading", "[unit][turn_penalty]") {
+  // A forced via-point seeds the next leg with no heading. Only the first edge
+  // out of it is free to choose; the turn at A must still be priced, or the
+  // search walks straight into the reversal it exists to avoid.
+  bf::GraphBuilder builder = MakeMidPathReversalGraph();
+  const bf::NavGraph& graph = builder.graph();
+  const int s = builder.VerticesByIdent("S")[0];
+  const int c = builder.VerticesByIdent("C")[0];
+  const int g = builder.VerticesByIdent("G")[0];
+  bf::SearchOptions opts;
+  opts.turn_penalty.enabled = true;
+  const std::vector<bf::SeededEndpoint> sources = {{s, 0.0, bf::kNoBearing}};
+  const std::vector<bf::SeededEndpoint> goals = {{g, 0.0, bf::kNoBearing}};
+
+  const bf::ShortestPath p = bf::FindShortestPathMulti(graph, sources, goals, opts);
+  REQUIRE(p.found);
+  CHECK(p.vertices == std::vector<int>{s, c, g});
+
+  // The search's own cost matches the independent re-cost of the same path.
+  const int n = graph.VertexCount();
+  std::vector<double> source_seed(n, -1.0);
+  std::vector<double> goal_seed(n, -1.0);
+  source_seed[s] = 0.0;
+  goal_seed[g] = 0.0;
+  const std::vector<double> no_bearing(n, bf::kNoBearing);
+  double cost = 0.0;
+  double distance = 0.0;
+  REQUIRE(bf::CostOfPathMulti(graph, p.vertices, source_seed, goal_seed, no_bearing, no_bearing,
+                              opts, cost, distance));
+  CHECK_THAT(p.cost, WithinRel(cost, 1e-9));
+}
+
+TEST_CASE("Yen prices a source-is-goal path like A* does", "[unit][turn_penalty]") {
+  // V is both a source (arriving north, bearing 0) and the goal (leaving
+  // south, bearing 180), so the empty path at V still turns 180 degrees. U is
+  // the other source, 60 NM south of V and also arriving north.
+  bf::NavData d;
+  auto wp = [](const char* id, double lat) {
+    return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{lat, 0.0}, bf::WaypointKind::kFix};
+  };
+  d.waypoints = {wp("V", 0.0), wp("W", 1.0), wp("U", -1.0)};
+  bf::AirwaySegment seg;
+  seg.name = "Q1";
+  seg.direction = bf::AirwayDirection::kForward;
+  d.airways = {{bf::Ident("V", "ZZ"), bf::Ident("W", "ZZ"), seg},
+               {bf::Ident("U", "ZZ"), bf::Ident("V", "ZZ"), seg}};
+  auto built = bf::GraphBuilder::Build(d);
+  REQUIRE(built);
+  const bf::GraphBuilder builder = std::move(built).value();
+  const int v = builder.VerticesByIdent("V")[0];
+  const int u = builder.VerticesByIdent("U")[0];
+  bf::SearchOptions opts;
+  opts.turn_penalty.enabled = true;
+
+  // U-V costs 60 NM + the 180-degree turn at V; V alone costs its 100 NM seed
+  // + the same turn. So U-V comes first, and V must come second at ~300, not
+  // at 100 with the turn dropped (which would rank it below the first path).
+  const std::vector<bf::ShortestPath> paths = bf::FindKShortestPathsMulti(
+      builder.graph(), {{v, 100.0, 0.0}, {u, 0.0, 0.0}}, {{v, 0.0, 180.0}}, 2, opts);
+  REQUIRE(paths.size() == 2);
+  CHECK(paths[0].vertices == std::vector<int>{u, v});
+  CHECK(paths[1].vertices == std::vector<int>{v});
+  CHECK(paths[0].cost <= paths[1].cost);
+  CHECK_THAT(paths[1].cost, WithinRel(100.0 + bf::TurnPenalty::kMaxPenaltyNm, 1e-9));
 }
