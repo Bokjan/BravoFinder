@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/navdb/forced_router.h"
 
-#include <cstdint>
-#include <queue>
+#include <algorithm>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -13,6 +12,66 @@
 #include "io/build/graph_builder.h"
 
 namespace bf {
+
+namespace {
+
+// How many per-hop combinations FindPaths stitches before it settles for the
+// best routes found so far. Far above what a normal request needs (a handful),
+// it only bounds the case where large turns at the forced fixes keep the lower
+// bound below every stitched route.
+constexpr int kMaxStitchedPicks = 4096;
+
+// Concatenate hop paths that meet at their shared seam vertices into one route
+// and re-cost it end to end (CostOfPathMulti, so the turns at the seams count).
+// Returns found=false if the route repeats a vertex or the re-cost rejects it.
+ShortestPath StitchAndCost(const NavGraph& graph, const std::vector<const std::vector<int>*>& parts,
+                           const std::vector<double>& source_seed,
+                           const std::vector<double>& goal_seed,
+                           const std::vector<double>& source_bearing,
+                           const std::vector<double>& goal_bearing, const SearchOptions& options) {
+  ShortestPath out;
+  std::vector<int> path;
+  for (const std::vector<int>* part : parts) {
+    if (part->empty()) {
+      return out;
+    }
+    if (path.empty()) {
+      path = *part;
+      continue;
+    }
+    if (path.back() != part->front()) {
+      return out;  // seam mismatch (should not happen: seam == forced fix)
+    }
+    // Use explicit loop instead of range-insert to avoid a GCC 14
+    // -Wstringop-overflow= false positive on __builtin_memcpy inside
+    // std::vector::insert(range). Reserve upfront so the loop allocates at
+    // most once, matching the original insert behaviour.
+    path.reserve(path.size() + part->size() - 1);
+    for (size_t i = 1; i < part->size(); ++i) {
+      path.push_back((*part)[i]);
+    }
+  }
+  std::unordered_set<int> seen;
+  seen.reserve(path.size());
+  for (const int v : path) {
+    if (!seen.insert(v).second) {
+      return out;  // cycle at a seam -> not a simple route
+    }
+  }
+  double cost = 0.0;
+  double dist = 0.0;
+  if (!CostOfPathMulti(graph, path, source_seed, goal_seed, source_bearing, goal_bearing, options,
+                       cost, dist)) {
+    return out;
+  }
+  out.vertices = std::move(path);
+  out.distance_nm = dist;
+  out.cost = cost;
+  out.found = true;
+  return out;
+}
+
+}  // namespace
 
 int ForcedRouter::ResolvePoint(const GraphBuilder& builder, const std::string& token,
                                const Coordinate& from, const Coordinate& to, std::string& echo,
@@ -85,6 +144,11 @@ std::vector<ShortestPath> ForcedRouter::FindPaths(const NavGraph& graph,
     if (cands.empty()) {
       return results;  // a hop is unroutable -> no forced route exists
     }
+    // The merge below needs each list in ascending cost order. Yen accepts in
+    // that order, but with the turn penalty on its first path comes from the
+    // greedy single-state A*, which a later candidate can undercut, so sort.
+    std::stable_sort(cands.begin(), cands.end(),
+                     [](const ShortestPath& a, const ShortestPath& b) { return a.cost < b.cost; });
     segments.push_back(std::move(cands));
   }
 
@@ -100,116 +164,134 @@ std::vector<ShortestPath> ForcedRouter::FindPaths(const NavGraph& graph,
 
   // Stitch one combination (one candidate index per segment) into a full path
   // and re-cost it under the full turn model. Returns found=false if the
-  // segments do not meet, the result has a cycle, or re-costing rejects it.
+  // result has a cycle (two hops share a vertex) or re-costing rejects it.
   auto stitch = [&](const std::vector<int>& pick) -> ShortestPath {
-    ShortestPath out;
-    std::vector<int> path;
+    std::vector<const std::vector<int>*> parts;
+    parts.reserve(hops);
     for (size_t h = 0; h < hops; ++h) {
-      const ShortestPath& seg = segments[h][pick[h]];
-      if (seg.vertices.empty()) {
-        return out;
-      }
-      if (path.empty()) {
-        path = seg.vertices;
-      } else {
-        if (path.back() != seg.vertices.front()) {
-          return out;  // seam mismatch (should not happen: seam == forced fix)
-        }
-        if (seg.vertices.size() > 1) {
-          // Use explicit loop instead of range-insert to avoid a GCC 14
-          // -Wstringop-overflow= false positive on __builtin_memcpy inside
-          // std::vector::insert(range). Reserve upfront so the loop
-          // allocates at most once, matching the original insert behaviour.
-          path.reserve(path.size() + seg.vertices.size() - 1);
-          for (size_t i = 1; i < seg.vertices.size(); ++i) {
-            path.push_back(seg.vertices[i]);
-          }
-        }
-      }
+      parts.push_back(&segments[h][pick[h]].vertices);
     }
-    std::unordered_set<int> seen;
-    seen.reserve(path.size());
-    for (const int v : path) {
-      if (!seen.insert(v).second) {
-        return out;  // cycle at a seam -> not a simple route
-      }
-    }
-    double cost = 0.0;
-    double dist = 0.0;
-    if (!CostOfPathMulti(graph, path, source_seed, goal_seed, source_bearing, goal_bearing, options,
-                         cost, dist)) {
-      return out;
-    }
-    out.vertices = std::move(path);
-    out.distance_nm = dist;
-    out.cost = cost;
-    out.found = true;
-    return out;
+    return StitchAndCost(graph, parts, source_seed, goal_seed, source_bearing, goal_bearing,
+                         options);
   };
 
-  // Lazy K-way merge over the Cartesian product of segment candidates, ordered
-  // by the re-costed full-path cost (not the sum of per-hop costs). Start from
-  // the all-best pick and expand a neighbor per segment each time a pick is
-  // popped. Each pick is stitched once when enqueued; the heap carries the path
-  // so pop does not re-stitch.
-  struct HeapItem {
-    double cost;
+  // Best-first enumeration of the Cartesian product of segment candidates. Each
+  // hop's list is in ascending cost order (Yen accepts in that order), so the
+  // sum of the picked hop costs never decreases along a pick's successors, and
+  // it is a lower bound on the stitched cost: re-costing adds only the turns at
+  // the forced fixes, which no single hop sees. So picks come off the heap in
+  // lower-bound order, every valid stitch waits in `ready`, and the cheapest
+  // ready route is emitted once no unexplored pick can undercut it -- output is
+  // in true cost order. A pick whose stitch is invalid (two hops share a
+  // vertex) is still expanded: the all-best pick failing must not end the
+  // search, since a cheap alternative in one hop usually avoids the clash.
+  //
+  // Each pick is generated once without a visited set: a pick advanced at hop
+  // `last` only advances hops >= last, so every index vector has exactly one
+  // parent chain. A budget bounds the work when seam turns keep the bound low.
+  struct PickItem {
+    double lower;
     std::vector<int> pick;
-    ShortestPath path;
-    bool operator>(const HeapItem& o) const { return cost > o.cost; }
+    size_t last;
   };
-  std::priority_queue<HeapItem, std::vector<HeapItem>, std::greater<>> heap;
-  // Dedup queued picks by a 64-bit FNV-1a hash of the pick vector, rather than
-  // copying every pick into a std::set<vector<int>>. A collision would drop one
-  // combo from the merge, but stitch() validates every emitted path, so the
-  // worst case is a missed alternative, never a wrong route.
-  auto hash_pick = [](const std::vector<int>& pick) -> uint64_t {
-    uint64_t h = 1469598103934665603ULL;  // FNV-1a offset basis
-    for (int idx : pick) {
-      const auto u = static_cast<uint32_t>(idx);
-      for (int b = 0; b < 4; ++b) {
-        h ^= static_cast<uint64_t>((u >> (b * 8)) & 0xFF);
-        h *= 1099511628211ULL;  // FNV prime
-      }
+  const auto pick_after = [](const PickItem& a, const PickItem& b) { return a.lower > b.lower; };
+  const auto route_after = [](const ShortestPath& a, const ShortestPath& b) {
+    if (a.cost != b.cost) {
+      return a.cost > b.cost;
     }
-    return h;
+    return a.vertices > b.vertices;
   };
-  std::unordered_set<uint64_t> queued;
-
-  auto enqueue = [&](std::vector<int> pick) {
-    if (!queued.insert(hash_pick(pick)).second) {
-      return;
-    }
-    ShortestPath stitched = stitch(pick);
-    if (!stitched.found) {
-      return;
-    }
-    const double c = stitched.cost;
-    heap.push(HeapItem{c, std::move(pick), std::move(stitched)});
-  };
-
-  enqueue(std::vector<int>(hops, 0));
-  if (heap.empty()) {
-    return results;
-  }
-
-  while (!heap.empty() && static_cast<int>(results.size()) < k) {
-    HeapItem item = heap.top();
-    heap.pop();
-    if (item.path.found) {
-      results.push_back(std::move(item.path));
-    }
-
-    // Enqueue the neighbors that advance one segment's candidate index.
+  std::vector<PickItem> frontier;
+  std::vector<ShortestPath> ready;
+  const auto lower_of = [&](const std::vector<int>& pick) {
+    double sum = 0.0;
     for (size_t h = 0; h < hops; ++h) {
+      sum += segments[h][pick[h]].cost;
+    }
+    return sum;
+  };
+  {
+    std::vector<int> root(hops, 0);
+    const double lower = lower_of(root);
+    frontier.push_back(PickItem{lower, std::move(root), 0});
+  }
+  int explored = 0;
+  while (static_cast<int>(results.size()) < k) {
+    const bool can_explore = !frontier.empty() && explored < kMaxStitchedPicks;
+    if (!ready.empty() && (!can_explore || ready.front().cost <= frontier.front().lower)) {
+      std::pop_heap(ready.begin(), ready.end(), route_after);
+      results.push_back(std::move(ready.back()));
+      ready.pop_back();
+      continue;
+    }
+    if (!can_explore) {
+      break;
+    }
+    std::pop_heap(frontier.begin(), frontier.end(), pick_after);
+    PickItem item = std::move(frontier.back());
+    frontier.pop_back();
+    ++explored;
+    ShortestPath stitched = stitch(item.pick);
+    if (stitched.found) {
+      ready.push_back(std::move(stitched));
+      std::push_heap(ready.begin(), ready.end(), route_after);
+    }
+    for (size_t h = item.last; h < hops; ++h) {
       if (item.pick[h] + 1 < static_cast<int>(segments[h].size())) {
         std::vector<int> next = item.pick;
         next[h] += 1;
-        enqueue(std::move(next));
+        const double lower = lower_of(next);
+        frontier.push_back(PickItem{lower, std::move(next), h});
+        std::push_heap(frontier.begin(), frontier.end(), pick_after);
       }
     }
   }
+  if (!results.empty()) {
+    return results;
+  }
 
+  // Every combination of per-hop alternatives shares a vertex between two hops
+  // (each hop's few cheapest paths all cross the same fix). Fall back to one
+  // route built hop by hop, each hop barred from the vertices already used and
+  // from the forced fixes still ahead, so the result is simple by construction.
+  // Each hop starts with the heading the previous one arrived on, so the turn
+  // at the forced fix is priced too.
+  std::vector<int> path;
+  for (size_t h = 0; h < hops; ++h) {
+    std::vector<int> banned(path.begin(), path.empty() ? path.end() : path.end() - 1);
+    for (size_t j = h + 1; j < forced.size(); ++j) {
+      banned.push_back(forced[j]);
+    }
+    if (options.node_filter.banned != nullptr) {
+      banned.insert(banned.end(), options.node_filter.banned->begin(),
+                    options.node_filter.banned->end());
+    }
+    std::sort(banned.begin(), banned.end());
+    banned.erase(std::unique(banned.begin(), banned.end()), banned.end());
+    SearchOptions hop_options = options;
+    hop_options.node_filter.banned = &banned;
+    double arrival_bearing = kNoBearing;
+    if (path.size() >= 2) {
+      arrival_bearing = graph.CoordOf(path[path.size() - 2]).BearingTo(graph.CoordOf(path.back()));
+    }
+    const std::vector<SeededEndpoint> hop_sources =
+        (h == 0) ? sources
+                 : std::vector<SeededEndpoint>{SeededEndpoint{forced[h - 1], 0.0, arrival_bearing}};
+    const std::vector<SeededEndpoint> hop_goals =
+        (h + 1 == hops) ? goals : std::vector<SeededEndpoint>{SeededEndpoint{forced[h], 0.0}};
+    const ShortestPath hop = FindShortestPathMulti(graph, hop_sources, hop_goals, hop_options);
+    if (!hop.found || hop.vertices.empty()) {
+      return results;
+    }
+    for (size_t i = path.empty() ? 0 : 1; i < hop.vertices.size(); ++i) {
+      path.push_back(hop.vertices[i]);
+    }
+  }
+  ShortestPath greedy =
+      StitchAndCost(graph, {&path}, source_seed, goal_seed, source_bearing, goal_bearing, options);
+  if (greedy.found) {
+    results.push_back(std::move(greedy));
+  }
   return results;
 }
 

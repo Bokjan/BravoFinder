@@ -3,6 +3,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <format>
 #include <fstream>
 #include <set>
 #include <string>
@@ -468,6 +469,38 @@ TEST_CASE("real data: more forced points than the cap are rejected", "[integrati
   bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
   REQUIRE_FALSE(r);
   CHECK(r.error().message.find("forced points") != std::string::npos);
+}
+
+TEST_CASE("real data: a forced point whose cheapest hops share a fix still routes",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // FARGO sits on J101 between SPI and STL, so the cheapest KJFK -> FARGO and
+  // FARGO -> KLAX paths can both pass SPI (on 2601 they did, before turns were
+  // priced inside each hop), and their plain concatenation then repeats it. A
+  // simple route through FARGO exists all the same, at any k.
+  for (int k : {1, 5}) {
+    CAPTURE(k);
+    bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+    req.forced_points = {"FARGO"};
+    req.k = k;
+    bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+    REQUIRE(r);
+    REQUIRE_FALSE(r.value().empty());
+    for (const bf::Route& route : r.value()) {
+      std::set<std::string> seen;
+      bool via_present = false;
+      for (const bf::RoutePoint& p : route.points) {
+        // Simple: no fix twice (ident + position, since idents repeat worldwide).
+        CHECK(seen.insert(std::format("{} {} {}", p.ident, p.coord.latitude, p.coord.longitude))
+                  .second);
+        via_present = via_present || p.ident == "FARGO";
+      }
+      CHECK(via_present);
+    }
+  }
 }
 
 TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {

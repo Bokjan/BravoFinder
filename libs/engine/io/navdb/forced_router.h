@@ -36,12 +36,16 @@ class ForcedRouter {
   // seeded at 0 so their cost is not double counted at the seams. Every hop
   // honors all constraints and node/edge bans in `options`.
   //
-  // Up to `k` whole routes are returned, ordered by total (segment-sum) cost.
-  // Each hop is expanded into up to `k` alternatives via K-shortest; the best K
-  // end-to-end combinations are then selected by a lazy K-way merge over the
-  // Cartesian product. A combination whose stitched path repeats a vertex (a
-  // cycle at some seam) is skipped. Returned path distance_nm/cost include both
-  // endpoint seeds (CostOfPathMulti), matching non-forced paths for MakeRoute.
+  // Up to `k` whole routes are returned in ascending re-costed order (the full
+  // path under the turn model, including the turns at the forced fixes). Each
+  // hop is expanded into up to `k` alternatives via K-shortest; the best
+  // end-to-end combinations are then enumerated best-first over the Cartesian
+  // product, using the sum of hop costs as a lower bound. A combination whose
+  // stitched path repeats a vertex (a cycle at some seam) is skipped but still
+  // expanded. If every combination repeats a vertex, one route is built hop by
+  // hop with the vertices already used barred. Returned path distance_nm/cost
+  // include both endpoint seeds (CostOfPathMulti), matching non-forced paths
+  // for MakeRoute.
   static std::vector<ShortestPath> FindPaths(const NavGraph& graph,
                                              const std::vector<SeededEndpoint>& sources,
                                              const std::vector<SeededEndpoint>& goals,

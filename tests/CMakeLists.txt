@@ -8,6 +8,7 @@ add_executable(bf_tests
                unit/turn_penalty_test.cc
                unit/constraint_test.cc
                unit/yen_test.cc
+               unit/forced_router_test.cc
                unit/search_workspace_test.cc
                unit/cifp_parser_test.cc
                unit/procedure_helpers_test.cc
