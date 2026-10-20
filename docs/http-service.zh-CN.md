@@ -58,7 +58,7 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
 - **keep-alive**：依 `llhttp_should_keep_alive` 复用连接；复用前**完整重置** parser 与请求缓冲，防上一请求残留串到下一请求。
 - **响应帧**：手写状态行 + `Content-Type`/`Content-Length`/`Connection`/`Date`；只发 `Content-Length`。
 - **上限**：header 总长/条数上限（→ 431）、body 上限（`--max-body` → 413，含 headers 完成时按声明的 `Content-Length` 提前拒）、同时打开连接数（`Limits::max_connections`，默认 1024；超额则 accept 后立刻关闭）。
-- **超时**：idle 定时器覆盖 header/body 读取与空闲 keep-alive（`--io-timeout`）；另有从请求开始（message-begin）起算的硬截止时间（`Limits::request_timeout_ms`，默认 120s），防止客户端慢速逐字节送数据、反复把 idle 定时器往后推。
+- **超时**：idle 定时器覆盖 header/body 读取与空闲 keep-alive（`--io-timeout`）；另有从请求第一个字节起算的硬截止时间（`Limits::request_timeout_ms`，默认 120s），防止客户端慢速逐字节送数据、反复把 idle 定时器往后推。起算点取"收到任何字节"而不是 llhttp 的 message-begin：llhttp 的起始状态会原地吞掉前导 `\r\n` 而不触发 message-begin，只按它打点的话，一个每 `--io-timeout` 之前发一次 `\r\n` 的客户端可以永久占住连接。写侧同样有界：已排队的响应写记下排队时刻，超过 `--io-timeout` 未完成（客户端零窗口不读）即强制关闭；同时开启 `uv_tcp_keepalive`（60s），对端不回 FIN 就消失时由内核回收。
 - **chunked 拒绝**：内网 JSON API 不需要 `Transfer-Encoding: chunked` → **显式拒绝**（400 + 关连接），安全地拒而非误解析，防请求走私。
 - **Expect: 100-continue**：不回中间的 `100 Continue`，直接 **417** + 关连接，避免客户端空等。
 - **同时只处理一个请求**：不做 pipelining——一个请求分发后忽略后续输入字节，并在写回时强制 `Connection: close`（无论第二请求是挤在同一次读缓冲里，还是分多次读进来，都一样处理），防止 keep-alive 复用到已经丢弃的下一请求上。
@@ -94,6 +94,9 @@ llhttp 只解析，HTTP/1.1 的语义与安全都在 `conn.cc` 里自己接（�
   - `GET /mcp`：开一条 SSE 长连接（`text/event-stream`，close-delimited 开放流），发一个 `: keepalive` 注释即占位。当前工具无 progress、无 server-push，此流零消费者，仅为将来通知预留 + 合成测试覆盖。
   - `DELETE /mcp`：无状态 → `200` ack。
 - **Session（无状态带 id）**：`initialize`（单个请求；batch 内的 `initialize` 会被 `Dispatcher` 拒绝）响应回一个随机 `Mcp-Session-Id` 头并协商到 2025-03-26；后续请求接受任意 session id 但**不跟踪**（Dispatcher 无 per-session 状态，每个请求独立）。
+- **连接受控关闭**：close 模式的响应写完先 `uv_shutdown` 半关（发 FIN），再由关闭回调收尾，宽限计时兜底。提前拒绝（413/414/417/431）时客户端往往还在上传，直接 `uv_close` 会发 RST，把已到达对端接收缓冲的响应一起丢掉，客户端只看到 ECONNRESET 而不是它要的那个状态码。
+- **HEAD 与 405**：HEAD 走 GET 的路由，帧层去掉 body 但保留 `Content-Length`（描述 GET 应有的表示）；已知路径用了错误方法返回 405 + `Allow`，不再与 404 混同。
+- **Origin 校验**：带 `Origin` 的请求，其 host 必须是 `localhost` / 回环地址 / 请求自身的 `Host` 头 / 监听地址之一，否则 403（不带 `Origin` 的 curl、本地客户端照常放行）。这正是 MCP Streamable HTTP 规范要求的 MUST——没有它，任意站点上的页面都能借用户的浏览器读取绑在回环上的服务（DNS rebinding）。REST 与 MCP 共用 `http_server::OriginAllowed`。
 - **SSE 写出能力**（加在 `libs/http_server/conn.cc`）：`WriteResponse` 支持自定义 `content_type` + 额外 header（POST→SSE 单事件用 `Content-Length` 缓冲）；`BeginStream`/`WriteEvent` 是 close-delimited 开放流（无 `Content-Length`、`Connection: keep-alive`），靠一个 `streaming_` 标志让写完成回调既不复位下一请求也不关连接，直到客户端断开 / idle 超时。**SSE 写出全在 loop 线程**，worker 只算不写。改这块并发面必过 `ctest --preset tsan`（线程安全契约）。
 
 端到端覆盖在 `tests/integration/mcp_http_test.cc`（真 loopback，用最小手造缓存，不依赖真实 navdata、不 SKIP）。
