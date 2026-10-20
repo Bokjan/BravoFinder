@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -177,9 +178,18 @@ Result<void> GraphBuilder::Populate(const NavData& data) {
                                   s.level});
   };
 
+  // An endpoint with a position hint resolves to the matching same-key point;
+  // one without falls back to the first-loaded point with that key.
+  auto resolve = [&](const Ident& ident, const std::optional<Coordinate>& hint) {
+    if (!hint) {
+      return VertexByIdent(ident);
+    }
+    Result<FixedIdent> key = FixedIdent::FromIdent(ident);
+    return key ? VertexNear(key.value(), *hint, kFixHintToleranceNm) : -1;
+  };
   for (const AirwayConnection& conn : data.airways) {
-    const int from = VertexByIdent(conn.from);
-    const int to = VertexByIdent(conn.to);
+    const int from = resolve(conn.from, conn.from_hint);
+    const int to = resolve(conn.to, conn.to_hint);
     if (from < 0 || to < 0) {
       continue;  // endpoint not in dataset; skip the segment
     }
@@ -262,6 +272,24 @@ int GraphBuilder::VertexByIdent(const FixedIdent& key) const {
     return it->second;
   }
   return -1;
+}
+
+int GraphBuilder::VertexNear(const FixedIdent& key, const Coordinate& near, double max_nm) const {
+  auto it = std::lower_bound(
+      ident_index_.begin(), ident_index_.end(), key,
+      [](const std::pair<FixedIdent, int>& e, const FixedIdent& k) { return e.first < k; });
+  int best = -1;
+  double best_nm = max_nm;
+  // Equal keys are ordered by ascending vertex, so a strict < keeps the
+  // first-loaded vertex on an exact tie.
+  for (; it != ident_index_.end() && it->first == key; ++it) {
+    const double nm = near.DistanceTo(graph_.coords_[it->second]);
+    if (nm <= best_nm && (best < 0 || nm < best_nm)) {
+      best = it->second;
+      best_nm = nm;
+    }
+  }
+  return best;
 }
 
 int GraphBuilder::VertexByIdent(const Ident& ident) const {

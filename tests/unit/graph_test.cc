@@ -222,6 +222,62 @@ TEST_CASE("VerticesByIdent returns every region match for a reused ident", "[uni
   CHECK(builder.VerticesByIdent("NOPE").empty());
 }
 
+TEST_CASE("same-key points resolve by position, not load order", "[unit][graph]") {
+  // DER06/LF is published at every French airport with a runway 06. Both copies
+  // are vertices; a reference that carries its position must land on the copy
+  // at that position, and one whose position matches neither must not resolve.
+  bf::NavData d;
+  auto wp = [](const char* id, double lat, double lon) {
+    return bf::Waypoint{bf::Ident(id, "LF"), bf::Coordinate{lat, lon}, bf::WaypointKind::kFix};
+  };
+  d.waypoints = {wp("DER06", 48.73, 2.39),  // LFPO, loaded first
+                 wp("DER06", 43.21, 6.49),  // LFTZ
+                 wp("EXIT", 43.50, 6.80), wp("NEXT", 43.80, 7.10)};
+  bf::AirwaySegment seg;
+  seg.name = "Q1";
+  // The airway's DER06 endpoint is LFTZ's (by position), not the first-loaded one.
+  d.airways = {{bf::Ident("DER06", "LF"), bf::Ident("EXIT", "LF"), seg, bf::Coordinate{43.21, 6.49},
+                std::nullopt}};
+  bf::GraphBuilder builder = MakeBuilder(d);
+  const std::vector<int> der = builder.VerticesByIdent("DER06");
+  REQUIRE(der.size() == 2);
+  const bf::FixedIdent key = Fixed("DER06", "LF");
+
+  CHECK(builder.VertexByIdent(key) == der[0]);  // no position: first-loaded
+  CHECK(builder.VertexNear(key, bf::Coordinate{43.2101, 6.4901}, bf::kFixHintToleranceNm) ==
+        der[1]);
+  CHECK(builder.VertexNear(key, bf::Coordinate{48.7301, 2.3901}, bf::kFixHintToleranceNm) ==
+        der[0]);
+  // A position near neither copy (e.g. a runway fix that only shares the key).
+  CHECK(builder.VertexNear(key, bf::Coordinate{45.0, 4.0}, bf::kFixHintToleranceNm) == -1);
+
+  CHECK(builder.HasOutbound(der[1]));
+  CHECK_FALSE(builder.HasOutbound(der[0]));
+
+  SECTION("a SID leg with a position wires to the airport's own fix") {
+    bf::ProcedureLeg first;
+    first.path_term = bf::PathTerminator::kIF;
+    first.fix = key;
+    first.set_fix_coord(bf::Coordinate{43.21, 6.49});
+    bf::ProcedureLeg exit;
+    exit.path_term = bf::PathTerminator::kTF;
+    exit.fix = Fixed("EXIT", "LF");
+    exit.set_fix_coord(bf::Coordinate{43.50, 6.80});
+    bf::Procedure sid;
+    sid.type = bf::ProcedureType::kSid;
+    sid.name = "TSID";
+    sid.legs = {first, exit};
+    bf::CifpData cifp;
+    cifp.procedures = {sid};
+    const bf::Coordinate lftz{43.10, 6.15};
+    const auto conns = bf::ProcedureConnector::BuildDeparture(cifp, lftz, builder, "");
+    REQUIRE(conns.size() == 1);
+    // Seed = LFTZ->DER06(LFTZ) + DER06->EXIT: tens of NM, not the ~390 NM a
+    // first-loaded (LFPO) DER06 would add.
+    CHECK(conns[0].seed_distance_nm < 60.0);
+  }
+}
+
 // Two parallel airways A->B, one low and one high, share both endpoints and so
 // have identical geographic distance. SelectEdge must return the edge the search
 // would have relaxed cheapest -- with a high-level preference, the HIGH edge --

@@ -11,13 +11,19 @@ namespace bf {
 namespace {
 
 // Resolve a procedure leg's fix to a graph vertex by its full (ident, region)
-// key. Returns kNoVertex when the leg has no resolvable fix. The ident-only fallback
-// was removed: a procedure leg carries its region, so resolving by
-// (ident, region) is both correct and unambiguous, and silently guessing a
-// region would risk wiring a procedure to the wrong fix.
+// key. Returns kNoVertex when the leg has no resolvable fix. The key alone is
+// ambiguous -- terminal fixes like DER06/LF exist at many airports, so a
+// first-loaded match wired LFTZ's SIDs to LFPO's DER06 378 NM away -- so a leg
+// that carries its published position resolves to the same-key vertex at that
+// position, and to nothing when no such vertex exists (e.g. a runway fix whose
+// key happens to match an unrelated waypoint). Only a leg without a position
+// falls back to the first-loaded match.
 int ResolveFix(const ProcedureLeg& leg, const GraphBuilder& builder) {
   if (leg.fix.IdentView().empty()) {
     return kNoVertex;
+  }
+  if (leg.has_fix_coord()) {
+    return builder.VertexNear(leg.fix, leg.fix_coord(), kFixHintToleranceNm);
   }
   return builder.VertexByIdent(leg.fix);
 }

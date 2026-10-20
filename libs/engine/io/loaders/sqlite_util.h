@@ -10,9 +10,11 @@
 #include <sqlite3.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
+#include "core/domain/coordinate.h"
 #include "core/result.h"
 
 namespace bf {
@@ -68,6 +70,15 @@ Result<void> ForEachRow(sqlite3_stmt* stmt, F&& on_row) {
 std::string ColumnText(sqlite3_stmt* stmt, int col);
 int ColumnInt(sqlite3_stmt* stmt, int col);
 double ColumnDouble(sqlite3_stmt* stmt, int col);
+
+// Whether the column is SQL NULL (ColumnInt/ColumnDouble cannot tell a NULL
+// from a genuine zero).
+bool ColumnIsNull(sqlite3_stmt* stmt, int col);
+
+// A (latitude, longitude) column pair, or nullopt when either is NULL. Use this
+// instead of two ColumnDouble calls wherever a NULL position must not silently
+// become (0, 0).
+std::optional<Coordinate> ColumnCoord(sqlite3_stmt* stmt, int lat_col, int lon_col);
 
 // Like ColumnText but WITHOUT trimming, so a caller indexing by fixed ARINC
 // column position sees the original byte offsets. The waypoint description code

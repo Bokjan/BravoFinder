@@ -8,6 +8,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -58,9 +59,11 @@ constexpr int kProcName = 2;
 constexpr int kTransition = 3;
 constexpr int kFixIdent = 4;
 constexpr int kFixRegion = 5;
-constexpr int kWptDesc = 8;  // ARINC 424 Waypoint Description Code (4 chars)
-constexpr int kTurnDir = 9;  // turn direction: 'L'/'R' (or blank)
-constexpr int kRnp = 10;     // required navigation performance, ARINC-encoded
+constexpr int kFixSection = 6;     // ARINC 424 section code of the fix record
+constexpr int kFixSubsection = 7;  // ARINC 424 subsection code of the fix record
+constexpr int kWptDesc = 8;        // ARINC 424 Waypoint Description Code (4 chars)
+constexpr int kTurnDir = 9;        // turn direction: 'L'/'R' (or blank)
+constexpr int kRnp = 10;           // required navigation performance, ARINC-encoded
 constexpr int kPathTerm = 11;
 constexpr int kCourse = 20;      // magnetic course, tenths of a degree
 constexpr int kDistance = 21;    // leg distance, tenths of a nautical mile
@@ -201,7 +204,7 @@ bool ParseRunway(std::string_view line, Runway& out) {
 
 }  // namespace
 
-CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
+CifpData CifpParser::ParseLines(const std::vector<std::string>& lines, const FixLocator& locate) {
   CifpData data;
 
   // Group consecutive legs sharing (type, name, transition, route type) into
@@ -289,6 +292,17 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
     }
     ProcedureLeg leg;
     leg.fix = std::move(fixed).value();
+    if (locate && !fix_ident.empty()) {
+      // Section/subsection are single characters; a blank subsection (VHF
+      // navaid) trims to empty and reads as ' '.
+      const std::string section = FieldStr(f, kFixSection);
+      const std::string subsection = FieldStr(f, kFixSubsection);
+      if (const std::optional<Coordinate> coord = locate(
+              leg.fix.IdentView(), leg.fix.Arinc424IcaoCodeView(),
+              section.empty() ? ' ' : section[0], subsection.empty() ? ' ' : subsection[0])) {
+        leg.set_fix_coord(*coord);
+      }
+    }
     leg.path_term = ParsePathTerminator(FieldStr(f, kPathTerm));
     leg.course_deg = static_cast<float>(FieldInt(f, kCourse) / 10.0);
     leg.distance_nm = static_cast<float>(FieldInt(f, kDistance) / 10.0);
@@ -304,7 +318,7 @@ CifpData CifpParser::ParseLines(const std::vector<std::string>& lines) {
   return data;
 }
 
-Result<CifpData> CifpParser::Parse(const std::string& path) {
+Result<CifpData> CifpParser::Parse(const std::string& path, const FixLocator& locate) {
   std::ifstream in(path);
   if (!in.is_open()) {
     return Result<CifpData>::Err(
@@ -318,7 +332,7 @@ Result<CifpData> CifpParser::Parse(const std::string& path) {
     }
     lines.push_back(std::move(line));
   }
-  return Result<CifpData>::Ok(ParseLines(lines));
+  return Result<CifpData>::Ok(ParseLines(lines, locate));
 }
 
 }  // namespace bf

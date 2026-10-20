@@ -2,12 +2,14 @@
 #include "io/loaders/xplane12/xplane12_loader.h"
 
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <unordered_set>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #include "core/domain/airway.h"
@@ -15,6 +17,8 @@
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/navaid_detail.h"
+#include "io/loaders/point_dedup.h"
+#include "io/loaders/xplane12/cifp_parser.h"
 
 namespace bf {
 
@@ -111,29 +115,187 @@ WaypointKind NavKindFromRowCode(int code) {
   }
 }
 
+// The class of point an ARINC reference names: a fix (earth_fix.dat), a VHF
+// navaid (VOR/DME/TACAN), or an NDB (both earth_nav.dat).
+enum class PointClass : uint8_t { kFix, kVhf, kNdb };
+
+PointClass ClassOfKind(WaypointKind kind) {
+  switch (kind) {
+    case WaypointKind::kNdb:
+      return PointClass::kNdb;
+    case WaypointKind::kVor:
+    case WaypointKind::kDme:
+      return PointClass::kVhf;
+    default:
+      return PointClass::kFix;
+  }
+}
+
+// Published positions of every earth_fix / earth_nav point, keyed by what a
+// reference to it can name: (ident, region, class, owner). `owner` is the
+// row's terminal-area column -- "ENRT" or the owning airport's ICAO -- for fixes
+// and NDBs (terminal NDBs are published per airport too); VHF navaids are keyed
+// with an empty owner since references to them never name an airport. Used to
+// give airway endpoints and CIFP legs the position hint that tells same-key
+// points apart. First row wins on a duplicate key.
+class PointIndex {
+ public:
+  void Add(const std::string& ident, const std::string& region, PointClass cls,
+           std::string_view owner, const Coordinate& coord) {
+    by_key_.try_emplace(Key(ident, region, cls, cls == PointClass::kVhf ? "" : owner), coord);
+  }
+
+  std::optional<Coordinate> Find(std::string_view ident, std::string_view region, PointClass cls,
+                                 std::string_view owner) const {
+    auto it = by_key_.find(Key(ident, region, cls, cls == PointClass::kVhf ? "" : owner));
+    if (it == by_key_.end()) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
+  // Locate a CIFP leg's fix for airport `icao` from its ARINC 424 section and
+  // subsection: E/A enroute waypoint, P/C the airport's terminal waypoint, D/' '
+  // VHF navaid, D/B enroute NDB, P/N the airport's terminal NDB. Anything else
+  // (runway P/G, localizer P/I, ...) is not a graph vertex and gets no hint.
+  std::optional<Coordinate> Locate(std::string_view ident, std::string_view region, char section,
+                                   char subsection, std::string_view icao) const {
+    if (section == 'E' && subsection == 'A') {
+      return Find(ident, region, PointClass::kFix, kEnrouteOwner);
+    }
+    if (section == 'P' && subsection == 'C') {
+      return Find(ident, region, PointClass::kFix, icao);
+    }
+    if (section == 'D' && subsection == ' ') {
+      return Find(ident, region, PointClass::kVhf, "");
+    }
+    if (section == 'D' && subsection == 'B') {
+      return Find(ident, region, PointClass::kNdb, kEnrouteOwner);
+    }
+    if (section == 'P' && subsection == 'N') {
+      return Find(ident, region, PointClass::kNdb, icao);
+    }
+    return std::nullopt;
+  }
+
+  static constexpr std::string_view kEnrouteOwner = "ENRT";
+
+ private:
+  static std::string Key(std::string_view ident, std::string_view region, PointClass cls,
+                         std::string_view owner) {
+    std::string key;
+    key.reserve(ident.size() + region.size() + owner.size() + 4);
+    key.append(ident).push_back('\0');
+    key.append(region).push_back('\0');
+    key.push_back(static_cast<char>('0' + static_cast<int>(cls)));
+    key.append(owner);
+    return key;
+  }
+
+  std::unordered_map<std::string, Coordinate> by_key_;
+};
+
+// One earth_fix.dat row: lat lon ident terminal region ...
+struct FixRow {
+  double lat = 0;
+  double lon = 0;
+  std::string ident;
+  std::string terminal;
+  std::string icao_code;
+};
+bool ReadFixRow(std::istringstream& row, FixRow& out) {
+  return static_cast<bool>(row >> out.lat >> out.lon >> out.ident >> out.terminal >> out.icao_code);
+}
+
+// One earth_nav.dat row: code lat lon elev freq range hdg ident terminal region ...
+struct NavRow {
+  int code = 0;
+  double lat = 0;
+  double lon = 0;
+  int elev = 0;
+  int freq = 0;
+  double range = 0;
+  double hdg = 0;
+  std::string ident;
+  std::string terminal;
+  std::string icao_code;
+};
+bool ReadNavRow(std::istringstream& row, NavRow& out) {
+  return static_cast<bool>(row >> out.code >> out.lat >> out.lon >> out.elev >> out.freq >>
+                           out.range >> out.hdg >> out.ident >> out.terminal >> out.icao_code);
+}
+
+// Build the PointIndex from earth_fix.dat + earth_nav.dat alone (the CIFP load
+// paths, which do not otherwise parse the enroute files). A missing file just
+// leaves its points unindexed: legs then carry no hint.
+PointIndex LoadPointIndex(const std::string& data_dir) {
+  PointIndex index;
+  ForEachDataRow(data_dir + "/earth_fix.dat", [&](std::istringstream& row) {
+    FixRow r;
+    if (ReadFixRow(row, r)) {
+      index.Add(r.ident, r.icao_code, PointClass::kFix, r.terminal, Coordinate{r.lat, r.lon});
+    }
+  });
+  ForEachDataRow(data_dir + "/earth_nav.dat", [&](std::istringstream& row) {
+    NavRow r;
+    if (!ReadNavRow(row, r)) {
+      return;
+    }
+    const WaypointKind kind = NavKindFromRowCode(r.code);
+    if (kind != WaypointKind::kOther) {
+      index.Add(r.ident, r.icao_code, ClassOfKind(kind), r.terminal, Coordinate{r.lat, r.lon});
+    }
+  });
+  return index;
+}
+
+// A FixLocator for airport `icao` over `index` (which must outlive it).
+FixLocator LocatorFor(const PointIndex& index, const std::string& icao) {
+  return [&index, icao](std::string_view ident, std::string_view region, char section,
+                        char subsection) {
+    return index.Locate(ident, region, section, subsection, icao);
+  };
+}
+
+// The PointClass an earth_awy.dat endpoint type names: 11 = fix, 2 = NDB,
+// 3 = VHF navaid.
+std::optional<PointClass> AirwayEndpointClass(const std::string& type) {
+  if (type == "11") {
+    return PointClass::kFix;
+  }
+  if (type == "2") {
+    return PointClass::kNdb;
+  }
+  if (type == "3") {
+    return PointClass::kVhf;
+  }
+  return std::nullopt;
+}
+
 }  // namespace
 
 Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
   NavData data;
   // AIRAC cycle from the fix file header (0 if absent; non-fatal).
   data.cycle = ParseCycle(data_dir + "/earth_fix.dat");
-  // Track which (ident, region) points already exist so navaids do not add
-  // duplicates (e.g. a co-located VOR and DME share an ident).
-  std::unordered_set<Ident> seen;
+  // Merge rows that are the same physical point (e.g. a co-located VOR and DME
+  // share an ident) while keeping distinct same-key points such as per-airport
+  // terminal fixes (earth_fix's terminal column names the owning airport).
+  PointDeduper seen;
+  // Positions by what an airway endpoint names, for the airway position hints.
+  PointIndex index;
 
   // --- earth_fix.dat: lat lon ident terminal region type ... ---
   const bool fixes_ok = ForEachDataRow(data_dir + "/earth_fix.dat", [&](std::istringstream& row) {
-    double lat = 0;
-    double lon = 0;
-    std::string ident;
-    std::string terminal;
-    std::string icao_code;
-    if (!(row >> lat >> lon >> ident >> terminal >> icao_code)) {
+    FixRow r;
+    if (!ReadFixRow(row, r)) {
       return;
     }
-    Ident key(ident, icao_code);
-    if (seen.insert(key).second) {
-      data.waypoints.push_back(Waypoint{key, Coordinate{lat, lon}, WaypointKind::kFix});
+    const Coordinate coord{r.lat, r.lon};
+    index.Add(r.ident, r.icao_code, PointClass::kFix, r.terminal, coord);
+    Ident key(r.ident, r.icao_code);
+    if (seen.Insert(key, coord)) {
+      data.waypoints.push_back(Waypoint{std::move(key), coord, WaypointKind::kFix});
     }
   });
   if (!fixes_ok) {
@@ -142,28 +304,20 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
 
   // --- earth_nav.dat: code lat lon elev freq range hdg ident terminal region ... ---
   const bool nav_ok = ForEachDataRow(data_dir + "/earth_nav.dat", [&](std::istringstream& row) {
-    int code = 0;
-    double lat = 0;
-    double lon = 0;
-    int elev = 0;
-    int freq = 0;
-    double range = 0;
-    double hdg = 0;
-    std::string ident;
-    std::string terminal;
-    std::string icao_code;
-    if (!(row >> code >> lat >> lon >> elev >> freq >> range >> hdg >> ident >> terminal >>
-          icao_code)) {
+    NavRow r;
+    if (!ReadNavRow(row, r)) {
       return;
     }
-    WaypointKind kind = NavKindFromRowCode(code);
+    WaypointKind kind = NavKindFromRowCode(r.code);
     if (kind == WaypointKind::kOther) {
       return;  // not an enroute-routable navaid
     }
-    Ident key(ident, icao_code);
-    if (seen.insert(key).second) {
-      data.waypoints.push_back(Waypoint{key, Coordinate{lat, lon}, kind});
-      data.navaid_details.push_back(NavaidDetail{key, kind, elev, freq, range, hdg});
+    const Coordinate coord{r.lat, r.lon};
+    index.Add(r.ident, r.icao_code, ClassOfKind(kind), r.terminal, coord);
+    Ident key(r.ident, r.icao_code);
+    if (seen.Insert(key, coord)) {
+      data.waypoints.push_back(Waypoint{key, coord, kind});
+      data.navaid_details.push_back(NavaidDetail{key, kind, r.elev, r.freq, r.range, r.hdg});
     }
   });
   if (!nav_ok) {
@@ -193,7 +347,15 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
     seg.level = (hilo == 2) ? AirwayLevel::kHigh : AirwayLevel::kLow;
     seg.base_fl = base_fl;
     seg.top_fl = top_fl;
-    data.airways.push_back(AirwayConnection{Ident(from, freg), Ident(to, treg), seg});
+    // Endpoint type 11/2/3 says which table the point is in; airway fixes are
+    // enroute, so look them up under the ENRT owner.
+    auto hint = [&](const std::string& ident, const std::string& region,
+                    const std::string& type) -> std::optional<Coordinate> {
+      const std::optional<PointClass> cls = AirwayEndpointClass(type);
+      return cls ? index.Find(ident, region, *cls, PointIndex::kEnrouteOwner) : std::nullopt;
+    };
+    data.airways.push_back(AirwayConnection{Ident(from, freg), Ident(to, treg), seg,
+                                            hint(from, freg, ftype), hint(to, treg, ttype)});
   });
   if (!awy_ok) {
     return Result<NavData>::Err(Error(ErrorCode::kDataMissing, "cannot open earth_awy.dat"));
@@ -311,6 +473,9 @@ Result<std::vector<AirportProcedureData>> XPlane12Loader::LoadProcedures(
         Error(ErrorCode::kDataMissing, "no CIFP directory under " + data_dir));
   }
 
+  // CIFP legs carry no positions; look each fix up in the enroute files so the
+  // legs can be wired to the right one of several same-key points.
+  const PointIndex index = LoadPointIndex(data_dir);
   std::vector<AirportProcedureData> out;
   for (const fs::directory_entry& de : fs::directory_iterator(cifp_dir, ec)) {
     if (!de.is_regular_file() || de.path().extension() != ".dat") {
@@ -318,7 +483,7 @@ Result<std::vector<AirportProcedureData>> XPlane12Loader::LoadProcedures(
     }
     // The ICAO is the file stem, e.g. "CIFP/KJFK.dat" -> "KJFK".
     std::string icao = de.path().stem().string();
-    Result<CifpData> parsed = CifpParser::Parse(de.path().string());
+    Result<CifpData> parsed = CifpParser::Parse(de.path().string(), LocatorFor(index, icao));
     if (!parsed) {
       continue;  // skip an unreadable file; not fatal for the set as a whole
     }
@@ -329,7 +494,9 @@ Result<std::vector<AirportProcedureData>> XPlane12Loader::LoadProcedures(
 
 std::optional<CifpData> XPlane12Loader::LoadProcedure(const std::string& data_dir,
                                                       const std::string& icao) const {
-  Result<CifpData> parsed = CifpParser::Parse(data_dir + "/CIFP/" + icao + ".dat");
+  const PointIndex index = LoadPointIndex(data_dir);
+  Result<CifpData> parsed =
+      CifpParser::Parse(data_dir + "/CIFP/" + icao + ".dat", LocatorFor(index, icao));
   if (!parsed) {
     return std::nullopt;
   }

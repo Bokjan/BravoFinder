@@ -115,4 +115,15 @@ double ColumnDouble(sqlite3_stmt* stmt, int col) {
   return sqlite3_column_double(stmt, col);
 }
 
+bool ColumnIsNull(sqlite3_stmt* stmt, int col) {
+  return sqlite3_column_type(stmt, col) == SQLITE_NULL;
+}
+
+std::optional<Coordinate> ColumnCoord(sqlite3_stmt* stmt, int lat_col, int lon_col) {
+  if (ColumnIsNull(stmt, lat_col) || ColumnIsNull(stmt, lon_col)) {
+    return std::nullopt;
+  }
+  return Coordinate{sqlite3_column_double(stmt, lat_col), sqlite3_column_double(stmt, lon_col)};
+}
+
 }  // namespace bf

@@ -19,7 +19,7 @@
 #include "io/cache/byte_io.h"
 #include "io/cache/crc32c.h"
 #include "io/cache/unified_cache.h"
-#include "io/loaders/xplane12/cifp_parser.h"
+#include "io/loaders/xplane12/xplane12_loader.h"
 #include "io/navdb/nav_database.h"
 #include "test_xplane12.h"
 
@@ -69,14 +69,16 @@ TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integ
   REQUIRE(u);
   REQUIRE(u.value().cifp.has_value());
 
-  // KJFK direct parse vs section fetch: procedures and legs must match.
-  bf::Result<bf::CifpData> direct = bf::CifpParser::Parse(EnsureXPlane12() + "/CIFP/KJFK.dat");
+  // KJFK direct load vs section fetch: procedures and legs must match. Load
+  // through the loader (not the bare parser) so the legs carry the same fix
+  // positions the build wrote.
+  std::optional<bf::CifpData> direct = bf::XPlane12Loader().LoadProcedure(EnsureXPlane12(), "KJFK");
   REQUIRE(direct);
   auto fetched = u.value().cifp->Fetch("KJFK");
   REQUIRE(fetched);
   REQUIRE(fetched.value().has_value());
 
-  const bf::CifpData& a = direct.value();
+  const bf::CifpData& a = *direct;
   const bf::CifpData& b = *fetched.value();
   REQUIRE(a.procedures.size() == b.procedures.size());
   REQUIRE(a.runways.size() == b.runways.size());
@@ -89,6 +91,11 @@ TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integ
       const bf::ProcedureLeg& la = a.procedures[i].legs[j];
       const bf::ProcedureLeg& lb = b.procedures[i].legs[j];
       CHECK(la.fix == lb.fix);
+      CHECK(la.has_fix_coord() == lb.has_fix_coord());
+      if (la.has_fix_coord() && lb.has_fix_coord()) {
+        CHECK(la.fix_lat == lb.fix_lat);
+        CHECK(la.fix_lon == lb.fix_lon);
+      }
       CHECK(la.path_term == lb.path_term);
       CHECK(lb.course_deg == Catch::Approx(la.course_deg));
       CHECK(lb.distance_nm == Catch::Approx(la.distance_nm));

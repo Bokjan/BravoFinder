@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #pragma once
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -75,7 +77,7 @@ enum class AltConstraintKind : uint8_t {
 // An altitude restriction on a leg. Altitudes are in feet MSL as stored in the
 // CIFP. For kBetween, alt1_ft is the upper bound and alt2_ft the lower.
 // Standalone helper / parse result; ProcedureLeg stores the same fields flat so
-// the leg array stays 36B (a nested AltitudeConstraint would pad to 40B).
+// the leg array stays compact (a nested AltitudeConstraint would add 4B of padding).
 struct AltitudeConstraint {
   AltConstraintKind kind = AltConstraintKind::kNone;
   int alt1_ft = 0;
@@ -115,8 +117,8 @@ int ParseRouteTypeToken(std::string_view token);
 // the course/distance/altitude data parsed from the CIFP row. Legs that do not
 // terminate at a fix leave `fix` empty and rely on course/distance.
 //
-// Layout is pinned at 36 bytes (align 4) for the ~765k-leg eager array:
-//   FixedIdent(12) + 2×float(8) + 2×int(8) + 2×u16(4) + 4×u8-ish(4).
+// Layout is pinned at 44 bytes (align 4) for the ~765k-leg eager array:
+//   FixedIdent(12) + 2×float(8) + 2×float(8) + 2×int(8) + 2×u16(4) + 4×u8-ish(4).
 // course/distance are float: CIFP source quantum is 0.1, and seed/route A/B
 // confirmed no fingerprint drift (see research/2026-08-05_struct_layout_audit).
 // Wire (cifp_codec) stores F64 for course/distance and a U8 for is_mapt.
@@ -125,6 +127,14 @@ struct ProcedureLeg {
   // largest CIFP structure (~765k legs), so this cuts eager-mode resident memory
   // by ~40 MB. Empty ident for heading/altitude/manual-termination legs.
   FixedIdent fix;
+  // Published position of `fix` as recorded by the source (NaN when the source
+  // gives none). An (ident, region) key is not unique -- terminal fixes such as
+  // DER06/LF exist at many airports, and a VOR and an NDB may share an ident --
+  // so the procedure connector uses this position to pick the right vertex among
+  // same-key candidates instead of trusting load order. float: ~1 m precision,
+  // far below the vertex-match tolerance.
+  float fix_lat = std::numeric_limits<float>::quiet_NaN();
+  float fix_lon = std::numeric_limits<float>::quiet_NaN();
   float course_deg = 0.0f;   // magnetic course (CIFP column, 0 if absent)
   float distance_nm = 0.0f;  // route/leg distance (CIFP column, 0 if absent)
   int alt1_ft = 0;           // altitude constraint feet (see AltitudeConstraint)
@@ -151,8 +161,16 @@ struct ProcedureLeg {
 
   // Whether this leg ends at a resolvable navigation fix.
   bool fix_is_definite() const { return TerminatesAtFix(path_term) && !fix.IdentView().empty(); }
+
+  // Whether the source recorded the fix position (see fix_lat / fix_lon).
+  bool has_fix_coord() const { return !std::isnan(fix_lat) && !std::isnan(fix_lon); }
+  Coordinate fix_coord() const { return Coordinate{fix_lat, fix_lon}; }
+  void set_fix_coord(const Coordinate& c) {
+    fix_lat = static_cast<float>(c.latitude);
+    fix_lon = static_cast<float>(c.longitude);
+  }
 };
-static_assert(sizeof(ProcedureLeg) == 36, "ProcedureLeg layout drifted (eager CIFP density)");
+static_assert(sizeof(ProcedureLeg) == 44, "ProcedureLeg layout drifted (eager CIFP density)");
 static_assert(alignof(ProcedureLeg) == 4, "ProcedureLeg align drifted");
 
 // Which kind of terminal procedure this is. U8 matches cifp wire and keeps the

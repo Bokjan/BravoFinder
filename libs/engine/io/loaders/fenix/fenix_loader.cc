@@ -32,6 +32,7 @@
 #include "core/result.h"
 #include "io/loaders/loader_constants.h"
 #include "io/loaders/nav_data.h"
+#include "io/loaders/point_dedup.h"
 #include "io/loaders/sqlite_util.h"
 
 namespace bf {
@@ -276,6 +277,7 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
 
   sqlite3_stmt* stmt = s.value().get();
   int skipped_long = 0;
+  PointDeduper seen;
   Result<void> rows = ForEachRow(stmt, [&] {
     int id = ColumnInt(stmt, 0);
     std::string ident_str = ColumnText(stmt, 1);
@@ -304,7 +306,14 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
       }
     }
 
-    data.waypoints.push_back(Waypoint{Ident{ident_str, icao_code}, Coordinate{lat, lon}, kind});
+    // Fenix lists some points more than once (same ident/region/position under
+    // different IDs); keep one vertex per physical point. Airway and procedure
+    // references carry the row's position, so they resolve to the kept vertex.
+    Ident key{ident_str, icao_code};
+    const Coordinate coord{lat, lon};
+    if (seen.Insert(key, coord)) {
+      data.waypoints.push_back(Waypoint{std::move(key), coord, kind});
+    }
   });
   if (!rows) {
     return Result<void>::Err(rows.error());
@@ -417,20 +426,22 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     }
   }
 
-  // Build waypoint ident/region lookup.
-  std::unordered_map<int, Ident> wp_by_id;
+  // Build waypoint ident/region/position lookup. The position goes along as the
+  // endpoint hint: several Waypoints rows can share an (ident, region), and the
+  // leg names one exact row.
+  std::unordered_map<int, std::pair<Ident, Coordinate>> wp_by_id;
   {
     Result<SqliteStmt> s = Prepare(
-        conn,
-        std::format(
-            "SELECT w.ID, w.Ident, COALESCE(l.Country,'') FROM {} w LEFT JOIN {} l ON w.ID = l.ID",
-            kTblWaypoints, kTblWaypointLookup));
+        conn, std::format("SELECT w.ID, w.Ident, COALESCE(l.Country,''), w.Latitude, w.Longtitude "
+                          "FROM {} w LEFT JOIN {} l ON w.ID = l.ID",
+                          kTblWaypoints, kTblWaypointLookup));
     if (!s) {
       return Result<void>::Err(s.error());
     }
     sqlite3_stmt* stmt = s.value().get();
     Result<void> rows = ForEachRow(stmt, [&] {
-      wp_by_id[ColumnInt(stmt, 0)] = Ident{ColumnText(stmt, 1), ColumnText(stmt, 2)};
+      wp_by_id[ColumnInt(stmt, 0)] = {Ident{ColumnText(stmt, 1), ColumnText(stmt, 2)},
+                                      Coordinate{ColumnDouble(stmt, 3), ColumnDouble(stmt, 4)}};
     });
     if (!rows) {
       return Result<void>::Err(rows.error());
@@ -461,8 +472,10 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     }
 
     AirwayConnection conn;
-    conn.from = fm->second;
-    conn.to = to->second;
+    conn.from = fm->second.first;
+    conn.to = to->second.first;
+    conn.from_hint = fm->second.second;
+    conn.to_hint = to->second.second;
     conn.segment.name = nm->second;
     conn.segment.level = ParseAirwayLevel(level);
     // Fenix schema does not encode per-segment direction restrictions;
@@ -665,20 +678,28 @@ struct LegGroup {
 Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowed_tids,
                             std::unordered_map<int, std::vector<LegGroup>>& leg_groups,
                             std::unordered_map<int, std::vector<ProcedureLeg>>& common_legs) {
-  // Waypoint ident/region lookup for leg-fix resolution.
-  std::unordered_map<int, std::pair<std::string, std::string>> wp_info;
+  // Waypoint ident/region/position lookup for leg-fix resolution. The position
+  // lets the connector pick the leg's exact point among same-key vertices.
+  struct WptInfo {
+    std::string ident;
+    std::string icao_code;
+    Coordinate coord;
+  };
+  std::unordered_map<int, WptInfo> wp_info;
   {
     Result<SqliteStmt> ws = Prepare(
-        conn,
-        std::format(
-            "SELECT w.ID, w.Ident, COALESCE(l.Country,'') FROM {} w LEFT JOIN {} l ON w.ID = l.ID",
-            kTblWaypoints, kTblWaypointLookup));
+        conn, std::format("SELECT w.ID, w.Ident, COALESCE(l.Country,''), w.Latitude, w.Longtitude "
+                          "FROM {} w LEFT JOIN {} l ON w.ID = l.ID",
+                          kTblWaypoints, kTblWaypointLookup));
     if (!ws) {
       return Result<void>::Err(ws.error());
     }
     sqlite3_stmt* stmt = ws.value().get();
-    Result<void> rows = ForEachRow(
-        stmt, [&]() { wp_info[ColumnInt(stmt, 0)] = {ColumnText(stmt, 1), ColumnText(stmt, 2)}; });
+    Result<void> rows = ForEachRow(stmt, [&]() {
+      wp_info[ColumnInt(stmt, 0)] =
+          WptInfo{ColumnText(stmt, 1), ColumnText(stmt, 2),
+                  Coordinate{ColumnDouble(stmt, 3), ColumnDouble(stmt, 4)}};
+    });
     if (!rows) {
       return Result<void>::Err(rows.error());
     }
@@ -717,15 +738,15 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
       if (wpt_id > 0) {
         auto wit = wp_info.find(wpt_id);
         if (wit != wp_info.end()) {
-          const std::string& ident = wit->second.first;
-          const std::string& icao_code = wit->second.second;
-          Result<FixedIdent> fixed = FixedIdent::FromParts(ident, icao_code);
+          const WptInfo& wpt = wit->second;
+          Result<FixedIdent> fixed = FixedIdent::FromParts(wpt.ident, wpt.icao_code);
           if (!fixed) {
-            BF_LOG_WARN("fenix: skipping procedure leg with ident '{}': {}", ident,
+            BF_LOG_WARN("fenix: skipping procedure leg with ident '{}': {}", wpt.ident,
                         fixed.error().message);
             return;
           }
           leg.fix = std::move(fixed).value();
+          leg.set_fix_coord(wpt.coord);
         }
       }
 

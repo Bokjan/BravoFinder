@@ -13,7 +13,6 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 #include "core/base/log.h"
@@ -34,6 +33,7 @@
 #include "core/result.h"
 #include "io/loaders/loader_constants.h"
 #include "io/loaders/nav_data.h"
+#include "io/loaders/point_dedup.h"
 #include "io/loaders/sqlite_util.h"
 
 namespace bf {
@@ -148,7 +148,7 @@ int ParseHemiCoord(const std::string& s) {
 
 // --- Per-table loaders (column names that differ from v1 are noted). ---
 
-Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
+Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, PointDeduper& seen) {
   const std::string sql = std::format(
       "SELECT icao_code, waypoint_identifier, waypoint_latitude, waypoint_longitude FROM {}",
       kTblEnrouteWp);
@@ -159,14 +159,14 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, std::unordered_s
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
-    if (seen.insert(key).second) {
-      data.waypoints.push_back(Waypoint{
-          key, Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)}, WaypointKind::kFix});
+    const Coordinate coord{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)};
+    if (seen.Insert(key, coord)) {
+      data.waypoints.push_back(Waypoint{key, coord, WaypointKind::kFix});
     }
   });
 }
 
-Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
+Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, PointDeduper& seen) {
   // Use icao_code (2-char ICAO region), NOT region_code (the airport the fix
   // belongs to, e.g. "01OH"): region_code is not a region, mismatches how
   // airways/procedures reference the fix, and overflows FixedIdent::kArinc424IcaoCodeCap.
@@ -181,14 +181,14 @@ Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, std::unordered_
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
-    if (seen.insert(key).second) {
-      data.waypoints.push_back(Waypoint{
-          key, Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)}, WaypointKind::kFix});
+    const Coordinate coord{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)};
+    if (seen.Insert(key, coord)) {
+      data.waypoints.push_back(Waypoint{key, coord, WaypointKind::kFix});
     }
   });
 }
 
-Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ident>& seen) {
+Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, PointDeduper& seen) {
   // v2: navaid_identifier / navaid_latitude / navaid_longitude / navaid_frequency
   // (v1 used vor_*).
   const std::string sql = std::format(
@@ -206,11 +206,11 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ide
       return;  // ILS/LOC component: not enroute-routable
     }
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
-    if (!seen.insert(key).second) {
+    const Coordinate coord{ColumnDouble(stmt, 7), ColumnDouble(stmt, 8)};
+    if (!seen.Insert(key, coord)) {
       return;
     }
-    data.waypoints.push_back(
-        Waypoint{key, Coordinate{ColumnDouble(stmt, 7), ColumnDouble(stmt, 8)}, kind});
+    data.waypoints.push_back(Waypoint{key, coord, kind});
     const int freq_raw = static_cast<int>(std::lround(ColumnDouble(stmt, 2) * kCentiScale));
     data.navaid_details.push_back(NavaidDetail{key, kind, ColumnInt(stmt, 6), freq_raw,
                                                ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)});
@@ -218,7 +218,7 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, std::unordered_set<Ide
 }
 
 Result<void> LoadNdbNavaids(sqlite3* conn, NavData& data, std::string_view table,
-                            std::unordered_set<Ident>& seen) {
+                            PointDeduper& seen) {
   // v2: navaid_identifier / navaid_frequency / navaid_latitude / navaid_longitude
   // (v1 used ndb_*).
   const std::string sql = std::format(
@@ -232,11 +232,11 @@ Result<void> LoadNdbNavaids(sqlite3* conn, NavData& data, std::string_view table
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
-    if (!seen.insert(key).second) {
+    const Coordinate coord{ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)};
+    if (!seen.Insert(key, coord)) {
       return;
     }
-    data.waypoints.push_back(Waypoint{key, Coordinate{ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)},
-                                      WaypointKind::kNdb});
+    data.waypoints.push_back(Waypoint{key, coord, WaypointKind::kNdb});
     data.navaid_details.push_back(
         NavaidDetail{key, WaypointKind::kNdb, 0, ColumnInt(stmt, 2), ColumnDouble(stmt, 3), 0.0});
   });
@@ -247,7 +247,8 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   const std::string sql = std::format(
       "SELECT route_identifier, seqno, waypoint_identifier, icao_code, direction_restriction, "
       "flightlevel, minimum_altitude1, maximum_altitude, outbound_course, inbound_course, "
-      "waypoint_description_code FROM {} ORDER BY route_identifier, seqno",
+      "waypoint_description_code, waypoint_latitude, waypoint_longitude FROM {} ORDER BY "
+      "route_identifier, seqno",
       kTblAirways);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
@@ -262,10 +263,12 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   bool prev_is_awy_end = false;
   std::string prev_route, prev_ident, prev_icao, prev_dir, prev_level;
   int prev_min_alt = 0, prev_max_alt = 0;
+  std::optional<Coordinate> prev_coord;
   return ForEachRow(stmt, [&]() {
     const std::string route = ColumnText(stmt, 0);
     const std::string ident = ColumnText(stmt, 2);
     const std::string icao = ColumnText(stmt, 3);
+    const std::optional<Coordinate> coord = ColumnCoord(stmt, 11, 12);
     if (have_prev && route == prev_route && !prev_is_awy_end) {
       // Each airway record's direction/level/altitude describe the OUTBOUND leg
       // leaving that fix (in increasing-seqno order), so the segment prev->current
@@ -283,10 +286,11 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
       // base_fl==0 && top_fl==0 sentinel AltitudeBandConstraint exempts. Harmless
       // since no query cruises above FL999. (Same as dfd1.)
       seg.top_fl = prev_max_alt / kFeetPerFlightLevel;
-      data.airways.push_back(
-          AirwayConnection{Ident(prev_ident, prev_icao), Ident(ident, icao), seg});
+      data.airways.push_back(AirwayConnection{Ident(prev_ident, prev_icao), Ident(ident, icao), seg,
+                                              prev_coord, coord});
     }
     prev_route = route;
+    prev_coord = coord;
     prev_ident = ident;
     prev_icao = icao;
     prev_dir = ColumnText(stmt, 4);
@@ -458,6 +462,8 @@ struct ProcCols {
   int turn_dir = 16;     // turn_direction ('L'/'R')
   int speed_limit = 17;  // speed_limit (knots)
   int wpt_desc = 18;     // waypoint_description_code (ARINC 424, 4 chars)
+  int wp_lat = 19;       // waypoint_latitude
+  int wp_lon = 20;       // waypoint_longitude
 };
 
 // SQL for one procedure table, in ProcCols column order.
@@ -472,7 +478,8 @@ std::string ProcSql(std::string_view table, bool single_airport) {
                         "path_termination, course, course_flag, distance_time, "
                         "route_distance_holding_distance_time, altitude_description, altitude1, "
                         "altitude2, rnp, turn_direction, speed_limit, "
-                        "waypoint_description_code FROM ") +
+                        "waypoint_description_code, waypoint_latitude, waypoint_longitude "
+                        "FROM ") +
                     std::string(table);
   if (single_airport) {
     sql += " WHERE airport_identifier = ?";
@@ -522,6 +529,9 @@ void AppendLeg(sqlite3_stmt* stmt, const ProcCols& c, double magvar, Procedure& 
   leg.speed_limit_kt = static_cast<uint16_t>(std::clamp(
       ColumnInt(stmt, c.speed_limit), 0, static_cast<int>(std::numeric_limits<uint16_t>::max())));
   leg.is_mapt = IsMaptDesc(ColumnText(stmt, c.wpt_desc));
+  if (const std::optional<Coordinate> coord = ColumnCoord(stmt, c.wp_lat, c.wp_lon)) {
+    leg.set_fix_coord(*coord);
+  }
   proc.legs.push_back(std::move(leg));
   // Consume the seqno column (previously relied on only by ORDER BY) to validate
   // that legs arrive non-decreasing within a procedure -- the order the
@@ -800,7 +810,7 @@ Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
 
   // Each per-table loader returns Result<void>; a step error (corruption, IO)
   // propagates as a load failure rather than silently producing partial data.
-  std::unordered_set<Ident> seen;
+  PointDeduper seen;
   Result<void> load = Result<void>::Ok();
   load = LoadEnrouteWaypoints(conn.value(), data, seen);
   if (!load) {
@@ -819,7 +829,8 @@ Result<NavData> Dfd2Loader::LoadNavData(const std::string& source_dir) const {
     return Result<NavData>::Err(load.error());
   }
   // Terminal waypoints load LAST so canonical enroute/navaid entries win the
-  // first-wins `seen` dedup once terminal fixes are keyed by icao_code. (Same as dfd1.)
+  // first-wins same-point merge; a same-key terminal fix elsewhere is kept as its
+  // own vertex. (Same as dfd1.)
   load = LoadTerminalWaypoints(conn.value(), data, seen);
   if (!load) {
     return Result<NavData>::Err(load.error());

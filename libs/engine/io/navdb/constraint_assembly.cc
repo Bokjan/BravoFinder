@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "core/base/string_util.h"
-#include "core/domain/ident.h"
 #include "core/routing/route_request.h"
 #include "core/routing/route_string.h"
 #include "io/build/graph_builder.h"
@@ -20,9 +19,10 @@ namespace bf {
 namespace {
 
 // Resolve the request's avoid_waypoints to the set of vertices to block. A full
-// "IDENT/REGION" key resolves to that single vertex; a bare "IDENT" resolves to
-// every region's match (idents are not globally unique, so "avoid X" avoids all
-// X). Unknown idents contribute nothing (avoiding something absent is a no-op).
+// "IDENT/REGION" key resolves to every vertex with that key (distinct points may
+// share one, e.g. per-airport terminal fixes); a bare "IDENT" resolves to every
+// region's match (idents are not globally unique, so "avoid X" avoids all X).
+// Unknown idents contribute nothing (avoiding something absent is a no-op).
 std::vector<int> ResolveAvoidVertices(const GraphBuilder& builder,
                                       const std::vector<std::string>& avoid_waypoints) {
   std::vector<int> out;
@@ -30,9 +30,11 @@ std::vector<int> ResolveAvoidVertices(const GraphBuilder& builder,
     const std::string up = ToUpper(raw);
     const size_t slash = up.find('/');
     if (slash != std::string::npos) {
-      const int v = builder.VertexByIdent(Ident(up.substr(0, slash), up.substr(slash + 1)));
-      if (v >= 0) {
-        out.push_back(v);
+      const std::string_view region = std::string_view(up).substr(slash + 1);
+      for (const int v : builder.VerticesByIdent(up.substr(0, slash))) {
+        if (builder.RegionOf(v) == region) {
+          out.push_back(v);
+        }
       }
     } else {
       for (const int v : builder.VerticesByIdent(up)) {

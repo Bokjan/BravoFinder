@@ -55,6 +55,22 @@ TEST_CASE("real data: KJFK to KLAX route is plausible", "[integration]") {
   CHECK(r.total_distance_nm < 2144.0 * 1.15);
 }
 
+TEST_CASE("real data: a SID resolves the airport's own same-key terminal fix", "[integration]") {
+  // DER06/LF exists at LFTZ and at LFPO (378 NM apart). Resolving LFTZ's SID
+  // legs by key alone picked LFPO's copy and inflated LFTZ->LFMN (~50 NM great
+  // circle) to ~940 NM with an ~850 NM "departure".
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  bf::Result<std::vector<bf::Route>> routes = db->FindRoutes(MakeRequest("LFTZ", "LFMN"));
+  REQUIRE(routes);
+  REQUIRE_FALSE(routes.value().empty());
+  const bf::Route& r = routes.value().front();
+  CHECK(r.total_distance_nm < 300.0);
+  CHECK(r.dep_distance_nm < 150.0);
+}
+
 TEST_CASE("real data: route phase distances split and sum to the total", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

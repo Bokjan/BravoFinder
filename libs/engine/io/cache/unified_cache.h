@@ -78,7 +78,7 @@ class UnifiedCache {
   // wrong files, so that version is retired to force a rebuild (see CLAUDE.md,
   // "Protective (poison) format_version bump"). The reason for each bump lives in
   // the commit history, not in a comment here.
-  static constexpr uint32_t kFormatVersion = 18;
+  static constexpr uint32_t kFormatVersion = 19;
 
   // What to serialize into a unified file. `cifp` may be empty (no CIFP section
   // written). `detail` is optional. The graph is always written.

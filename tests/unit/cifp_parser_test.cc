@@ -3,7 +3,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/domain/procedure.h"
@@ -70,6 +72,38 @@ TEST_CASE("CIFP parser: definite-fix legs resolve their fix and region", "[unit]
   CHECK(p.legs[0].fix.IdentView().empty());
   CHECK_FALSE(p.legs[0].fix_is_definite());
   CHECK_FALSE(p.legs[4].fix_is_definite());
+}
+
+TEST_CASE("CIFP parser: a FixLocator gets each leg's section code", "[unit][cifp]") {
+  // CIFP legs carry no positions, only the ARINC section/subsection of the fix
+  // record. The locator sees exactly those, and its answer becomes the leg's
+  // fix position; legs without a fix (VI/VM) are never looked up.
+  std::vector<std::string> seen;
+  const bf::FixLocator locate = [&](std::string_view ident, std::string_view region, char section,
+                                    char subsection) -> std::optional<bf::Coordinate> {
+    seen.push_back(std::string(ident) + "/" + std::string(region) + ":" + section + subsection);
+    if (ident == "SKORR") {
+      return bf::Coordinate{40.5, -73.9};
+    }
+    return std::nullopt;
+  };
+  const bf::CifpData data = bf::CifpParser::ParseLines(kDeezz5Rw31L, locate);
+  REQUIRE(data.procedures.size() == 1);
+  const auto& legs = data.procedures.front().legs;
+  REQUIRE(legs.size() == 6);
+  CHECK(seen ==
+        std::vector<std::string>{"SKORR/K6:EA", "CESID/K6:EA", "YNKEE/K6:EA", "DEEZZ/K6:EA"});
+  REQUIRE(legs[1].has_fix_coord());
+  CHECK_THAT(legs[1].fix_coord().latitude, WithinAbs(40.5, 1e-5));
+  CHECK_THAT(legs[1].fix_coord().longitude, WithinAbs(-73.9, 1e-5));
+  CHECK_FALSE(legs[0].has_fix_coord());
+  CHECK_FALSE(legs[2].has_fix_coord());
+
+  // Without a locator no leg carries a position.
+  const bf::CifpData bare = bf::CifpParser::ParseLines(kDeezz5Rw31L);
+  for (const bf::ProcedureLeg& leg : bare.procedures[0].legs) {
+    CHECK_FALSE(leg.has_fix_coord());
+  }
 }
 
 TEST_CASE("CIFP parser: course, distance, and altitude columns", "[unit][cifp]") {

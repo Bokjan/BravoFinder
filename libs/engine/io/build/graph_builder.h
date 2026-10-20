@@ -17,6 +17,12 @@
 
 namespace bf {
 
+// How far a reference's published position may sit from the vertex it names.
+// Same-point rows are merged within kSamePointNm (0.5 NM) at load time, and in
+// cycle 2601 every correct DFD procedure/airway reference lies within 0.5 NM of
+// its point while every wrong same-key match is >= 10 NM away.
+inline constexpr double kFixHintToleranceNm = 1.0;
+
 // Builds an immutable NavGraph (CSR) from a loaded NavData. Resolves airway
 // endpoints by (ident, region) to vertex indices and emits directed edges
 // honoring each segment's direction. Airport vertices are present but carry no
@@ -54,14 +60,23 @@ class GraphBuilder {
   // Callers that know the region should use the (ident, region) overload below.
   std::vector<int> VerticesByIdent(const std::string& ident) const;
 
-  // Resolve a waypoint by its full (ident, region) key, or -1. Preferred over
-  // the ident-only lookup when the region is known (procedure fixes carry it),
-  // since idents are not globally unique.
+  // Resolve a waypoint by its full (ident, region) key, or -1. When several
+  // distinct points share the key this returns the first-loaded one (enroute
+  // fixes and navaids load before terminal fixes); a reference that knows its
+  // position should use VertexNear instead.
   int VertexByIdent(const Ident& ident) const;
 
   // Same, for a key already in compact form (e.g. a ProcedureLeg::fix). The
   // lookup index is FixedIdent-keyed, so this avoids the Ident round-trip.
   int VertexByIdent(const FixedIdent& key) const;
+
+  // Resolve `key` to the same-key vertex nearest `near`, or -1 when no vertex
+  // with that key lies within `max_nm` of it. An (ident, region) key may name
+  // several distinct points (per-airport terminal fixes, a VOR and an NDB sharing
+  // an ident), so a reference that knows its published position -- a procedure
+  // leg, an airway endpoint -- resolves through this instead of VertexByIdent,
+  // which returns the first-loaded point regardless of where it is.
+  int VertexNear(const FixedIdent& key, const Coordinate& near, double max_nm) const;
 
   // Resolve an airport by ICAO code to its vertex index, or -1.
   int VertexByAirport(const std::string& icao) const;
