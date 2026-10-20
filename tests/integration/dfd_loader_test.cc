@@ -231,7 +231,53 @@ void CheckTerminalWaypointRegion(const bf::NavData& data) {
   }
 }
 
+// An airway crossing an ARINC area boundary lists the boundary fix twice under
+// one seqno (DFD v2: A1 IKELA in PAC with End of Airway set, again in EEU
+// without). The pair is one point: no X->X self-loop, and the leg after it
+// (IKELA->LENKO) must survive. DME-only stations take the DME position instead
+// of a NULL VOR position read as (0, 0). Shared by dfd1/dfd2.
+void CheckAreaBoundaryAndDmePositions(const bf::NavData& data) {
+  CHECK(FindSegment(data, "A1", "IDOSI", "IKELA") != nullptr);
+  CHECK(FindSegment(data, "A1", "IKELA", "LENKO") != nullptr);
+  CHECK(FindSegment(data, "A1", "BUNTA", "BINKU") != nullptr);
+  for (const bf::AirwayConnection& c : data.airways) {
+    CHECK_FALSE(c.from == c.to);
+  }
+  for (const bf::Waypoint& w : data.waypoints) {
+    if (w.kind == bf::WaypointKind::kDme || w.kind == bf::WaypointKind::kVor) {
+      INFO(w.ident.ident << "/" << w.ident.arinc424_icao_code);
+      CHECK_FALSE((w.coord.latitude == 0.0 && w.coord.longitude == 0.0));
+    }
+  }
+  // VMS/FD is a DME-only station in Eswatini.
+  auto vms = std::find_if(data.waypoints.begin(), data.waypoints.end(),
+                          [](const bf::Waypoint& w) { return w.ident == bf::Ident("VMS", "FD"); });
+  REQUIRE(vms != data.waypoints.end());
+  CHECK(vms->coord.latitude == Catch::Approx(-26.51).margin(0.05));
+  CHECK(vms->coord.longitude == Catch::Approx(31.32).margin(0.05));
+}
+
 }  // namespace
+
+TEST_CASE("dfd1: area-boundary airway fixes and DME positions", "[integration][dfd]") {
+  const std::string dir = EnsureDfd1();
+  if (dir.empty()) {
+    SKIP("DFD v1 data not found");
+  }
+  bf::Result<bf::NavData> data = bf::Dfd1Loader().LoadNavData(dir);
+  REQUIRE(data);
+  CheckAreaBoundaryAndDmePositions(data.value());
+}
+
+TEST_CASE("dfd2: area-boundary airway fixes and DME positions", "[integration][dfd]") {
+  const std::string dir = EnsureDfd2();
+  if (dir.empty()) {
+    SKIP("DFD v2 data not found");
+  }
+  bf::Result<bf::NavData> data = bf::Dfd2Loader().LoadNavData(dir);
+  REQUIRE(data);
+  CheckAreaBoundaryAndDmePositions(data.value());
+}
 
 TEST_CASE("dfd1: airway direction restriction governs the outbound leg", "[integration][dfd]") {
   const std::string dir = EnsureDfd1();

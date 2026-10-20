@@ -159,9 +159,13 @@ Result<void> LoadEnrouteWaypoints(sqlite3* conn, NavData& data, PointDeduper& se
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
-    const Coordinate coord{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)};
-    if (seen.Insert(key, coord)) {
-      data.waypoints.push_back(Waypoint{key, coord, WaypointKind::kFix});
+    const std::optional<Coordinate> coord = ColumnCoord(stmt, 2, 3);
+    if (!coord) {
+      BF_LOG_WARN("dfd2: skipping '{}/{}' (no position)", key.ident, key.arinc424_icao_code);
+      return;
+    }
+    if (seen.Insert(key, *coord)) {
+      data.waypoints.push_back(Waypoint{key, *coord, WaypointKind::kFix});
     }
   });
 }
@@ -181,19 +185,27 @@ Result<void> LoadTerminalWaypoints(sqlite3* conn, NavData& data, PointDeduper& s
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
-    const Coordinate coord{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)};
-    if (seen.Insert(key, coord)) {
-      data.waypoints.push_back(Waypoint{key, coord, WaypointKind::kFix});
+    const std::optional<Coordinate> coord = ColumnCoord(stmt, 2, 3);
+    if (!coord) {
+      BF_LOG_WARN("dfd2: skipping '{}/{}' (no position)", key.ident, key.arinc424_icao_code);
+      return;
+    }
+    if (seen.Insert(key, *coord)) {
+      data.waypoints.push_back(Waypoint{key, *coord, WaypointKind::kFix});
     }
   });
 }
 
 Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, PointDeduper& seen) {
   // v2: navaid_identifier / navaid_latitude / navaid_longitude / navaid_frequency
-  // (v1 used vor_*).
+  // (v1 used vor_*). A DME-only station (class " D", TACAN "T", ...) has no VOR
+  // and leaves navaid_latitude/longitude NULL; its position is the DME's (2601:
+  // 4689 rows, all with dme_latitude). Reading only navaid_* put 1238 routable
+  // DME/TACANs at (0, 0) and gave airway T645 a 6697 NM NANOO->UQQ leg.
   const std::string sql = std::format(
       "SELECT icao_code, navaid_identifier, navaid_frequency, navaid_class, range, "
-      "station_declination, dme_elevation, navaid_latitude, navaid_longitude FROM {}",
+      "station_declination, dme_elevation, COALESCE(navaid_latitude, dme_latitude), "
+      "COALESCE(navaid_longitude, dme_longitude) FROM {}",
       kTblVhf);
   Result<SqliteStmt> s = Prepare(conn, sql);
   if (!s) {
@@ -206,11 +218,15 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, PointDeduper& seen) {
       return;  // ILS/LOC component: not enroute-routable
     }
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
-    const Coordinate coord{ColumnDouble(stmt, 7), ColumnDouble(stmt, 8)};
-    if (!seen.Insert(key, coord)) {
+    const std::optional<Coordinate> coord = ColumnCoord(stmt, 7, 8);
+    if (!coord) {
+      BF_LOG_WARN("dfd2: skipping '{}/{}' (no position)", key.ident, key.arinc424_icao_code);
       return;
     }
-    data.waypoints.push_back(Waypoint{key, coord, kind});
+    if (!seen.Insert(key, *coord)) {
+      return;
+    }
+    data.waypoints.push_back(Waypoint{key, *coord, kind});
     const int freq_raw = static_cast<int>(std::lround(ColumnDouble(stmt, 2) * kCentiScale));
     data.navaid_details.push_back(NavaidDetail{key, kind, ColumnInt(stmt, 6), freq_raw,
                                                ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)});
@@ -232,11 +248,15 @@ Result<void> LoadNdbNavaids(sqlite3* conn, NavData& data, std::string_view table
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
-    const Coordinate coord{ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)};
-    if (!seen.Insert(key, coord)) {
+    const std::optional<Coordinate> coord = ColumnCoord(stmt, 4, 5);
+    if (!coord) {
+      BF_LOG_WARN("dfd2: skipping '{}/{}' (no position)", key.ident, key.arinc424_icao_code);
       return;
     }
-    data.waypoints.push_back(Waypoint{key, coord, WaypointKind::kNdb});
+    if (!seen.Insert(key, *coord)) {
+      return;
+    }
+    data.waypoints.push_back(Waypoint{key, *coord, WaypointKind::kNdb});
     data.navaid_details.push_back(
         NavaidDetail{key, WaypointKind::kNdb, 0, ColumnInt(stmt, 2), ColumnDouble(stmt, 3), 0.0});
   });
@@ -262,13 +282,37 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
   // (Same as dfd1; see the dfd1 LoadAirways comment for the full rationale.)
   bool prev_is_awy_end = false;
   std::string prev_route, prev_ident, prev_icao, prev_dir, prev_level;
-  int prev_min_alt = 0, prev_max_alt = 0;
+  int prev_min_alt = 0, prev_max_alt = 0, prev_seqno = 0;
   std::optional<Coordinate> prev_coord;
   return ForEachRow(stmt, [&]() {
     const std::string route = ColumnText(stmt, 0);
     const std::string ident = ColumnText(stmt, 2);
     const std::string icao = ColumnText(stmt, 3);
     const std::optional<Coordinate> coord = ColumnCoord(stmt, 11, 12);
+    const int seqno = ColumnInt(stmt, 1);
+    // Column 2 ('E') of the waypoint description code marks End of Airway. Read
+    // raw (untrimmed): trimming a blank column 1 would shift the byte offsets and
+    // silently miss the 'E', reintroducing cross-instance phantom legs.
+    const bool is_awy_end = HasCodeAt(ColumnTextRaw(stmt, 10), 1, kWptDescEndOfAirway);
+    // An airway crossing an ARINC area boundary (e.g. A1 PAC -> EEU at IKELA) can
+    // list the boundary fix twice under one seqno: once ending the first area's
+    // portion (End of Airway set) and once starting the next. ORDER BY (route,
+    // seqno) leaves the pair in either order, so chaining the rows naively gave a
+    // zero-length self-loop and then broke the airway at the End flag, dropping
+    // the following leg (DFD v2 2601: 711 such pairs, 557 lost edges). Fold the
+    // pair into one point: the airway continues unless both rows end it, and the
+    // outbound attributes come from the row that continues.
+    if (have_prev && route == prev_route && seqno == prev_seqno && ident == prev_ident &&
+        icao == prev_icao) {
+      if (!is_awy_end) {
+        prev_dir = ColumnText(stmt, 4);
+        prev_level = ColumnText(stmt, 5);
+        prev_min_alt = ColumnInt(stmt, 6);
+        prev_max_alt = ColumnInt(stmt, 7);
+      }
+      prev_is_awy_end = prev_is_awy_end && is_awy_end;
+      return;
+    }
     if (have_prev && route == prev_route && !prev_is_awy_end) {
       // Each airway record's direction/level/altitude describe the OUTBOUND leg
       // leaving that fix (in increasing-seqno order), so the segment prev->current
@@ -297,11 +341,8 @@ Result<void> LoadAirways(sqlite3* conn, NavData& data) {
     prev_level = ColumnText(stmt, 5);
     prev_min_alt = ColumnInt(stmt, 6);
     prev_max_alt = ColumnInt(stmt, 7);
-    // Column 2 ('E') of the waypoint description code marks End of Airway. Read
-    // raw (untrimmed): trimming a blank column 1 would shift the byte offsets and
-    // silently miss the 'E', reintroducing cross-instance phantom legs. (Same as dfd1.)
-    const std::string desc = ColumnTextRaw(stmt, 10);
-    prev_is_awy_end = HasCodeAt(desc, 1, kWptDescEndOfAirway);
+    prev_seqno = seqno;
+    prev_is_awy_end = is_awy_end;
     have_prev = true;
   });
 }
@@ -317,9 +358,13 @@ Result<void> LoadAirports(sqlite3* conn, NavData& data) {
   }
   sqlite3_stmt* stmt = s.value().get();
   return ForEachRow(stmt, [&]() {
-    data.airports.push_back(Airport{ColumnText(stmt, 1), ColumnText(stmt, 0),
-                                    Coordinate{ColumnDouble(stmt, 2), ColumnDouble(stmt, 3)},
-                                    ColumnInt(stmt, 4)});
+    const std::optional<Coordinate> coord = ColumnCoord(stmt, 2, 3);
+    if (!coord) {
+      BF_LOG_WARN("dfd2: skipping airport '{}' (no position)", ColumnText(stmt, 1));
+      return;
+    }
+    data.airports.push_back(
+        Airport{ColumnText(stmt, 1), ColumnText(stmt, 0), *coord, ColumnInt(stmt, 4)});
   });
 }
 
