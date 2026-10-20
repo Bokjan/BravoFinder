@@ -32,6 +32,7 @@ constexpr uint32_t kSectionDetail = 3;
 // offset == length == 0 rather than dropped, so the table is a fixed size.
 constexpr uint32_t kSectionCount = 3;
 constexpr size_t kSectionRowSize = 4 + 8 + 8 + 4;  // type U32 + crc U32 + offset U64 + length U64
+constexpr size_t kHeaderCrcSize = 4;  // CRC-32C of [header][section table], right after the table
 
 // A generous bound on the header prefix (magic + fixed U32s + three inline
 // provenance strings). Real provenance strings are a few dozen bytes and a data
@@ -144,10 +145,12 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
                                    "cannot serialize. This is unexpected for real AIRAC data."));
   }
 
-  // Sections begin after [header][section table][pool]. Compute each present
-  // section's absolute file offset in table order (graph, cifp, detail).
-  const uint64_t sections_start =
-      header.size() + static_cast<uint64_t>(kSectionCount) * kSectionRowSize + pool_blob.size();
+  // Sections begin after [header][section table][header CRC][pool]. Compute
+  // each present section's absolute file offset in table order (graph, cifp,
+  // detail).
+  const uint64_t sections_start = header.size() +
+                                  static_cast<uint64_t>(kSectionCount) * kSectionRowSize +
+                                  kHeaderCrcSize + pool_blob.size();
   uint64_t cursor = sections_start;
   const uint64_t graph_off = cursor;
   cursor += graph_body.size();
@@ -180,6 +183,16 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   tw.U64(detail_off);
   tw.U64(has_detail ? detail_body.size() : 0);
 
+  // The header CRC covers every byte before it -- the fixed header, provenance,
+  // capabilities, pool length/CRC, and the section table -- so a bit flip in a
+  // cycle, a capability flag, or a section row's type/offset/length is caught at
+  // Open instead of silently cataloguing the wrong cycle or dropping a section.
+  std::vector<uint8_t> header_crc;
+  {
+    ByteWriter cw(header_crc);
+    cw.U32(Crc32C::Update(Crc32C::Compute(header), table));
+  }
+
   std::ofstream f(path, std::ios::binary | std::ios::trunc);
   if (!f.is_open()) {
     return Result<void>::Err(
@@ -187,6 +200,7 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
   }
   WriteAll(f, header);
   WriteAll(f, table);
+  WriteAll(f, header_crc);
   WriteAll(f, pool_blob);
   WriteAll(f, graph_body);
   if (has_cifp) {
@@ -234,9 +248,22 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
   header.capabilities.altitude_bands = r.U8() != 0;
   header.capabilities.mora_grid = r.U8() != 0;
   header.capabilities.msa_sectors = r.U8() != 0;
+  r.U32();  // pool_len
+  r.U32();  // pool_crc
+  uint8_t table[kSectionCount * kSectionRowSize];
+  r.Bytes(table, sizeof(table));  // covered by the header CRC, otherwise unused here
+  // Bytes [0, crc_at) are the magic plus everything the reader has consumed.
+  const size_t crc_at = buf.size() - r.remaining();
+  const uint32_t stored_crc = r.U32();
   if (!r.ok()) {
     return Result<UnifiedHeader>::Err(
         Error(ErrorCode::kCacheCorrupt, WithRebuildHint("corrupt .bfdb header")));
+  }
+  // Verify the header CRC so a catalogue scan (BfdbInventory) cannot list a
+  // bit-flipped cycle or provenance as if it were real.
+  if (Crc32C::Compute(std::span<const uint8_t>(buf).subspan(0, crc_at)) != stored_crc) {
+    return Result<UnifiedHeader>::Err(
+        Error(ErrorCode::kCacheCorrupt, WithRebuildHint("corrupt .bfdb: header CRC mismatch")));
   }
   return Result<UnifiedHeader>::Ok(std::move(header));
 }
@@ -380,6 +407,25 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     }
   }
 
+  // Header CRC over every byte read so far ([header][section table]): re-read
+  // that prefix (a few hundred bytes) and compare.
+  const std::streamoff header_end = f.tellg();
+  uint32_t header_crc = 0;
+  if (!readU32(header_crc)) {
+    return bad("truncated .bfdb header");
+  }
+  {
+    std::vector<uint8_t> prefix;
+    f.seekg(0);
+    if (!readN(prefix, static_cast<size_t>(header_end))) {
+      return bad("truncated .bfdb header");
+    }
+    if (Crc32C::Compute(prefix) != header_crc) {
+      return bad("corrupt .bfdb: header CRC mismatch");
+    }
+    f.seekg(header_end + static_cast<std::streamoff>(kHeaderCrcSize));
+  }
+
   // Global string pool, read once into memory and shared by every section decode.
   std::vector<uint8_t> pool;
   if (!readN(pool, pool_len)) {
@@ -389,24 +435,31 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     return bad("corrupt .bfdb: string pool CRC mismatch");
   }
 
-  // Map section types to rows.
+  // Map section types to rows. A format version fixes the section set, so each
+  // known type appears exactly once; an unknown or repeated type is corruption
+  // (the header CRC already makes it unlikely), not something to skip past.
   const Row* graph_row = nullptr;
   const Row* cifp_row = nullptr;
   const Row* detail_row = nullptr;
   for (uint32_t i = 0; i < section_count; ++i) {
+    const Row** slot = nullptr;
     switch (rows[i].type) {
       case kSectionGraph:
-        graph_row = &rows[i];
+        slot = &graph_row;
         break;
       case kSectionCifp:
-        cifp_row = &rows[i];
+        slot = &cifp_row;
         break;
       case kSectionDetail:
-        detail_row = &rows[i];
+        slot = &detail_row;
         break;
       default:
-        break;  // unknown section type: ignore (forward-compat within a version)
+        return bad("corrupt .bfdb: unknown section type");
     }
+    if (*slot != nullptr) {
+      return bad("corrupt .bfdb: duplicate section type");
+    }
+    *slot = &rows[i];
   }
   if (graph_row == nullptr || (graph_row->off == 0 && graph_row->len == 0)) {
     return bad("corrupt .bfdb: missing graph section");

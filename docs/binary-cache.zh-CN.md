@@ -86,11 +86,13 @@ uint8  level        // AirwayLevel low/high/both 的原始 enum 值（三态互�
                 pool_len, pool_crc
 [section table] 目前 3 项，每项 (type U32, crc U32, offset U64, length U64)；
                 crc 为段体 CRC-32C，offset==length==0 表示该段缺席
+[header crc]    U32，CRC-32C 覆盖其前全部字节（file header + section table）
 [global pool]   pool_len 字节，三段共用（见第 6 节），pool_crc 覆盖整池
 [graph 段] [cifp 段] [detail 段]   顺序紧接，偏移由段表指定，各段带 crc
 ```
 
-- **pool 放头部而非尾部**：Writer 本就要 buffer 各段体（段表需要每段 offset/length），pool 在序列化中自然累积完成，写盘顺序 header→段表→pool→各段体，无额外成本；Reader 顺序读完 header+段表+pool（含 pool_crc，~1.5MB）后 pool 已就位，解析各段即时 resolve，不需 seek 到文件尾、不需全量读入。对 CIFP 按需尤其友好：读完 pool 与目录即可开始 `Fetch`，graph/detail 段可跳过。
+- **头部 CRC**：段体、pool、CIFP 段各有 CRC，但 cycle / provenance / capability 与段表行的 type/offset/length 以前没有——段表里 CIFP 行的 type 位翻转会让该段被当作「未知段」跳过，`Open` 成功却报告全部机场无程序。header crc 堵上这个洞；`ReadHeader`（`BfdbInventory` 编目用）同样校验，不会把翻转后的 cycle 编进目录。同一 `format_version` 内段集合固定，未知或重复的段 type 一律视为损坏。
+- **pool 放头部而非尾部**：Writer 本就要 buffer 各段体（段表需要每段 offset/length），pool 在序列化中自然累积完成，写盘顺序 header→段表→header crc→pool→各段体，无额外成本；Reader 顺序读完 header+段表+pool（含 pool_crc，~1.5MB）后 pool 已就位，解析各段即时 resolve，不需 seek 到文件尾、不需全量读入。对 CIFP 按需尤其友好：读完 pool 与目录即可开始 `Fetch`，graph/detail 段可跳过。
 - **CIFP 段**：`airport_count` + `ICAO→（段内相对偏移，段长）` 目录 + 每机场一段 bare body （无局部池，引用直指全局池）。段内相对偏移加上 CIFP 段的 `section_offset` 得绝对文件偏移。
 - **按需加载**（默认 `on-demand`）：`Open` 只读 header+段表+pool+CIFP 目录进内存（~3MB）， `Fetch(icao)` 才按绝对偏移**定位读**（pread / Windows `ReadFile`+`OVERLAPPED`）该段——启动仍毫秒级，不常驻全部程序；
 - **eager 模式**：`Open` 时 `FetchAll` 全量反序列化进内存并冻结（~102MB），之后无锁读，面向 Web/批量并发。

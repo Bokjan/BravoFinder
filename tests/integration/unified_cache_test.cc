@@ -89,6 +89,7 @@ bf::NavDetailArchive MakeDetail() {
 // parse (unified_cache.cc::Open) just enough to locate the regions; if the
 // container layout changes, this parse changes with it.
 struct RegionLocs {
+  uint64_t table_off = 0;  // first section-table row
   uint64_t pool_off = 0, pool_len = 0;
   uint64_t graph_off = 0, graph_len = 0;
   uint64_t detail_off = 0, detail_len = 0;
@@ -127,8 +128,9 @@ RegionLocs ReadRegionLocs(const std::vector<uint8_t>& b) {
   locs.pool_len = u32();
   u32();  // pool_crc
   // Pool follows the 3-row section table (each row: type U32 + crc U32 + off U64
-  // + len U64 = 24 bytes).
-  locs.pool_off = pos + 3 * 24;
+  // + len U64 = 24 bytes) and the U32 header CRC.
+  locs.table_off = pos;
+  locs.pool_off = pos + 3 * 24 + 4;
   for (int i = 0; i < 3; ++i) {
     const uint32_t type = u32();
     u32();  // crc
@@ -364,6 +366,21 @@ TEST_CASE("unified: CRC-32C rejects a bit-flipped region", "[unit][unified]") {
     bf::Result<bf::UnifiedData> r = bf::UnifiedCache::Open(path);
     CHECK_FALSE(r);
     CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
+  }
+
+  // Header and section table are covered by the header CRC: a flipped cycle byte
+  // (offset 12: magic, version, section_count precede it) or a flipped section
+  // type -- which used to drop the CIFP section and open as "no procedures" --
+  // must be rejected by Open and by the cheap ReadHeader catalogue read alike.
+  for (uint64_t off : {uint64_t{12}, locs.table_off + 24 /* CIFP row type */}) {
+    std::vector<uint8_t> b = pristine;
+    b[off] ^= 0x01;
+    write_file(path, b);
+    bf::Result<bf::UnifiedData> r = bf::UnifiedCache::Open(path);
+    CHECK_FALSE(r);
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
+    bf::Result<bf::UnifiedHeader> h = bf::UnifiedCache::ReadHeader(path);
+    CHECK_FALSE(h);
   }
 
   // A CIFP segment is lazy: flipping a byte in its body does NOT fail Open (the

@@ -59,7 +59,8 @@ struct UnifiedData {
 //                    rows) for CIFP -- CIFP segments are lazy and carry their own
 //                    crc in their directory row. Field order is alignment-driven:
 //                    crc fills the 4-byte gap after type so offset/length stay
-//                    8-aligned with no padding.
+//                    8-aligned with no padding. Each type appears exactly once.
+//   [header crc]  U32 CRC-32C of every byte before it (file header + section table)
 //   [global string pool]  pool_len bytes, shared by all sections; pool_crc covers it
 //   [graph section] [cifp section] [detail section]  in section-table order
 //
