@@ -22,6 +22,8 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
+#include <utility>
 
 #include "dispatcher.h"  // bf::mcp::Dispatcher
 #include "registry.h"
@@ -32,9 +34,11 @@ namespace bf::mcp {
 class McpHttpHandler : public http_server::RequestHandler {
  public:
   // Serve MCP from `registry`; offload work onto `loop`'s threadpool. Both must
-  // outlive the handler. Builds its Dispatcher (and tool list) once.
-  McpHttpHandler(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop)
-      : dispatcher_(registry), loop_(loop) {}
+  // outlive the handler. `bind_host` is the address the listener was bound to,
+  // used by the Origin check (MCP requires one; see OriginAllowed). Builds its
+  // Dispatcher (and tool list) once.
+  McpHttpHandler(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop, std::string bind_host)
+      : dispatcher_(registry), loop_(loop), bind_host_(std::move(bind_host)) {}
 
   // Route one fully-parsed request (loop thread): answer /mcp per Streamable
   // HTTP, or 404 anything else.
@@ -51,6 +55,8 @@ class McpHttpHandler : public http_server::RequestHandler {
   // thread-safe, so many worker threads may call it concurrently.
   Dispatcher dispatcher_;
   uv_loop_t* loop_;
+  // The listen address, for the Origin check.
+  std::string bind_host_;
   // In-flight offloaded work items; a request over the cap is shed with 503.
   std::atomic<int> inflight_{0};
 };

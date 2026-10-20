@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -84,6 +85,11 @@ struct HttpRequest {
   std::string body;
   Headers headers;
   bool keep_alive = false;
+  // The peer's IP as text ("127.0.0.1", "::1", ...), or "" when unavailable.
+  // Used for the Origin check: a browser's DNS-rebinding attack arrives from a
+  // loopback peer with an attacker-controlled Origin, so the peer address is what
+  // tells a same-machine client apart from a rebound page.
+  std::string remote_address;
 
   // The first value of a request header by name, or "" if absent. Comparison is
   // ASCII case-insensitive (request header names are stored lower-cased by the
@@ -120,6 +126,19 @@ class RequestHandler {
   virtual ~RequestHandler() = default;
   virtual void Handle(std::shared_ptr<Connection> conn, const HttpRequest& req) = 0;
 };
+
+// Whether a request's Origin header may be served. A request with no Origin
+// (every non-browser client: curl, a CLI, a local MCP client) is allowed -- the
+// header is a browser-only signal and rejecting its absence would break them.
+// A present Origin is allowed when its host is "localhost", a loopback address,
+// or exactly the server's configured bind host; anything else is refused.
+//
+// This is what stops DNS rebinding against a server bound to loopback or a LAN
+// address: a page served from attacker.example can make the browser send a
+// request to 127.0.0.1 with "Origin: http://attacker.example", and the browser
+// only reads the response if the server accepts the request. The MCP Streamable
+// HTTP spec makes this check a MUST; both consumers share it.
+bool OriginAllowed(const HttpRequest& req, std::string_view bind_host);
 
 // Build an error JSON payload {"error":"<message>"} with RapidJSON's Writer so
 // the message is auto-escaped. Used for the transport's own rejects (413/417/

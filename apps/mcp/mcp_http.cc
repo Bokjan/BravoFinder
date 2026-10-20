@@ -185,8 +185,22 @@ void McpHttpHandler::Handle(std::shared_ptr<http_server::Connection> conn,
                         req.keep_alive);
     return;
   }
+  // Streamable HTTP makes the Origin check a MUST: it is what stops a page on
+  // another site (DNS rebinding) from driving this server through the client's
+  // browser. The transport core implements the rule; the answer here is 403.
+  if (!http_server::OriginAllowed(req, bind_host_)) {
+    conn->WriteResponse(http_server::kStatusForbidden, http_server::JsonError("origin not allowed"),
+                        req.keep_alive);
+    return;
+  }
   if (req.method == "POST") {
     HandlePost(std::move(conn), req);
+    return;
+  }
+  if (req.method == "HEAD") {
+    // Same answer a GET would give, minus the body: the transport drops the body
+    // of a HEAD response and keeps its framing headers.
+    conn->WriteResponse(http_server::kStatusOk, "", req.keep_alive, "text/event-stream", {});
     return;
   }
   if (req.method == "GET") {
@@ -203,7 +217,8 @@ void McpHttpHandler::Handle(std::shared_ptr<http_server::Connection> conn,
     return;
   }
   conn->WriteResponse(http_server::kStatusMethodNotAllowed,
-                      http_server::JsonError("method not allowed"), req.keep_alive);
+                      http_server::JsonError("method not allowed"), req.keep_alive,
+                      "application/json", {{"Allow", "GET, HEAD, POST, DELETE"}});
 }
 
 void McpHttpHandler::HandlePost(std::shared_ptr<http_server::Connection> conn,

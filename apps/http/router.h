@@ -28,8 +28,9 @@ namespace bf::http {
 class Router : public http_server::RequestHandler {
  public:
   // Serve queries from `registry`; offload work onto `loop`'s threadpool. Both
-  // must outlive the Router.
-  Router(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop);
+  // must outlive the Router. `bind_host` is the address the listener was bound
+  // to, for the Origin check.
+  Router(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop, std::string bind_host);
 
   // Route one fully-parsed request (loop thread): write an inline response, or
   // queue an offloaded query, using `conn` for the reply.
@@ -42,6 +43,8 @@ class Router : public http_server::RequestHandler {
 
   bf::service::NavDatabaseRegistry& registry_;
   uv_loop_t* loop_;
+  // The listen address, for the Origin check.
+  std::string bind_host_;
   // POST path (e.g. "/v1/routes") -> the shared handler that serves it.
   std::unordered_map<std::string, bf::service::QueryHandler> routes_;
   // In-flight offloaded work items. Incremented when queued, decremented on

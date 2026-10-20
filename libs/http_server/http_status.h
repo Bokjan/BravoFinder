@@ -17,6 +17,7 @@ inline constexpr int kStatusNone = 0;
 inline constexpr int kStatusOk = 200;
 inline constexpr int kStatusAccepted = 202;
 inline constexpr int kStatusBadRequest = 400;
+inline constexpr int kStatusForbidden = 403;
 inline constexpr int kStatusNotFound = 404;
 inline constexpr int kStatusMethodNotAllowed = 405;
 inline constexpr int kStatusRequestTimeout = 408;

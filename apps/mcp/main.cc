@@ -53,7 +53,7 @@ int RunHttp(bf::service::NavDatabaseRegistry& registry, const std::string& host,
 
   uv_loop_t loop;
   uv_loop_init(&loop);
-  bf::mcp::McpHttpHandler handler(registry, &loop);
+  bf::mcp::McpHttpHandler handler(registry, &loop, host);
 
   bf::http_server::Limits limits;
   limits.max_body_bytes = static_cast<size_t>(max_body);

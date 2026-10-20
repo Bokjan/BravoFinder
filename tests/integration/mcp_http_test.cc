@@ -106,7 +106,7 @@ class McpHarness {
       server->Shutdown();
       uv_close(reinterpret_cast<uv_handle_t*>(a), nullptr);
     });
-    bf::mcp::McpHttpHandler handler(registry_, &loop_);
+    bf::mcp::McpHttpHandler handler(registry_, &loop_, "127.0.0.1");
     bf::http_server::Server server(&loop_, handler, limits_);
     stop_.data = &server;
     const int r = server.Listen("127.0.0.1", 0);

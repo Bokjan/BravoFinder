@@ -126,6 +126,14 @@ class Connection : public std::enable_shared_from_this<Connection> {
   // no work item still references it.
   void StartClose();
 
+  // Half-close, then close. Used after a close-mode response has drained: the
+  // peer is told the reply is complete (FIN) and its remaining upload is
+  // discarded, instead of an abrupt RST that would destroy the response bytes
+  // still sitting in its receive buffer. Falls back to a plain close if the
+  // shutdown cannot be started, and StartClose still runs immediately if the
+  // peer never finishes (the close is scheduled a fixed grace period later).
+  void ShutdownThenClose();
+
   // Reset parser + per-request buffers for the next keep-alive request and
   // restart the idle timer.
   void ResetForNextRequest();
@@ -154,6 +162,8 @@ class Connection : public std::enable_shared_from_this<Connection> {
 
   // libuv trampolines.
   static void OnAlloc(uv_handle_t* h, size_t suggested, uv_buf_t* buf);
+  // uv_shutdown completion: the FIN is queued, so the handles can close.
+  static void OnShutdown(uv_shutdown_t* req, int status);
   static void OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf);
   static void OnTimeout(uv_timer_t* t);
   static void OnWriteDone(uv_write_t* req, int status);
@@ -190,6 +200,18 @@ class Connection : public std::enable_shared_from_this<Connection> {
   // reference is released only after both close callbacks have run.
   int open_handles_ = 0;
   bool closing_ = false;
+
+  // Time (uv_now) the current response write was queued, or 0 when no write is
+  // outstanding. A client that stops reading (zero window) never completes the
+  // uv_write, so this is what bounds a write-side stall; it is cleared when the
+  // write's completion callback runs.
+  uint64_t write_started_at_ms_ = 0;
+  // True for a HEAD request: the response carries the headers (including the
+  // Content-Length the GET would have) but no body, per RFC 9110 §9.3.2.
+  bool head_request_ = false;
+  // The reply has been written and the connection is half-closed: the shutdown
+  // grace timer closes it even if the peer never acknowledges.
+  bool close_after_shutdown_ = false;
 
   // Per-request accumulation.
   std::string url_;

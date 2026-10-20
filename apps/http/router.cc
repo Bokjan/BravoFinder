@@ -145,8 +145,8 @@ std::function<http_server::WorkResult()> MakeWork(bf::service::NavDatabaseRegist
 
 }  // namespace
 
-Router::Router(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop)
-    : registry_(registry), loop_(loop) {
+Router::Router(bf::service::NavDatabaseRegistry& registry, uv_loop_t* loop, std::string bind_host)
+    : registry_(registry), loop_(loop), bind_host_(std::move(bind_host)) {
   // Index the shared handlers by name, then bind each to its HTTP path.
   std::unordered_map<std::string, bf::service::QueryHandler> by_name;
   for (bf::service::NamedHandler& nh : bf::service::MakeHandlers()) {
@@ -172,25 +172,39 @@ void Router::Handle(std::shared_ptr<http_server::Connection> conn,
   if (path.size() > 1 && path.back() == '/') {
     path.pop_back();
   }
+  // A browser page from another site must not be able to read this server's
+  // answers through the user's browser (DNS rebinding). The transport core
+  // implements the rule; REST and MCP apply the same one.
+  if (!http_server::OriginAllowed(req, bind_host_)) {
+    conn->WriteResponse(http_server::kStatusForbidden, http_server::JsonError("origin not allowed"),
+                        req.keep_alive);
+    return;
+  }
+
+  // A HEAD request gets the GET response without its body: the transport drops
+  // the body but keeps the framing headers a GET would have carried, so the
+  // server answers HEAD exactly where it answers GET.
+  const bool is_head = req.method == "HEAD";
+  const bool is_get = req.method == "GET" || is_head;
 
   // Liveness: the process is up, so always 200 -- no database touched.
-  if (req.method == "GET" && path == "/healthz") {
+  if (is_get && path == "/healthz") {
     conn->WriteResponse(http_server::kStatusOk, StatusJson("ok"), req.keep_alive);
     return;
   }
   // Program version for consumers — loop-thread, no database.
-  if (req.method == "GET" && path == "/v1/version") {
+  if (is_get && path == "/v1/version") {
     conn->WriteResponse(http_server::kStatusOk, VersionJson(), req.keep_alive);
     return;
   }
   // The cycle list is an in-memory read of the (immutable) inventory.
-  if (req.method == "GET" && path == "/v1/cycles") {
+  if (is_get && path == "/v1/cycles") {
     conn->WriteResponse(http_server::kStatusOk, SerializeCycles(), req.keep_alive);
     return;
   }
   // Readiness: opening the latest cycle may do disk I/O, so offload it; 503 if
   // it cannot be resolved.
-  if (req.method == "GET" && path == "/readyz") {
+  if (is_get && path == "/readyz") {
     if (inflight_.load(std::memory_order_relaxed) >= kMaxInflightWork) {
       conn->WriteResponse(http_server::kStatusServiceUnavailable,
                           http_server::JsonError("server busy"), req.keep_alive);
@@ -205,11 +219,19 @@ void Router::Handle(std::shared_ptr<http_server::Connection> conn,
     return;
   }
 
-  // Query endpoints: POST + JSON body. An unmatched (method, path) is 404.
+  // Query endpoints: POST + JSON body. An unmatched (method, path) is 404, and a
+  // known path reached with the wrong method is 405 (with the allowed method in
+  // Allow), so a client can tell a typo from a redirect.
   auto it = routes_.find(path);
-  if (req.method != "POST" || it == routes_.end()) {
-    conn->WriteResponse(http_server::kStatusNotFound, http_server::JsonError("not found"),
-                        req.keep_alive);
+  if (it != routes_.end() && req.method != "POST") {
+    conn->WriteResponse(http_server::kStatusMethodNotAllowed,
+                        is_head ? "" : http_server::JsonError("method not allowed"), req.keep_alive,
+                        "application/json", {{"Allow", "POST"}});
+    return;
+  }
+  if (it == routes_.end()) {
+    conn->WriteResponse(http_server::kStatusNotFound,
+                        is_head ? "" : http_server::JsonError("not found"), req.keep_alive);
     return;
   }
   // Shed load before doing any per-request work if the offload queue is full.

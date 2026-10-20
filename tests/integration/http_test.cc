@@ -87,7 +87,7 @@ class ServerHarness {
       server->Shutdown();
       uv_close(reinterpret_cast<uv_handle_t*>(a), nullptr);
     });
-    bf::http::Router router(registry_, &loop_);
+    bf::http::Router router(registry_, &loop_, "127.0.0.1");
     bf::http_server::Server server(&loop_, router, limits_);
     // The async callback needs the server for Shutdown. Safe to set before the
     // send: the destructor cannot fire the async until the ctor has returned,
@@ -499,6 +499,67 @@ TEST_CASE("http hardening: header limits and idle timeout", "[integration][http]
     CHECK(StatusOf(resp) == 408);
     CHECK(HasConnection(resp, "close"));
     close(fd);
+  }
+
+  SECTION("a CRLF slow drip still meets the request deadline") {
+    // llhttp's start state swallows leading CR/LF without ever signalling a
+    // message, so these bytes must stamp the deadline clock themselves. Before
+    // that, a client sending "\r\n" just under the idle timeout could hold a
+    // connection forever: request_started_at_ms_ stayed 0 and every read merely
+    // re-armed the idle timer.
+    bf::service::NavDatabaseRegistry registry2(bf::BfdbInventory{});
+    bf::http_server::Limits drip;
+    drip.io_timeout_ms = 3000;      // never fires within this section
+    drip.request_timeout_ms = 200;  // fires a few drips in
+    ServerHarness h2(registry2, drip);
+    REQUIRE(h2.port() > 0);
+    const int fd = ConnectTo(h2.port());
+    REQUIRE(fd >= 0);
+    std::string resp;
+    for (int i = 0; i < 40 && resp.empty(); ++i) {
+      REQUIRE(SendAll(fd, "\r\n"));
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      // Poll without blocking on a full response: the server answers 408 with
+      // Connection: close, so a short read timeout is enough to notice it.
+      timeval tv{0, 0};
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      char tmp[512];
+      const ssize_t n = recv(fd, tmp, sizeof(tmp), 0);
+      if (n > 0) {
+        resp.append(tmp, static_cast<size_t>(n));
+      }
+    }
+    CHECK(StatusOf(resp) == 408);
+    close(fd);
+  }
+
+  SECTION("a HEAD response carries the headers but no body") {
+    const std::string get = RoundTrip(port, Get("/healthz", false));
+    REQUIRE(StatusOf(get) == 200);
+    const std::string body = BodyOf(get);
+    REQUIRE_FALSE(body.empty());
+
+    const std::string head =
+        RoundTrip(port, "HEAD /healthz HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    CHECK(StatusOf(head) == 200);
+    // The framing headers describe what a GET would have returned ...
+    CHECK(ParseContentLength(head.substr(0, head.find("\r\n\r\n"))) == body.size());
+    // ... but the body itself is absent.
+    CHECK(BodyOf(head).empty());
+  }
+
+  SECTION("a cross-site Origin is refused") {
+    // A DNS-rebinding page sends its own Origin while the request reaches
+    // loopback; a same-origin page sends the host it was served from. Requests
+    // with no Origin at all (curl, a local client) keep working.
+    const auto with_origin = [](const std::string& origin) {
+      return "GET /healthz HTTP/1.1\r\nHost: x\r\nOrigin: " + origin +
+             "\r\nConnection: close\r\n\r\n";
+    };
+    CHECK(StatusOf(RoundTrip(port, with_origin("http://attacker.example"))) == 403);
+    CHECK(StatusOf(RoundTrip(port, with_origin("null"))) == 403);
+    CHECK(StatusOf(RoundTrip(port, with_origin("http://localhost:3000"))) == 200);
+    CHECK(StatusOf(RoundTrip(port, with_origin("http://127.0.0.1:3000"))) == 200);
   }
 
   SECTION("max_connections sheds additional accepts") {

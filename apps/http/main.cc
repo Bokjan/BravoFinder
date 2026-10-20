@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
   // Set up the loop, the router, and the TCP listener.
   uv_loop_t loop;
   uv_loop_init(&loop);
-  bf::http::Router router(registry, &loop);
+  bf::http::Router router(registry, &loop, host);
 
   bf::http_server::Limits limits;
   limits.max_body_bytes = static_cast<size_t>(max_body);

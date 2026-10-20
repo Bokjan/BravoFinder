@@ -62,6 +62,8 @@ const char* ReasonPhrase(int status) {
       return "Accepted";
     case kStatusBadRequest:
       return "Bad Request";
+    case kStatusForbidden:
+      return "Forbidden";
     case kStatusNotFound:
       return "Not Found";
     case kStatusMethodNotAllowed:
@@ -198,7 +200,7 @@ void AppendExtraHeaders(std::vector<uint8_t>& out, const Headers& extra_headers)
 // text from the consumer, appended as bytes.
 std::vector<uint8_t> BuildResponse(int status, const std::string& body, bool keep_alive,
                                    const std::string& content_type, const Headers& extra_headers,
-                                   uint32_t elapsed_ms) {
+                                   uint32_t elapsed_ms, size_t content_length) {
   std::vector<uint8_t> out;
   out.reserve(body.size() + 200);
   AppendBytes(out, "HTTP/1.1 ");
@@ -209,7 +211,7 @@ std::vector<uint8_t> BuildResponse(int status, const std::string& body, bool kee
   AppendBytes(out, "\r\nContent-Type: ");
   AppendHeaderSafe(out, content_type);
   AppendBytes(out, "\r\nContent-Length: ");
-  AppendBytes(out, std::to_string(body.size()));
+  AppendBytes(out, std::to_string(content_length));
   AppendBytes(out, "\r\nConnection: ");
   AppendBytes(out, keep_alive ? "keep-alive" : "close");
   AppendBytes(out, "\r\nDate: ");
@@ -263,6 +265,56 @@ std::string JsonError(const std::string& message) {
   return buffer.GetString();
 }
 
+// The host part of an authority string ("host:port", "[::1]:80") or of an
+// Origin URL ("https://host/path"). Returns "" when there is no host.
+std::string_view HostOf(std::string_view authority) {
+  const size_t scheme = authority.find("://");
+  size_t begin = scheme == std::string_view::npos ? 0 : scheme + 3;
+  size_t end = authority.find_first_of("/?#", begin);
+  if (end == std::string_view::npos) {
+    end = authority.size();
+  }
+  std::string_view host_port = authority.substr(begin, end - begin);
+  // Strip the port: everything after the last ':' outside IPv6 brackets, and the
+  // brackets themselves so "[::1]" compares as "::1".
+  if (!host_port.empty() && host_port.front() == '[') {
+    const size_t close = host_port.find(']');
+    if (close != std::string_view::npos) {
+      return host_port.substr(1, close - 1);
+    }
+    return {};
+  }
+  const size_t colon = host_port.find(':');
+  return colon == std::string_view::npos ? host_port : host_port.substr(0, colon);
+}
+
+bool OriginAllowed(const HttpRequest& req, std::string_view bind_host) {
+  const std::string origin = req.Header("Origin");
+  if (origin.empty()) {
+    return true;  // no Origin: not a browser cross-origin request
+  }
+  // "Origin: null" (a sandboxed frame, a file:// page) names no host at all.
+  const std::string_view host = HostOf(origin);
+  if (host.empty()) {
+    return false;
+  }
+  if (AsciiIeq(host, "localhost") || host == "127.0.0.1" || host == "::1") {
+    return true;  // a same-machine page
+  }
+  // Otherwise the origin must be the host the request is addressed to. A browser
+  // sets Origin from the page it loaded, so a same-origin request (a UI served
+  // from the same server) matches its Host header, while a page on another site
+  // reading 127.0.0.1 cannot produce one. Comparing against Host rather than the
+  // bind address also covers a wildcard bind, where the bind address is 0.0.0.0.
+  const std::string_view host_header = HostOf(req.Header("Host"));
+  if (!host_header.empty() && AsciiIeq(host, host_header)) {
+    return true;
+  }
+  // A server bound to a named LAN address may also be reached through it.
+  return !bind_host.empty() && bind_host != "0.0.0.0" && bind_host != "::" &&
+         AsciiIeq(host, bind_host);
+}
+
 std::string HttpRequest::Header(const std::string& name) const {
   for (const auto& [hdr_name, value] : headers) {
     if (AsciiIeq(hdr_name, name)) {
@@ -308,6 +360,11 @@ void Connection::SetupParser(Connection& conn) {
 }
 
 void Connection::Start() {
+  // Detect a peer that vanished without a FIN (a dropped network, a killed VM)
+  // while the connection sits in keep-alive. libuv keeps the OS defaults for
+  // the probe intervals; this only turns the facility on, so a dead peer is
+  // reaped by the kernel instead of pinning a connection slot forever.
+  uv_tcp_keepalive(&handle_, 1, 60);
   RestartTimer();
   const int r = uv_read_start(stream(), OnAlloc, OnRead);
   if (r != 0) {
@@ -320,6 +377,36 @@ void Connection::Close() { StartClose(); }
 void Connection::RestartTimer() {
   // One-shot idle timer; re-armed on every byte of progress.
   uv_timer_start(&timer_, OnTimeout, limits_.io_timeout_ms, 0);
+}
+
+void Connection::ShutdownThenClose() {
+  if (closing_) {
+    return;
+  }
+  // Stop reading first: nothing more of the peer's upload is wanted, and
+  // uv_shutdown then completes as soon as the queued FIN is written.
+  uv_read_stop(stream());
+  // libuv's shutdown request is C-owned: it hands the struct back to the
+  // callback, so it is allocated and released on that contract (like WriteReq).
+  auto* req = new uv_shutdown_t{};
+  req->data = this;
+  const int r = uv_shutdown(req, stream(), OnShutdown);
+  if (r != 0) {
+    delete req;
+    StartClose();
+    return;
+  }
+  // The peer may never acknowledge (or may keep sending): close unconditionally
+  // after the grace period so a shutdown that never completes cannot pin the
+  // connection. StartClose is idempotent; the callback above is then a no-op.
+  close_after_shutdown_ = true;
+  uv_timer_start(&timer_, OnTimeout, limits_.io_timeout_ms, 0);
+}
+
+void Connection::OnShutdown(uv_shutdown_t* req, int /*status*/) {
+  auto* conn = static_cast<Connection*>(req->data);
+  delete req;
+  conn->StartClose();
 }
 
 void Connection::StartClose() {
@@ -371,6 +458,9 @@ void Connection::ResetForNextRequest() {
   reject_status_ = kStatusNone;
   reject_message_.clear();
   request_started_at_ms_ = 0;
+  head_request_ = false;
+  close_after_shutdown_ = false;
+  write_started_at_ms_ = 0;
   RestartTimer();
 }
 
@@ -408,6 +498,13 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
     return;
   }
   conn->RestartTimer();
+  if (conn->request_started_at_ms_ == 0) {
+    // First byte of a request. Stamped here as well as on message-begin because
+    // llhttp's start state consumes leading CR/LF inside the parser without
+    // ever signalling a message, so a client dribbling "\r\n" one byte per
+    // idle timeout kept request_started_at_ms_ at 0 and never met the deadline.
+    conn->request_started_at_ms_ = uv_now(conn->handle_.loop);
+  }
   const llhttp_errno_t err = llhttp_execute(&conn->parser_, buf->base, static_cast<size_t>(nread));
   if (conn->reject_status_ != kStatusNone) {
     // A hardening limit tripped (body/header cap, chunked, Expect, …): answer and close.
@@ -444,6 +541,11 @@ void Connection::OnRead(uv_stream_t* s, ssize_t nread, const uv_buf_t* buf) {
 
 void Connection::OnTimeout(uv_timer_t* t) {
   auto* conn = static_cast<Connection*>(t->data);
+  if (conn->close_after_shutdown_) {
+    // Half-closed and waiting for the shuffle to finish: it did not, so close.
+    conn->StartClose();
+    return;
+  }
   if (conn->streaming_) {
     // An open SSE stream has been idle for io_timeout_ms with no WriteEvent.
     // Close it so a forgotten placeholder stream cannot hold the connection
@@ -459,7 +561,21 @@ void Connection::OnTimeout(uv_timer_t* t) {
     // worker will finish and its completion callback writes the response on the
     // loop thread; the in-flight work holds a strong self-reference, so the
     // connection cannot leak meanwhile. Closing here would race that write and
-    // silently drop a valid-but-slow response, so leave it be.
+    // silently drop a valid-but-slow response.
+    //
+    // A queued response write is different: once it is in flight, a client that
+    // stops reading (a closed zero window) never completes uv_write, and the
+    // connection would stay open forever, holding a slot against
+    // max_connections. Bound that stall with the same idle timeout and close.
+    if (conn->write_started_at_ms_ != 0 &&
+        uv_now(conn->handle_.loop) - conn->write_started_at_ms_ >= conn->limits_.io_timeout_ms) {
+      conn->StartClose();
+      return;
+    }
+    // Not yet a write-stall (the worker is still computing): re-arm so the
+    // write deadline is re-checked, rather than going silent for good. This does
+    // not bound compute -- every re-arm re-tests the same condition.
+    conn->RestartTimer();
     return;
   }
   if (!conn->closing_) {
@@ -621,6 +737,7 @@ int Connection::OnMessageComplete(llhttp_t* p) {
 void Connection::Dispatch() {
   HttpRequest req;
   req.method = llhttp_method_name(static_cast<llhttp_method_t>(llhttp_get_method(&parser_)));
+  head_request_ = AsciiIeq(req.method, "HEAD");
   const size_t q = url_.find('?');
   if (q == std::string::npos) {
     req.path = url_;
@@ -635,12 +752,27 @@ void Connection::Dispatch() {
   body_.clear();
   req.headers = std::move(headers_);
   req.keep_alive = keep_alive_;
+  // Peer address, for the Origin check and for logging.
+  sockaddr_storage peer{};
+  int peer_len = static_cast<int>(sizeof(peer));
+  if (uv_tcp_getpeername(&handle_, reinterpret_cast<sockaddr*>(&peer), &peer_len) == 0) {
+    char ip[INET6_ADDRSTRLEN] = {};
+    if (peer.ss_family == AF_INET) {
+      uv_ip4_name(reinterpret_cast<const sockaddr_in*>(&peer), ip, sizeof(ip));
+    } else if (peer.ss_family == AF_INET6) {
+      uv_ip6_name(reinterpret_cast<const sockaddr_in6*>(&peer), ip, sizeof(ip));
+    }
+    req.remote_address = ip;
+  }
   handler_.Handle(shared_from_this(), req);
 }
 
 void Connection::WriteRaw(std::vector<uint8_t> payload, WriteMode mode) {
   if (closing_) {
     return;
+  }
+  if (write_started_at_ms_ == 0) {
+    write_started_at_ms_ = uv_now(handle_.loop);
   }
   // uv_buf_init's length is unsigned (32-bit on common ABIs). A payload that
   // does not fit would truncate; refuse rather than write a partial frame.
@@ -674,7 +806,11 @@ void Connection::WriteResponse(int status, const std::string& body, bool keep_al
   if (force_close_after_response_) {
     keep_alive = false;
   }
-  WriteRaw(BuildResponse(status, body, keep_alive, content_type, extra_headers, elapsed_ms),
+  // A HEAD response is the GET response minus its body: the framing headers
+  // (Content-Length included) must describe the representation, so the body is
+  // dropped at the frame level rather than by each handler.
+  WriteRaw(BuildResponse(status, head_request_ ? "" : body, keep_alive, content_type, extra_headers,
+                         elapsed_ms, /*content_length=*/body.size()),
            keep_alive ? WriteMode::kKeepAlive : WriteMode::kClose);
 }
 
@@ -726,12 +862,20 @@ void Connection::OnWriteDone(uv_write_t* req, int status) {
   }
   switch (mode) {
     case WriteMode::kStream:
-      return;  // an open stream: keep the connection alive for more events
+      conn->write_started_at_ms_ = 0;  // this chunk drained; nothing outstanding
+      return;                          // an open stream: stay open for more events
     case WriteMode::kKeepAlive:
+      conn->write_started_at_ms_ = 0;
       conn->ResetForNextRequest();
       return;
     case WriteMode::kClose:
-      conn->StartClose();
+      // Shut the write side down first and close only once the peer has been
+      // told (uv_shutdown completes its callback after the FIN is queued). An
+      // immediate uv_close while the client is still uploading sends a RST,
+      // which discards the response already in the peer's receive buffer --
+      // the client then sees ECONNRESET instead of the 413/431/417 it was sent.
+      conn->write_started_at_ms_ = 0;
+      conn->ShutdownThenClose();
       return;
   }
 }
