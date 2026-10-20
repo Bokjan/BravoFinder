@@ -43,11 +43,15 @@ class Loader {
   virtual Result<std::vector<AirportProcedureData>> LoadProcedures(
       const std::string& source_dir) const = 0;
 
-  // Parse a single airport's CIFP procedures from `source_dir` on demand, or
-  // nullopt if that airport has no procedure data. Used by NavDatabase::Open's
-  // lazy procedure cache so a route/query only parses the airports it touches.
-  virtual std::optional<CifpData> LoadProcedure(const std::string& source_dir,
-                                                const std::string& icao) const = 0;
+  // Parse a single airport's CIFP procedures from `source_dir` on demand: the
+  // data, nullopt if that airport has no procedure data, or an Error if the
+  // source could not be read (a missing or unreadable database or file, a
+  // failed query). Used by NavDatabase::Open's lazy procedure cache so a
+  // route/query only parses the airports it touches; the cache remembers "no
+  // procedures" but not an Error, so a read failure is never mistaken for an
+  // airport without SIDs/STARs.
+  virtual Result<std::optional<CifpData>> LoadProcedure(const std::string& source_dir,
+                                                        const std::string& icao) const = 0;
 
   // The loader's stable name, recorded as `source_loader` provenance in caches
   // and selected by `bf build --loader`. Must round-trip through MakeLoader.

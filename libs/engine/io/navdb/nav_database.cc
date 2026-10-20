@@ -241,9 +241,15 @@ Result<const CifpData*> NavDatabase::Impl::ProceduresFor(const std::string& icao
       stored = std::make_unique<CifpData>(std::move(fetched.value()).value());
     }
   } else if (loader_) {
-    std::optional<CifpData> parsed = loader_->LoadProcedure(source_dir_, icao);
-    if (parsed.has_value()) {
-      stored = std::make_unique<CifpData>(std::move(parsed).value());
+    // Same rule as the archive: a read failure is returned, not cached as "no
+    // procedures", so it cannot pass for an airport without SIDs/STARs.
+    Result<std::optional<CifpData>> parsed = loader_->LoadProcedure(source_dir_, icao);
+    if (!parsed) {
+      BF_LOG_ERROR("CIFP load failed for {}: {}", icao, parsed.error().message);
+      return Result<const CifpData*>::Err(std::move(parsed).error());
+    }
+    if (parsed.value().has_value()) {
+      stored = std::make_unique<CifpData>(std::move(parsed.value()).value());
     }
   }
   // Re-lock and insert. try_emplace keeps the first inserted value if another

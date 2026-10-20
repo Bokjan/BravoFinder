@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +23,17 @@
 #include "io/loaders/dfd1/dfd1_loader.h"
 #include "io/loaders/loader_registry.h"
 #include "test_db.h"
+
+namespace {
+
+// A LoadProcedure result that must not be a read failure: the procedures, or
+// nullopt for an airport without any.
+std::optional<bf::CifpData> Loaded(bf::Result<std::optional<bf::CifpData>> r) {
+  REQUIRE(r);
+  return std::move(r).value();
+}
+
+}  // namespace
 
 namespace {
 
@@ -231,11 +243,11 @@ TEST_CASE("fenix: LoadProcedure KJFK", "[integration][fenix]") {
   const std::string dir = EnsureFenix();
   if (dir.empty()) SKIP("Fenix navdata not found");
   bf::FenixLoader l;
-  auto r = l.LoadProcedure(dir, "KJFK");
+  auto r = Loaded(l.LoadProcedure(dir, "KJFK"));
   REQUIRE(r.has_value());
   CHECK(!r->procedures.empty());
   CHECK(!r->runways.empty());
-  CHECK_FALSE(l.LoadProcedure(dir, "ZZZZ").has_value());
+  CHECK_FALSE(Loaded(l.LoadProcedure(dir, "ZZZZ")).has_value());
   int tf = 0, unk = 0, alt = 0;
   for (const auto& p : r->procedures)
     for (const auto& leg : p.legs) {
@@ -255,7 +267,7 @@ TEST_CASE("fenix: Procedure::runway is RW-prefixed only", "[integration][fenix]"
   const std::string dir = EnsureFenix();
   if (dir.empty()) SKIP("Fenix navdata not found");
   bf::FenixLoader l;
-  auto r = l.LoadProcedure(dir, "KJFK");
+  auto r = Loaded(l.LoadProcedure(dir, "KJFK"));
   REQUIRE(r.has_value());
 
   // Find a procedure record by (name, transition_ident). KJFK anchors verified
@@ -322,8 +334,8 @@ TEST_CASE("fenix/dfd1: SID/STAR transition records match leg-for-leg", "[integra
   bf::Dfd1Loader dl;
   for (const char* icao : {"KJFK", "KATL"}) {
     INFO(icao);
-    auto f = fl.LoadProcedure(fd, icao);
-    auto d = dl.LoadProcedure(dd, icao);
+    auto f = Loaded(fl.LoadProcedure(fd, icao));
+    auto d = Loaded(dl.LoadProcedure(dd, icao));
     REQUIRE(f.has_value());
     REQUIRE(d.has_value());
     std::map<std::pair<std::string, std::string>, int> count;

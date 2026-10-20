@@ -517,15 +517,21 @@ Result<std::vector<AirportProcedureData>> XPlane12Loader::LoadProcedures(
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(out));
 }
 
-std::optional<CifpData> XPlane12Loader::LoadProcedure(const std::string& data_dir,
-                                                      const std::string& icao) const {
-  const PointIndex index = LoadPointIndex(data_dir);
-  Result<CifpData> parsed =
-      CifpParser::Parse(data_dir + "/CIFP/" + icao + ".dat", LocatorFor(index, icao));
-  if (!parsed) {
-    return std::nullopt;
+Result<std::optional<CifpData>> XPlane12Loader::LoadProcedure(const std::string& data_dir,
+                                                              const std::string& icao) const {
+  // An airport without a CIFP file simply has no procedures; a file that is
+  // there but cannot be parsed is a read failure, not an empty airport.
+  const std::string path = data_dir + "/CIFP/" + icao + ".dat";
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(path, ec)) {
+    return Result<std::optional<CifpData>>::Ok(std::nullopt);
   }
-  return std::move(parsed).value();
+  const PointIndex index = LoadPointIndex(data_dir);
+  Result<CifpData> parsed = CifpParser::Parse(path, LocatorFor(index, icao));
+  if (!parsed) {
+    return Result<std::optional<CifpData>>::Err(std::move(parsed).error());
+  }
+  return Result<std::optional<CifpData>>::Ok(std::move(parsed).value());
 }
 
 }  // namespace bf

@@ -72,7 +72,10 @@ TEST_CASE("cifp section: a fetched segment matches direct file parsing", "[integ
   // KJFK direct load vs section fetch: procedures and legs must match. Load
   // through the loader (not the bare parser) so the legs carry the same fix
   // positions the build wrote.
-  std::optional<bf::CifpData> direct = bf::XPlane12Loader().LoadProcedure(EnsureXPlane12(), "KJFK");
+  bf::Result<std::optional<bf::CifpData>> loaded =
+      bf::XPlane12Loader().LoadProcedure(EnsureXPlane12(), "KJFK");
+  REQUIRE(loaded);
+  const std::optional<bf::CifpData>& direct = loaded.value();
   REQUIRE(direct);
   auto fetched = u.value().cifp->Fetch("KJFK");
   REQUIRE(fetched);

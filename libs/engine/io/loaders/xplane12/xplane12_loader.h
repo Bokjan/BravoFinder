@@ -35,8 +35,8 @@ class XPlane12Loader final : public Loader {
 
   // Parse a single CIFP/<ICAO>.dat on demand, or nullopt if that file is absent
   // or unreadable.
-  std::optional<CifpData> LoadProcedure(const std::string& source_dir,
-                                        const std::string& icao) const override;
+  Result<std::optional<CifpData>> LoadProcedure(const std::string& source_dir,
+                                                const std::string& icao) const override;
 
   std::string name() const override { return "xplane12"; }
 

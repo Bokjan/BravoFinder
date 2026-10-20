@@ -21,8 +21,8 @@ class FenixLoader final : public Loader {
   Result<NavData> LoadNavData(const std::string& source_dir) const override;
   Result<std::vector<AirportProcedureData>> LoadProcedures(
       const std::string& source_dir) const override;
-  std::optional<CifpData> LoadProcedure(const std::string& source_dir,
-                                        const std::string& icao) const override;
+  Result<std::optional<CifpData>> LoadProcedure(const std::string& source_dir,
+                                                const std::string& icao) const override;
   std::string name() const override { return "fenix"; }
 
   // Fenix schema has no per-leg airway direction or altitude bands, and does

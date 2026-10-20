@@ -1087,48 +1087,54 @@ namespace {
 // Load procedures for a single airport (LoadProcedure path).  Delegates to the
 // shared BuildAirportProcedures core with a one-element airport set, so it
 // produces byte-identical structures to the bulk LoadProcedures path.
-std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& icao) {
+// The airport's procedures, nullopt if the airport is unknown or has none, or
+// an Error if a query fails.
+Result<std::optional<CifpData>> LoadAirportProcedures(sqlite3* conn, const std::string& icao) {
+  using Out = Result<std::optional<CifpData>>;
   int airport_id = -1;
   {
     Result<SqliteStmt> s =
         Prepare(conn, std::format("SELECT ID FROM {} WHERE ICAO = ?", kTblAirports));
     if (!s) {
-      return std::nullopt;
+      return Out::Err(std::move(s).error());
     }
     sqlite3_bind_text(s.value().get(), 1, icao.c_str(), -1, SQLITE_TRANSIENT);
     Result<bool> row = Step(s.value().get());
-    if (row && row.value()) {
+    if (!row) {
+      return Out::Err(std::move(row).error());
+    }
+    if (row.value()) {
       airport_id = ColumnInt(s.value().get(), 0);
     }
   }
   if (airport_id < 0) {
-    return std::nullopt;
+    return Out::Ok(std::nullopt);
   }
 
   std::unordered_set<int> ids{airport_id};
   Result<std::unordered_map<int, CifpData>> built = BuildAirportProcedures(conn, &ids);
   if (!built) {
-    return std::nullopt;
+    return Out::Err(std::move(built).error());
   }
   auto it = built.value().find(airport_id);
   if (it == built.value().end()) {
-    return std::nullopt;
+    return Out::Ok(std::nullopt);
   }
-  return it->second;
+  return Out::Ok(std::move(it->second));
 }
 
 }  // namespace
 
-std::optional<CifpData> FenixLoader::LoadProcedure(const std::string& source_dir,
-                                                   const std::string& icao) const {
+Result<std::optional<CifpData>> FenixLoader::LoadProcedure(const std::string& source_dir,
+                                                           const std::string& icao) const {
   Result<std::string> db_path = FindFenixDb(source_dir);
   if (!db_path) {
-    return std::nullopt;
+    return Result<std::optional<CifpData>>::Err(std::move(db_path).error());
   }
 
   Result<sqlite3*> conn_result = AcquireConn(kLoaderName, db_path.value());
   if (!conn_result) {
-    return std::nullopt;
+    return Result<std::optional<CifpData>>::Err(std::move(conn_result).error());
   }
 
   return LoadAirportProcedures(conn_result.value(), icao);

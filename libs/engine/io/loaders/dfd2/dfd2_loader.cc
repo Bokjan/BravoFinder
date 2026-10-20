@@ -706,7 +706,10 @@ void MergeRunways(std::vector<AirportProcedureData>& out,
 // airport has no procedures/runways; a SQLite step error degrades to nullopt
 // too (this path is best-effort -- the full LoadProcedures path propagates such
 // errors).
-std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& airport) {
+// The airport's procedures and runways, nullopt if it has neither, or an Error
+// if a query fails (a missing table or a step error is a read failure, not an
+// airport without procedures).
+Result<std::optional<CifpData>> LoadAirportProcedures(sqlite3* conn, const std::string& airport) {
   CifpData cifp;
   const std::pair<std::string_view, ProcedureType> kTables[] = {
       {kTblSids, ProcedureType::kSid},
@@ -716,7 +719,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
   for (const auto& [table, type] : kTables) {
     Result<SqliteStmt> s = Prepare(conn, ProcSql(table, /*single_airport=*/true));
     if (!s) {
-      continue;
+      return Result<std::optional<CifpData>>::Err(std::move(s).error());
     }
     sqlite3_stmt* stmt = s.value().get();
     sqlite3_bind_text(stmt, 1, airport.c_str(), -1, SQLITE_TRANSIENT);
@@ -759,7 +762,7 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
       AppendLeg(stmt, c, current, prev_seqno);
     });
     if (!rows) {
-      return std::nullopt;  // step error: treat as load failure for this airport
+      return Result<std::optional<CifpData>>::Err(std::move(rows).error());
     }
     flush_current();
   }
@@ -768,7 +771,10 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
                         "landing_threshold_elevation FROM {} WHERE airport_identifier = ? ORDER BY "
                         "runway_identifier",
                         kTblRunways));
-  if (rs) {
+  if (!rs) {
+    return Result<std::optional<CifpData>>::Err(std::move(rs).error());
+  }
+  {
     sqlite3_stmt* stmt = rs.value().get();
     sqlite3_bind_text(stmt, 1, airport.c_str(), -1, SQLITE_TRANSIENT);
     Result<void> rows = ForEachRow(stmt, [&]() {
@@ -779,13 +785,13 @@ std::optional<CifpData> LoadAirportProcedures(sqlite3* conn, const std::string& 
       cifp.runways.push_back(std::move(rwy));
     });
     if (!rows) {
-      return std::nullopt;
+      return Result<std::optional<CifpData>>::Err(std::move(rows).error());
     }
   }
   if (cifp.procedures.empty() && cifp.runways.empty()) {
-    return std::nullopt;
+    return Result<std::optional<CifpData>>::Ok(std::nullopt);
   }
-  return cifp;
+  return Result<std::optional<CifpData>>::Ok(std::move(cifp));
 }
 
 }  // namespace
@@ -936,15 +942,15 @@ Result<std::vector<AirportProcedureData>> Dfd2Loader::LoadProcedures(
   return Result<std::vector<AirportProcedureData>>::Ok(std::move(merged));
 }
 
-std::optional<CifpData> Dfd2Loader::LoadProcedure(const std::string& source_dir,
-                                                  const std::string& icao) const {
+Result<std::optional<CifpData>> Dfd2Loader::LoadProcedure(const std::string& source_dir,
+                                                          const std::string& icao) const {
   Result<std::string> db_path = FindV2Db(source_dir);
   if (!db_path) {
-    return std::nullopt;
+    return Result<std::optional<CifpData>>::Err(std::move(db_path).error());
   }
   Result<sqlite3*> conn = AcquireConn(kLoaderName, db_path.value());
   if (!conn) {
-    return std::nullopt;
+    return Result<std::optional<CifpData>>::Err(std::move(conn).error());
   }
   return LoadAirportProcedures(conn.value(), icao);
 }

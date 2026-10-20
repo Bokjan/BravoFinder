@@ -14,16 +14,29 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "io/loaders/dfd1/dfd1_loader.h"
 #include "io/loaders/dfd2/dfd2_loader.h"
+#include "io/loaders/fenix/fenix_loader.h"
 #include "io/loaders/loader_registry.h"
 #include "io/loaders/xplane12/cifp_parser.h"
 #include "io/loaders/xplane12/xplane12_loader.h"
 #include "test_dfd1.h"
 #include "test_dfd2.h"
 #include "test_xplane12.h"
+
+namespace {
+
+// A LoadProcedure result that must not be a read failure: the procedures, or
+// nullopt for an airport without any.
+std::optional<bf::CifpData> Loaded(bf::Result<std::optional<bf::CifpData>> r) {
+  REQUIRE(r);
+  return std::move(r).value();
+}
+
+}  // namespace
 
 namespace {
 
@@ -97,18 +110,34 @@ TEST_CASE("dfd1: LoadProcedures returns per-airport procedures", "[integration][
   CHECK(!it->second.runways.empty());
 }
 
+TEST_CASE("LoadProcedure tells a read failure from an airport without procedures",
+          "[integration][dfd]") {
+  // No database at all is a failure to read, not "this airport has no SIDs":
+  // NavDatabase caches the latter for good, so conflating them would hide a
+  // broken source behind DCT fallbacks.
+  const std::string missing = "/nonexistent/bravofinder-navdata";
+  CHECK_FALSE(bf::Dfd1Loader().LoadProcedure(missing, "KJFK"));
+  CHECK_FALSE(bf::Dfd2Loader().LoadProcedure(missing, "KJFK"));
+  CHECK_FALSE(bf::FenixLoader().LoadProcedure(missing, "KJFK"));
+  // X-Plane keeps one file per airport, so a missing file is an airport
+  // without procedures.
+  bf::Result<std::optional<bf::CifpData>> xp = bf::XPlane12Loader().LoadProcedure(missing, "KJFK");
+  REQUIRE(xp);
+  CHECK_FALSE(xp.value().has_value());
+}
+
 TEST_CASE("dfd1: LoadProcedure loads a single airport on demand", "[integration][dfd]") {
   const std::string dir = EnsureDfd1();
   if (dir.empty()) {
     SKIP("DFD v1 data not found");
   }
   bf::Dfd1Loader loader;
-  std::optional<bf::CifpData> kjfk = loader.LoadProcedure(dir, "KJFK");
+  std::optional<bf::CifpData> kjfk = Loaded(loader.LoadProcedure(dir, "KJFK"));
   REQUIRE(kjfk.has_value());
   CHECK(!kjfk->procedures.empty());
   CHECK(!kjfk->runways.empty());
   // An airport with no procedures returns nullopt (pick an unlikely code).
-  CHECK_FALSE(loader.LoadProcedure(dir, "ZZZZ").has_value());
+  CHECK_FALSE(Loaded(loader.LoadProcedure(dir, "ZZZZ")).has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +185,7 @@ TEST_CASE("dfd2: LoadProcedure loads a single airport on demand", "[integration]
     SKIP("DFD v2 data not found");
   }
   bf::Dfd2Loader loader;
-  std::optional<bf::CifpData> kjfk = loader.LoadProcedure(dir, "KJFK");
+  std::optional<bf::CifpData> kjfk = Loaded(loader.LoadProcedure(dir, "KJFK"));
   REQUIRE(kjfk.has_value());
   CHECK(!kjfk->procedures.empty());
   CHECK(!kjfk->runways.empty());
@@ -172,8 +201,8 @@ TEST_CASE("dfd2/xplane: true-referenced courses and MSA bearings agree", "[integ
   if (d2.empty() || !HasCifp(xp, "BGTL")) {
     SKIP("xplane12 CIFP and/or DFD v2 data not found");
   }
-  std::optional<bf::CifpData> x = bf::XPlane12Loader().LoadProcedure(xp, "BGTL");
-  std::optional<bf::CifpData> d = bf::Dfd2Loader().LoadProcedure(d2, "BGTL");
+  std::optional<bf::CifpData> x = Loaded(bf::XPlane12Loader().LoadProcedure(xp, "BGTL"));
+  std::optional<bf::CifpData> d = Loaded(bf::Dfd2Loader().LoadProcedure(d2, "BGTL"));
   REQUIRE(x.has_value());
   REQUIRE(d.has_value());
   auto first_leg = [](const bf::CifpData& c) -> const bf::ProcedureLeg* {
@@ -449,7 +478,7 @@ TEST_CASE("dfd/xplane: KJFK procedure legs agree on rnp/turn/speed across loader
   bf::Result<bf::CifpData> xplane = bf::CifpParser::Parse(xp + "/CIFP/KJFK.dat");
   REQUIRE(xplane);
   bf::Dfd1Loader loader;
-  std::optional<bf::CifpData> dfd = loader.LoadProcedure(d1, "KJFK");
+  std::optional<bf::CifpData> dfd = Loaded(loader.LoadProcedure(d1, "KJFK"));
   REQUIRE(dfd.has_value());
 
   struct Extras {
