@@ -106,10 +106,14 @@ void Accumulate(std::vector<Connection>& by_fix, int fix_vertex, double seed, do
 // One on-network fix a procedure record passes, with the polyline distance from
 // the record's start accumulated up to it and whether it is the record's
 // PUBLISHED handoff point (see WalkOnNetworkFixes for what makes a fix a gate).
+// `resolved_index` is its position in WalkResult::resolved, so the fixes either
+// side of it along the published track can be found whether or not they are
+// on-network themselves.
 struct FixHit {
   int vertex;
   double cumulative_nm;
   bool is_gate;
+  size_t resolved_index;
 };
 
 // The result of walking one procedure record's legs: every on-network fix it
@@ -119,6 +123,7 @@ struct FixHit {
 // are not measured here).
 struct WalkResult {
   std::vector<FixHit> hits;
+  std::vector<Coordinate> resolved;  // every resolved fix, in leg order
   double total_nm = 0.0;
   Coordinate first_coord{};
   Coordinate last_coord{};
@@ -190,8 +195,9 @@ WalkResult WalkOnNetworkFixes(const Procedure& p, const GraphBuilder& builder, W
     if (usable) {
       const bool gate =
           dir == WalkDir::kInbound ? leg.path_term == PathTerminator::kIF : i == sid_exit_leg;
-      result.hits.push_back(FixHit{v, cumulative, gate});
+      result.hits.push_back(FixHit{v, cumulative, gate, result.resolved.size()});
     }
+    result.resolved.push_back(this_coord);
     if (!result.have_first) {
       result.first_coord = this_coord;
       result.have_first = true;
@@ -217,9 +223,12 @@ std::vector<Connection> Finalize(std::vector<Connection> by_fix) {
 }
 
 // Collect one side's published on-network handoff fixes: the STAR's Initial Fix
-// / the SID's last fix-bearing leg. Bearings come from the full on-network hit
-// list so a gate's heading is set by the fix that precedes/follows it along the
-// published track, not by the next gate.
+// / the SID's last fix-bearing leg. A gate's heading is set by the resolved fix
+// that precedes/follows it along the published track -- on-network or not --
+// not by the nearest on-network one. A SID's fixes before its exit, and a
+// STAR's after its IF, are mostly terminal fixes off the airway network, so
+// measuring to an on-network neighbour would skip them and fall back to the
+// airport, which can point a very different way.
 std::vector<Connection> CollectSide(const CifpData& cifp, ProcedureType want, WalkDir dir,
                                     const Coordinate& airport_coord, const GraphBuilder& builder,
                                     const std::string& runway_filter) {
@@ -238,32 +247,30 @@ std::vector<Connection> CollectSide(const CifpData& cifp, ProcedureType want, Wa
     const double runway_bridge =
         departure ? (walk.have_first ? airport_coord.DistanceTo(walk.first_coord) : 0.0)
                   : (walk.have_last ? walk.last_coord.DistanceTo(airport_coord) : 0.0);
-    std::vector<Coordinate> hit_coords;
-    hit_coords.reserve(walk.hits.size());
-    for (const FixHit& h : walk.hits) {
-      hit_coords.push_back(builder.graph().CoordOf(h.vertex));
-    }
-    for (size_t j = 0; j < walk.hits.size(); ++j) {
-      if (!walk.hits[j].is_gate) {
+    for (const FixHit& hit : walk.hits) {
+      if (!hit.is_gate) {
         continue;
       }
+      const size_t r = hit.resolved_index;
+      const Coordinate& here = walk.resolved[r];
       double seed = 0.0;
       double bearing = 0.0;
       if (departure) {
-        seed = runway_bridge + walk.hits[j].cumulative_nm;
+        seed = runway_bridge + hit.cumulative_nm;
         // Inbound heading: from the previous resolved fix (the runway side) into
-        // the hit. For the first hit that predecessor is the airport, matching
-        // the runway-bridge geometry the seed uses.
-        const Coordinate& prev = (j == 0) ? airport_coord : hit_coords[j - 1];
-        bearing = prev.BearingTo(hit_coords[j]);
+        // the gate. For the first resolved fix that predecessor is the airport,
+        // matching the runway-bridge geometry the seed uses.
+        const Coordinate& prev = (r == 0) ? airport_coord : walk.resolved[r - 1];
+        bearing = prev.BearingTo(here);
       } else {
-        seed = (walk.total_nm - walk.hits[j].cumulative_nm) + runway_bridge;
-        // Outbound heading: from the hit toward the next resolved fix on the way
-        // to the runway. For the last hit that successor is the airport.
-        const Coordinate& next = (j + 1 < walk.hits.size()) ? hit_coords[j + 1] : airport_coord;
-        bearing = hit_coords[j].BearingTo(next);
+        seed = (walk.total_nm - hit.cumulative_nm) + runway_bridge;
+        // Outbound heading: from the gate toward the next resolved fix on the way
+        // to the runway. For the last resolved fix that successor is the airport.
+        const Coordinate& next =
+            (r + 1 < walk.resolved.size()) ? walk.resolved[r + 1] : airport_coord;
+        bearing = here.BearingTo(next);
       }
-      Accumulate(by_fix, walk.hits[j].vertex, seed, bearing, MakeRef(p));
+      Accumulate(by_fix, hit.vertex, seed, bearing, MakeRef(p));
     }
   }
   return by_fix;

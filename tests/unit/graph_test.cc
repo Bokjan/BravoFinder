@@ -487,6 +487,65 @@ TEST_CASE("connections are restricted to a procedure's published handoff fix", "
   }
 }
 
+TEST_CASE("a gate's heading comes from its neighbour on the published track", "[unit][graph]") {
+  // The airport sits at the origin. The procedure runs through T1 -- a terminal
+  // fix east of it, off the airway network -- and hands off at GATE, north of
+  // T1 and on an airway to NXT. The track arrives at / leaves GATE along
+  // T1-GATE (due north / south), not along the airport-GATE diagonal (45 / 225
+  // degrees), which is what skipping the off-network T1 would measure.
+  bf::NavData d;
+  auto wp = [](const char* id, double lat, double lon) {
+    return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{lat, lon}, bf::WaypointKind::kFix};
+  };
+  d.waypoints = {wp("T1", 0.0, 1.0), wp("GATE", 1.0, 1.0), wp("NXT", 2.0, 1.0)};
+  bf::AirwaySegment seg;
+  seg.name = "Q1";
+  seg.direction = bf::AirwayDirection::kBoth;
+  d.airways = {{bf::Ident("GATE", "ZZ"), bf::Ident("NXT", "ZZ"), seg}};
+  bf::GraphBuilder builder = MakeBuilder(d);
+  const int gate = builder.VerticesByIdent("GATE")[0];
+  const bf::Coordinate airport{0.0, 0.0};
+  auto leg = [](bf::PathTerminator term, const char* ident) {
+    bf::ProcedureLeg l;
+    l.path_term = term;
+    l.fix = Fixed(ident, "ZZ");
+    return l;
+  };
+  // Headings are compared to within a degree: the meridian through T1 and GATE
+  // makes the published-track bearing exactly 0 / 180.
+  const auto near_deg = [](double got, double want) {
+    double diff = std::fabs(got - want);
+    diff = std::min(diff, 360.0 - diff);
+    return diff < 1.0;
+  };
+
+  SECTION("a SID arrives at its exit from the fix before it") {
+    bf::Procedure sid;
+    sid.type = bf::ProcedureType::kSid;
+    sid.name = "TSID";
+    sid.legs = {leg(bf::PathTerminator::kIF, "T1"), leg(bf::PathTerminator::kTF, "GATE")};
+    bf::CifpData cifp;
+    cifp.procedures = {sid};
+    const auto conns = bf::ProcedureConnector::BuildDeparture(cifp, airport, builder, "");
+    REQUIRE(conns.size() == 1);
+    CHECK(conns[0].fix_vertex == gate);
+    CHECK(near_deg(conns[0].bearing, 0.0));
+  }
+
+  SECTION("a STAR leaves its IF toward the fix after it") {
+    bf::Procedure star;
+    star.type = bf::ProcedureType::kStar;
+    star.name = "TSTAR";
+    star.legs = {leg(bf::PathTerminator::kIF, "GATE"), leg(bf::PathTerminator::kTF, "T1")};
+    bf::CifpData cifp;
+    cifp.procedures = {star};
+    const auto conns = bf::ProcedureConnector::BuildArrival(cifp, airport, builder, "");
+    REQUIRE(conns.size() == 1);
+    CHECK(conns[0].fix_vertex == gate);
+    CHECK(near_deg(conns[0].bearing, 180.0));
+  }
+}
+
 TEST_CASE("off-network published STAR/SID gates produce DCT-splice proxies", "[unit][graph]") {
   // Line A-B-C-D on Q1, plus isolated EEE (in the graph, no airway edges) that
   // stands in for a published gate with no inbound/outbound.
