@@ -112,23 +112,28 @@ class ProcedureConnector {
   // seed |F→IF| + STAR body (IF→last fix + stub); splice_vertex = IF. Call when
   // BuildArrival's on-network gates are empty. Unresolvable IFs are skipped.
   // Optional `name_filter` restricts to a named STAR (bare name or NAME.TRANSITION)
-  // so --star rebinds splice metadata to the requested procedure only.
+  // so --star rebinds splice metadata to the requested procedure only. An IF in
+  // `avoid` (sorted vertex ids, e.g. the request's avoid_waypoints) is skipped:
+  // the route would fly over it.
   static std::vector<Connection> BuildStarSpliceArrival(const CifpData& cifp,
                                                         const Coordinate& airport_coord,
                                                         const GraphBuilder& builder,
                                                         const std::string& runway_filter,
-                                                        const std::string& name_filter = {});
+                                                        const std::string& name_filter = {},
+                                                        const std::vector<int>& avoid = {});
 
   // Departure connections for published SID exits that resolve but are
   // off-network (no outbound edge). Each exit contributes K nearest outbound
   // proxy goals F with seed SID body (runway→exit) + |exit→F|; splice_vertex =
   // exit. Call when BuildDeparture's on-network gates are empty.
   // Optional `name_filter` restricts to a named SID (same selector shape as --sid).
+  // An exit in `avoid` (sorted vertex ids) is skipped, as for the STAR splice.
   static std::vector<Connection> BuildSidSpliceDeparture(const CifpData& cifp,
                                                          const Coordinate& airport_coord,
                                                          const GraphBuilder& builder,
                                                          const std::string& runway_filter,
-                                                         const std::string& name_filter = {});
+                                                         const std::string& name_filter = {},
+                                                         const std::vector<int>& avoid = {});
 
   // DCT fallback: connect to the nearest on-network waypoints by great-circle
   // distance. Used when no procedure connections are available. `arrival` picks

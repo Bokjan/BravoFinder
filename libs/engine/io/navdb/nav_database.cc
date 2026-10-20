@@ -346,8 +346,20 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
   const auto cifp_fn = [this](const std::string& icao) { return impl_->ProceduresFor(icao); };
   const CifpLookup cifp_lookup{cifp_fn};
 
-  Result<EndpointPlan> dep_r = EndpointPlanner::Plan(*impl_->builder_, request, request.departure,
-                                                     /*departure=*/true, cifp_lookup);
+  // Constraints first: the avoid set also bars off-network SID exits / STAR
+  // IFs from the endpoint plans, since a route would fly over them.
+  Result<ConstraintBundle> constraints_r =
+      ConstraintAssembly::Build(request, *impl_->builder_, impl_->mora_);
+  if (!constraints_r) {
+    return Result<Routes>::Err(std::move(constraints_r).error());
+  }
+  ConstraintBundle constraints = std::move(constraints_r).value();
+  SearchOptions& options = constraints.options;
+  const std::vector<int>& avoid_vertices = constraints.avoid_vertices;
+
+  Result<EndpointPlan> dep_r =
+      EndpointPlanner::Plan(*impl_->builder_, request, request.departure,
+                            /*departure=*/true, cifp_lookup, avoid_vertices);
   if (!dep_r) {
     return Result<Routes>::Err(std::move(dep_r).error());
   }
@@ -362,8 +374,9 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         ErrorCode::kAirportNotFound,
         "unknown departure airport: " + request.departure + " (expected an ICAO code, e.g. KLAX)"));
   }
-  Result<EndpointPlan> arr_r = EndpointPlanner::Plan(*impl_->builder_, request, request.arrival,
-                                                     /*departure=*/false, cifp_lookup);
+  Result<EndpointPlan> arr_r =
+      EndpointPlanner::Plan(*impl_->builder_, request, request.arrival,
+                            /*departure=*/false, cifp_lookup, avoid_vertices);
   if (!arr_r) {
     return Result<Routes>::Err(std::move(arr_r).error());
   }
@@ -378,15 +391,6 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         ErrorCode::kAirportNotFound,
         "unknown arrival airport: " + request.arrival + " (expected an ICAO code, e.g. KLAX)"));
   }
-
-  Result<ConstraintBundle> constraints_r =
-      ConstraintAssembly::Build(request, *impl_->builder_, impl_->mora_);
-  if (!constraints_r) {
-    return Result<Routes>::Err(std::move(constraints_r).error());
-  }
-  ConstraintBundle constraints = std::move(constraints_r).value();
-  SearchOptions& options = constraints.options;
-  const std::vector<int>& avoid_vertices = constraints.avoid_vertices;
 
   const NavGraph& graph = impl_->builder_->graph();
   std::vector<SeededEndpoint> sources =

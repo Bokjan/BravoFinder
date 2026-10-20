@@ -79,10 +79,13 @@ class EndpointPlanner {
   // procedures: procedure-first connections; without CIFP: DCT links to the
   // nearest on-network waypoints. Non-airport tokens leave connections empty so
   // the caller reports an unknown-airport error (waypoint endpoints are not
-  // supported — idents are not globally unique).
+  // supported — idents are not globally unique). `avoid` (sorted vertex ids)
+  // bars off-network SID exits / STAR IFs from splice connections, since the
+  // route would fly over them; avoided connection fixes themselves are pruned
+  // by the caller.
   static Result<EndpointPlan> Plan(const GraphBuilder& builder, const RouteRequest& request,
                                    const std::string& name, bool departure,
-                                   const CifpLookup& cifp_lookup);
+                                   const CifpLookup& cifp_lookup, const std::vector<int>& avoid);
 
   // Convert connections to A* seeded endpoints. When soft_prefer_star is true,
   // approach-front connections pay kProcedurePreferNm on SeededEndpoint.cost

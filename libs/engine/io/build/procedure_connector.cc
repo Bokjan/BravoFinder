@@ -467,7 +467,8 @@ std::vector<Connection> CollectStarSpliceArrivals(const CifpData& cifp,
                                                   const Coordinate& airport_coord,
                                                   const GraphBuilder& builder,
                                                   const std::string& runway_filter,
-                                                  const std::string& name_filter) {
+                                                  const std::string& name_filter,
+                                                  const std::vector<int>& avoid) {
   std::vector<Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
     if (p.type != ProcedureType::kStar || !RunwayMatches(p, runway_filter) ||
@@ -484,6 +485,9 @@ std::vector<Connection> CollectStarSpliceArrivals(const CifpData& cifp,
       }
       if (builder.HasInbound(gate)) {
         continue;  // on-network gate — BuildArrival owns it
+      }
+      if (std::binary_search(avoid.begin(), avoid.end(), gate)) {
+        continue;  // the route would fly over an avoided fix
       }
       const double body_stub = StarBodyAndStubNm(p, gate, airport_coord, builder);
       const ProcedureRef pref = MakeRef(p);
@@ -508,7 +512,8 @@ std::vector<Connection> CollectSidSpliceDepartures(const CifpData& cifp,
                                                    const Coordinate& airport_coord,
                                                    const GraphBuilder& builder,
                                                    const std::string& runway_filter,
-                                                   const std::string& name_filter) {
+                                                   const std::string& name_filter,
+                                                   const std::vector<int>& avoid) {
   std::vector<Connection> by_fix;
   for (const Procedure& p : cifp.procedures) {
     if (p.type != ProcedureType::kSid || !RunwayMatches(p, runway_filter) ||
@@ -525,6 +530,9 @@ std::vector<Connection> CollectSidSpliceDepartures(const CifpData& cifp,
     }
     if (builder.HasOutbound(exit_v)) {
       continue;  // on-network gate — BuildDeparture owns it
+    }
+    if (std::binary_search(avoid.begin(), avoid.end(), exit_v)) {
+      continue;  // the route would fly over an avoided fix
     }
     const double body = SidBodyToExitNm(p, exit_v, airport_coord, builder);
     const ProcedureRef pref = MakeRef(p);
@@ -646,17 +654,19 @@ std::vector<Connection> ProcedureConnector::BuildStarSpliceArrival(const CifpDat
                                                                    const Coordinate& airport_coord,
                                                                    const GraphBuilder& builder,
                                                                    const std::string& runway_filter,
-                                                                   const std::string& name_filter) {
+                                                                   const std::string& name_filter,
+                                                                   const std::vector<int>& avoid) {
   std::vector<Connection> by_fix =
-      CollectStarSpliceArrivals(cifp, airport_coord, builder, runway_filter, name_filter);
+      CollectStarSpliceArrivals(cifp, airport_coord, builder, runway_filter, name_filter, avoid);
   return Finalize(std::move(by_fix));
 }
 
 std::vector<Connection> ProcedureConnector::BuildSidSpliceDeparture(
     const CifpData& cifp, const Coordinate& airport_coord, const GraphBuilder& builder,
-    const std::string& runway_filter, const std::string& name_filter) {
+    const std::string& runway_filter, const std::string& name_filter,
+    const std::vector<int>& avoid) {
   std::vector<Connection> by_fix =
-      CollectSidSpliceDepartures(cifp, airport_coord, builder, runway_filter, name_filter);
+      CollectSidSpliceDepartures(cifp, airport_coord, builder, runway_filter, name_filter, avoid);
   return Finalize(std::move(by_fix));
 }
 

@@ -532,6 +532,47 @@ TEST_CASE("real data: an off-network forced point says so", "[integration]") {
   CHECK(r.error().message.find("not on the airway network") != std::string::npos);
 }
 
+TEST_CASE("real data: an avoided SID exit or STAR IF is not spliced in", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // Each departure's best route flies a SID to an off-network exit, then DCT to
+  // a nearby airway fix: RJNH via SAGRA, RJSM via REIWA, YBAF via DE10L. The
+  // exit is a point on the route, so avoiding it must pick another way.
+  struct Case {
+    const char* dep;
+    const char* arr;
+    const char* gate;
+  };
+  for (const Case& c : {Case{"RJNH", "RJTT", "SAGRA"}, Case{"RJSM", "RJTT", "REIWA"},
+                        Case{"YBAF", "YSSY", "DE10L"}}) {
+    CAPTURE(c.dep, c.gate);
+    const auto has_gate = [&c](const bf::Route& route) {
+      for (const bf::RoutePoint& p : route.points) {
+        if (p.ident == c.gate) {
+          return true;
+        }
+      }
+      return false;
+    };
+    bf::Result<std::vector<bf::Route>> base = db->FindRoutes(MakeRequest(c.dep, c.arr));
+    REQUIRE(base);
+    REQUIRE_FALSE(base.value().empty());
+    REQUIRE(has_gate(base.value().front()));  // the premise: the gate is on the route
+
+    bf::RouteRequest req = MakeRequest(c.dep, c.arr);
+    req.avoid_waypoints = {c.gate};
+    req.k = 3;
+    bf::Result<std::vector<bf::Route>> avoided = db->FindRoutes(req);
+    REQUIRE(avoided);
+    REQUIRE_FALSE(avoided.value().empty());
+    for (const bf::Route& route : avoided.value()) {
+      CHECK_FALSE(has_gate(route));
+    }
+  }
+}
+
 TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

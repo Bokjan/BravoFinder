@@ -200,7 +200,7 @@ J22   VGA/ZM ODOKU/ZM TASET/ZM PAGVU/ZM TC/ZM                    4 legs，整条
 
 `AvoidWaypointConstraint` 有个容易漏的补丁，值得单独说。它通过「封锁所有进入该顶点的边」来实现避让——但航路的**起终点连接 fix 是被「种下」的，不经由边进入**（见 [procedure-modeling](procedure-modeling.zh-CN.md) 的多源搜索）。所以一个被避让的顶点如果恰好是某个 SID 的出口 fix，约束抓不到它，它会作为搜索起点溜进结果。
 
-修法在 `FindRoutes` 里：解析出的避让顶点集合**同时**用于从种子端点集合里剔除。这也是为什么 `ResolveAvoidVertices` 的返回值要排序去重——它被两处 `binary_search` 共用。
+修法在 `FindRoutes` 里：解析出的避让顶点集合**同时**用于从种子端点集合里剔除。还有一类点连种子都不是：SID 出口 / STAR IF 不在路网上时，种子是它附近的路网代理点，出口本身作为 splice 门点用一段 DCT 接进航路，照样出现在航路点里。所以避让集合还要传给 `EndpointPlanner::Plan`，在收集 splice 连接时就跳过被避让的门点（在合并前过滤，免得同一代理点下其他程序的门点被一起丢掉）；门点全部被避让时按「没有可用程序」处理，回退到 DCT。为此 `FindRoutes` 先组装约束、再规划端点。这也是为什么 `ResolveAvoidVertices` 的返回值要排序去重——它被三处 `binary_search` 共用。
 
 `AirwayRuleConstraint` 不需要对应的补丁：它匹配的是**边**而非顶点，种子 fix 本身不会被规则命中。但有个后果值得记：如果某机场的全部 SID 出口边都被 block，查询会返回「无航路」——这正是硬封锁不可逆的体现，属预期行为，不做特殊兜底。
 

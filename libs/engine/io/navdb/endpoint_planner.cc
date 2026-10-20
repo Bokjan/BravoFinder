@@ -154,7 +154,8 @@ std::vector<SeededEndpoint> EndpointPlanner::ToSearchEndpoints(
 
 Result<EndpointPlan> EndpointPlanner::Plan(const GraphBuilder& builder, const RouteRequest& request,
                                            const std::string& name, bool departure,
-                                           const CifpLookup& cifp_lookup) {
+                                           const CifpLookup& cifp_lookup,
+                                           const std::vector<int>& avoid) {
   const std::string up = ToUpper(name);
   EndpointPlan plan;
   const int airport = builder.VertexByAirport(up);
@@ -187,14 +188,15 @@ Result<EndpointPlan> EndpointPlanner::Plan(const GraphBuilder& builder, const Ro
             // Named --sid: only accumulate matching off-network exit splices so
             // splice_vertex/seed bind to the requested SID, not a merge winner.
             plan.connections =
-                ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, builder, rwy, sel);
+                ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, builder, rwy, sel, avoid);
             if (plan.connections.empty()) {
               plan.named_procedure_unmatched = true;
               return Result<EndpointPlan>::Ok(std::move(plan));
             }
           }
         } else if (plan.connections.empty()) {
-          plan.connections = ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, builder, rwy);
+          plan.connections =
+              ProcedureConnector::BuildSidSpliceDeparture(*cifp, apt, builder, rwy, {}, avoid);
         }
         plan.used_procedures = !plan.connections.empty();
       } else {
@@ -204,7 +206,7 @@ Result<EndpointPlan> EndpointPlanner::Plan(const GraphBuilder& builder, const Ro
         if (!sel.empty()) {
           if (!FilterConnectionsByName(plan.connections, sel)) {
             plan.connections =
-                ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, builder, rwy, sel);
+                ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, builder, rwy, sel, avoid);
             if (plan.connections.empty()) {
               plan.named_procedure_unmatched = true;
               return Result<EndpointPlan>::Ok(std::move(plan));
@@ -218,7 +220,7 @@ Result<EndpointPlan> EndpointPlanner::Plan(const GraphBuilder& builder, const Ro
           // Off-network published gates (or no STAR): STAR splice ∪ approach
           // in one pool. Soft-prefer STAR only when splice candidates exist.
           std::vector<Connection> pool =
-              ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, builder, rwy);
+              ProcedureConnector::BuildStarSpliceArrival(*cifp, apt, builder, rwy, {}, avoid);
           std::vector<Connection> apch =
               ProcedureConnector::BuildApproachArrival(*cifp, apt, builder, rwy);
           const bool soft_prefer = !pool.empty() && !apch.empty();
