@@ -112,7 +112,10 @@ bool WantsSse(const http_server::HttpRequest& req) {
 // Whether a parsed request (single object or batch) is or contains an initialize
 // call, so the HTTP transport can attach a fresh Mcp-Session-Id. Session tracking
 // is an HTTP concern (the id rides in a header), so this stays in the transport
-// rather than the transport-neutral Dispatcher.
+// rather than the transport-neutral Dispatcher. The batch case only occurs for a
+// refused request (the Dispatcher rejects initialize inside a batch), so a
+// session id may accompany that error; minting one is harmless and keeps this
+// check purely about the message's shape.
 bool ContainsInitialize(const rapidjson::Document& req) {
   // Compare the method's full length, not its NUL-terminated prefix: otherwise
   // "initialize\u0000junk" would be read as an initialize (the dispatcher

@@ -5,7 +5,7 @@ BravoFinder's MCP server: it exposes the `bf route` and `bf query` capabilities 
 ## What it is
 
 - Transport: **stdio** (default — a local process the client spawns and talks to over stdin/stdout) or **HTTP** (`--transport http` — Streamable HTTP, 2025-03-26, on a TCP port `/mcp`, for remote / multi-client access). Both share the same protocol core and capabilities; only the byte transport differs.
-- Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK. Protocol version is negotiated at `initialize` (`2024-11-05` or `2025-03-26`). A message is either a single JSON-RPC request or a **batch** (a JSON array of requests); batch handling lives in the shared `Dispatcher`, so both transports accept it — stdio reads one batch per line and writes one batch response per line, HTTP carries a batch in one `POST /mcp` body.
+- Protocol: MCP over JSON-RPC 2.0, hand-rolled with no third-party MCP SDK. Protocol version is negotiated at `initialize` (`2024-11-05` or `2025-03-26`); `ping` answers an empty result. A message is either a single JSON-RPC request or a **batch** (a JSON array of requests, at most 32 elements — a larger one is answered whole with `-32600`); batch handling lives in the shared `Dispatcher`, so both transports accept it — stdio reads one batch per line and writes one batch response per line, HTTP carries a batch in one `POST /mcp` body. `initialize` is refused inside a batch, and a request `id` must be a string or a number (anything else, including `null`, is answered with `-32600` and a `null` id).
 - Capabilities: the ten per-database tools below (mirroring the CLI `route` / `query` subcommands), plus a `list_cycles` tool.
 - Data: the server is pointed at a **directory** of prebuilt `.bfdb` caches and serves one or more AIRAC cycles from it. It never parses raw data or writes files.
 
@@ -159,7 +159,7 @@ Takes no arguments. Returns an array of `{cycle}` for the caches the server can 
 - `find_routes` cannot compute a route (unknown endpoint / no feasible route): `isError: true`, `text` is `{"error":"..."}`.
 - A lookup where **all** `ids` are missing: `isError: true`; a **partial** hit: `isError: false` (missing entries are `null` in the array).
 - An unknown `cycle`: `isError: true`, `text` is `{"error":"unknown AIRAC cycle: ..."}`.
-- Unknown tool name: `isError: true`.
+- An unknown tool name is a JSON-RPC `-32602` invalid-params error, not a tool result.
 - Protocol-level error (e.g. `tools/call` missing its `params` object): a JSON-RPC `error`, not a tool result.
 
 ## Concurrency and lifetime
