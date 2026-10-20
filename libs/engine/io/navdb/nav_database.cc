@@ -448,6 +448,14 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
         return Result<Routes>::Err(Error(ErrorCode::kRouteParseError,
                                          "forced point '" + token + "' is also in the avoid list"));
       }
+      // A route reaches and leaves a via point along airways, so a fix lacking
+      // either direction can never be on one. Say so, instead of the generic
+      // "no route" the search would end in.
+      if (!impl_->builder_->HasInbound(v) || !impl_->builder_->HasOutbound(v)) {
+        return Result<Routes>::Err(
+            Error(ErrorCode::kNoRoute, "forced point '" + token + "' (" + echo +
+                                           ") is not on the airway network in both directions"));
+      }
       // A repeated point cannot be part of a simple route (the hop between two
       // visits has to leave it and come straight back), and it doubles the
       // search work, so reject it up front: the same fix named twice, or two

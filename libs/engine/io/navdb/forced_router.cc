@@ -92,11 +92,21 @@ int ForcedRouter::ResolvePoint(const GraphBuilder& builder, const std::string& t
     echo = id.ident + "/" + id.arinc424_icao_code;
     return v;
   }
-  // Bare ident: choose the non-airport match minimizing the added detour
+  // Bare ident: prefer a match a route can actually pass through -- one with
+  // both an inbound and an outbound airway edge -- since a via point off the
+  // network can never be routed and a closer namesake on it can. Within the
+  // same tier, choose the non-airport match minimizing the added detour
   // d(from,v) + d(v,to). The constant d(from,to) is omitted since it is the
   // same for every candidate and does not change the argmin. Ties break on the
   // lowest vertex index for determinism.
+  const auto tier = [&builder](int v) {
+    if (builder.HasInbound(v) && builder.HasOutbound(v)) {
+      return 0;
+    }
+    return builder.OnNetwork(v) ? 1 : 2;
+  };
   int best = -1;
+  int best_tier = 0;
   double best_detour = 0.0;
   bool saw_airport = false;
   for (const int v : builder.VerticesByIdent(up)) {
@@ -106,8 +116,10 @@ int ForcedRouter::ResolvePoint(const GraphBuilder& builder, const std::string& t
     }
     const Coordinate c = builder.graph().CoordOf(v);
     const double detour = from.DistanceTo(c) + c.DistanceTo(to);
-    if (best < 0 || detour < best_detour) {
+    const int t = tier(v);
+    if (best < 0 || t < best_tier || (t == best_tier && detour < best_detour)) {
       best = v;
+      best_tier = t;
       best_detour = detour;
     }
   }

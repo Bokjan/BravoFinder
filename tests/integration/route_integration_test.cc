@@ -503,6 +503,35 @@ TEST_CASE("real data: a forced point whose cheapest hops share a fix still route
   }
 }
 
+TEST_CASE("real data: a bare forced ident prefers its on-network namesake", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // MIAMI/K6 is off the airway network (and nearer the KJFK-KLAX great circle);
+  // MIAMI/K7 is on it. A bare MIAMI has to pick the one a route can pass.
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.forced_points = {"MIAMI"};
+  bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+  REQUIRE(r);
+  REQUIRE_FALSE(r.value().empty());
+  REQUIRE(r.value().front().forced_points.size() == 1);
+  CHECK(r.value().front().forced_points.front() == "MIAMI/K7");
+}
+
+TEST_CASE("real data: an off-network forced point says so", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  bf::RouteRequest req = MakeRequest("KJFK", "KLAX");
+  req.forced_points = {"USIRE"};
+  bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+  REQUIRE_FALSE(r);
+  CHECK(r.error().code == bf::ErrorCode::kNoRoute);
+  CHECK(r.error().message.find("not on the airway network") != std::string::npos);
+}
+
 TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

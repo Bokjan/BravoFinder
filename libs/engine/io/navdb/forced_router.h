@@ -20,8 +20,9 @@ class ForcedRouter {
 
   // Resolve one forced ("via") point token to a graph vertex. A full
   // "IDENT/REGION" key resolves exactly; a bare ident with several regional
-  // matches picks the one adding the least detour to the dep->arr great circle
-  // (deterministic and explainable). Airports are rejected (a via point is an
+  // matches prefers one on the airway network in both directions, then the one
+  // adding the least detour to the dep->arr great circle (deterministic and
+  // explainable). Airports are rejected (a via point is an
   // enroute fix, and airports are barred as transit nodes anyway). On success,
   // writes the resolved "IDENT/REGION" to `echo`. Returns the vertex, or -1 if no
   // non-airport match exists (the caller reports an unknown-forced-point error).
