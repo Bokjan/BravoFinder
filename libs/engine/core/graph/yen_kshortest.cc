@@ -192,6 +192,14 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   // per spur; clearing the previous spur index restores kNoBearing.
   std::vector<double> spur_source_bearing(n, kNoBearing);
   int spur_bearing_vertex = kNoVertex;
+  // The goal table a spur search ends on. It equals goal_seed except at most at
+  // one vertex: when an accepted path sharing the spur's root already ends at
+  // the spur node, "end here" is that path's last edge (into the conceptual
+  // super-sink) and is banned like any other, so that entry reads -1 for the
+  // spur. Restored after each spur, so it costs O(1) rather than an O(V) copy.
+  std::vector<double> spur_goal_seed = goal_seed;
+  const int goal_count = static_cast<int>(
+      std::count_if(goal_seed.begin(), goal_seed.end(), [](double g) { return g >= 0.0; }));
 
   // The goal set is fixed for the whole run, so h(v) is constant per vertex.
   // Build one memoized heuristic and share it across the first search and every
@@ -245,14 +253,18 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
   for (int kth = 1; kth < k; ++kth) {
     const std::vector<int>& prev_path = result.back().vertices;
 
-    // Spur nodes are every node of the previous path except the goal, plus a
-    // conceptual super-source at index -1 whose "edge" to the first node selects
-    // the starting connection fix. This super-source spur is the extension over
-    // standard (single-source, single-goal) Yen: banning the first-node choice
-    // forces the search onto a different SID/STAR entry, which is how candidates
-    // that use a different source fix arise. Lawler: start at the previous path's
-    // deviation index rather than always at -1.
-    for (int i = last_deviation; i + 1 < static_cast<int>(prev_path.size()); ++i) {
+    // Spur nodes are every node of the previous path, plus a conceptual
+    // super-source at index -1 whose "edge" to the first node selects the
+    // starting connection fix. Symmetrically, every goal has an "edge" into a
+    // conceptual super-sink, so the previous path's last node is a spur node
+    // too: banning its edge into the sink makes the search continue through
+    // that goal to another one. Without it, a path that passes one goal on its
+    // way to another would never be produced once the shorter one is accepted.
+    // Both are the extension over standard (single-source, single-goal) Yen;
+    // the super-source spur is how candidates using a different SID/STAR entry
+    // arise. Lawler: start at the previous path's deviation index rather than
+    // always at -1.
+    for (int i = last_deviation; i < static_cast<int>(prev_path.size()); ++i) {
       if (i < 0) {
         // Source-level spur: re-run the multi-source search with every starting
         // fix used by an accepted path that shares the (empty) root banned, so a
@@ -285,21 +297,36 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
       const std::vector<int> root(prev_path.begin(), prev_path.begin() + i + 1);
 
       // Ban the (i -> i+1) edge of every accepted/known path that shares this
-      // root, so the spur search must diverge here. Built as a const sorted
-      // vector (the IIFE sorts in place, then binds to const) so binary_search
-      // is valid by construction -- the type system prevents any later write.
+      // root, so the spur search must diverge here. An accepted path that IS the
+      // root ends at the spur node; its next "edge" is the one into the
+      // super-sink, banned by dropping the spur node from the spur's goal table.
+      // Built as a const sorted vector (the IIFE sorts in place, then binds to
+      // const) so binary_search is valid by construction -- the type system
+      // prevents any later write.
+      bool ends_at_spur = false;
       const std::vector<int64_t> yen_banned_edges = [&] {
         std::vector<int64_t> v;
         v.reserve(result.size());
         for (const ShortestPath& p : result) {
-          if (p.vertices.size() > static_cast<size_t>(i) + 1 &&
-              std::equal(root.begin(), root.end(), p.vertices.begin())) {
+          if (p.vertices.size() < root.size() ||
+              !std::equal(root.begin(), root.end(), p.vertices.begin())) {
+            continue;
+          }
+          if (p.vertices.size() == root.size()) {
+            ends_at_spur = true;
+          } else {
             v.push_back(EdgeKey(p.vertices[i], p.vertices[i + 1]));
           }
         }
         std::sort(v.begin(), v.end());
         return v;
       }();
+      // With the spur node's own goal banned, a spur needs another goal to
+      // reach; if there is none, the search could only fail (after exploring
+      // everything reachable), so skip it.
+      if (ends_at_spur && goal_seed[spur_node] >= 0.0 && goal_count < 2) {
+        continue;
+      }
       // Root nodes (except the spur node) are off-limits to keep paths loopless.
       const std::vector<int> yen_banned_nodes = [&] {
         std::vector<int> v(root.begin(), root.end() - 1);
@@ -335,9 +362,13 @@ std::vector<ShortestPath> FindKShortestPathsMulti(const NavGraph& graph,
       // Single-source (the spur node) -> any goal. The spur node's own seed is
       // irrelevant here; CostOfPathMulti re-applies the true source seed from the
       // stitched path's first vertex.
+      if (ends_at_spur) {
+        spur_goal_seed[spur_node] = -1.0;
+      }
       const ShortestPath spur =
-          FindShortestPathMulti(graph, {SeededEndpoint{spur_node, 0.0}}, goal_seed,
+          FindShortestPathMulti(graph, {SeededEndpoint{spur_node, 0.0}}, spur_goal_seed,
                                 spur_source_bearing, goal_bearing, spur_opts, heuristic, ws);
+      spur_goal_seed[spur_node] = goal_seed[spur_node];
       add_candidate(root, spur, /*deviation=*/i);
     }
 

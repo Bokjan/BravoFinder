@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cstdint>
 #include <random>
 #include <set>
@@ -465,7 +466,7 @@ std::vector<bf::ShortestPath> NaiveKShortestMulti(const bf::NavGraph& graph,
   };
   for (int kth = 1; kth < k; ++kth) {
     const std::vector<int> prev = result.back().vertices;
-    for (int i = -1; i + 1 < static_cast<int>(prev.size()); ++i) {
+    for (int i = -1; i < static_cast<int>(prev.size()); ++i) {
       if (i < 0) {
         std::set<int> banned_sources;
         for (const bf::ShortestPath& p : result) {
@@ -487,10 +488,15 @@ std::vector<bf::ShortestPath> NaiveKShortestMulti(const bf::NavGraph& graph,
       }
       const std::vector<int> root(prev.begin(), prev.begin() + i + 1);
       std::vector<int64_t> banned_edges;
+      bool ends_here = false;  // an accepted path ends at the spur node: ban its sink edge
       for (const bf::ShortestPath& p : result) {
-        if (p.vertices.size() > static_cast<size_t>(i) + 1 &&
+        if (p.vertices.size() >= root.size() &&
             std::equal(root.begin(), root.end(), p.vertices.begin())) {
-          banned_edges.push_back(bf::EdgeKey(p.vertices[i], p.vertices[i + 1]));
+          if (p.vertices.size() == root.size()) {
+            ends_here = true;
+          } else {
+            banned_edges.push_back(bf::EdgeKey(p.vertices[i], p.vertices[i + 1]));
+          }
         }
       }
       std::sort(banned_edges.begin(), banned_edges.end());
@@ -499,7 +505,17 @@ std::vector<bf::ShortestPath> NaiveKShortestMulti(const bf::NavGraph& graph,
       bf::SearchOptions opts;
       opts.node_filter.banned = &banned_nodes;
       opts.edge_filter.banned = &banned_edges;
-      add(root, bf::FindShortestPathMulti(graph, {bf::SeededEndpoint{prev[i], 0.0}}, goals, opts));
+      std::vector<bf::SeededEndpoint> spur_goals;
+      for (const bf::SeededEndpoint& g : goals) {
+        if (!(ends_here && g.vertex == prev[i])) {
+          spur_goals.push_back(g);
+        }
+      }
+      if (spur_goals.empty()) {
+        continue;
+      }
+      add(root,
+          bf::FindShortestPathMulti(graph, {bf::SeededEndpoint{prev[i], 0.0}}, spur_goals, opts));
     }
     if (candidates.empty()) {
       break;
@@ -613,6 +629,115 @@ TEST_CASE("Lawler matches naive Yen on hundreds of random graphs (multi-source)"
     for (size_t i = 0; i < opt.size(); ++i) {
       CHECK(opt[i].vertices == ref[i].vertices);
       CHECK(opt[i].cost == ref[i].cost);
+    }
+    ++checked;
+  }
+  CHECK(checked > 150);
+}
+
+// Every simple source..goal path by exhaustive DFS, ranked by (cost, vertices):
+// an oracle that shares no logic with Yen, so it catches a candidate Yen never
+// generates (rather than one it generates in a different order). Small graphs
+// only.
+std::vector<double> BruteKCostsMulti(const bf::NavGraph& graph,
+                                     const std::vector<bf::SeededEndpoint>& sources,
+                                     const std::vector<bf::SeededEndpoint>& goals, int k) {
+  const int n = graph.VertexCount();
+  const std::vector<double> src_seed = RefSeedTable(sources, n);
+  const std::vector<double> goal_seed = RefSeedTable(goals, n);
+  std::set<std::pair<double, std::vector<int>>> found;  // a set: parallel edges repeat a path
+  std::vector<int> path;
+  std::vector<bool> on_path(n, false);
+  const auto dfs = [&](const auto& self, int u) -> void {
+    path.push_back(u);
+    on_path[u] = true;
+    double cost = 0.0, dist = 0.0;
+    if (goal_seed[u] >= 0.0 && RefCostOfPathMulti(graph, path, src_seed, goal_seed, cost, dist)) {
+      found.emplace(cost, path);
+    }
+    for (const bf::GraphEdge* e = graph.EdgesBegin(u); e != graph.EdgesEnd(u); ++e) {
+      if (!on_path[e->to]) {
+        self(self, e->to);
+      }
+    }
+    on_path[u] = false;
+    path.pop_back();
+  };
+  for (int v = 0; v < n; ++v) {
+    if (src_seed[v] >= 0.0) {
+      dfs(dfs, v);
+    }
+  }
+  std::vector<double> costs;
+  for (const auto& [cost, p] : found) {
+    if (static_cast<int>(costs.size()) == k) {
+      break;
+    }
+    costs.push_back(cost);
+  }
+  return costs;
+}
+
+TEST_CASE("multi-goal Yen continues through a goal to reach another", "[unit][yen]") {
+  // S -> G1 -> G2 on one forward airway, both G1 and G2 goals. [S G1] is best;
+  // [S G1 G2] passes G1 on the way to G2 and must be the second path.
+  bf::NavData d;
+  auto wp = [](const char* id, double lon) {
+    return bf::Waypoint{bf::Ident(id, "ZZ"), bf::Coordinate{0.0, lon}, bf::WaypointKind::kFix};
+  };
+  d.waypoints = {wp("S", 0.0), wp("G1", 1.0 / 6), wp("G2", 2.0 / 6)};
+  bf::AirwaySegment seg;
+  seg.name = "Q1";
+  seg.direction = bf::AirwayDirection::kForward;
+  d.airways = {{bf::Ident("S", "ZZ"), bf::Ident("G1", "ZZ"), seg},
+               {bf::Ident("G1", "ZZ"), bf::Ident("G2", "ZZ"), seg}};
+  bf::GraphBuilder builder = MakeBuilder(d);
+  const int s = builder.VerticesByIdent("S")[0];
+  const int g1 = builder.VerticesByIdent("G1")[0];
+  const int g2 = builder.VerticesByIdent("G2")[0];
+  const std::vector<bf::ShortestPath> paths = bf::FindKShortestPathsMulti(
+      builder.graph(), {{s, 0.0}}, {{g1, 5.0}, {g2, 50.0}}, 3, bf::SearchOptions{});
+  REQUIRE(paths.size() == 2);  // there are only two simple paths
+  CHECK(paths[0].vertices == std::vector<int>{s, g1});
+  CHECK(paths[1].vertices == std::vector<int>{s, g1, g2});
+}
+
+TEST_CASE("multi-source Yen finds the same k cheapest as exhaustive search", "[unit][yen]") {
+  std::mt19937 rng(0xC0FFEE);  // fixed seed: reproducible
+  std::uniform_int_distribution<int> n_dist(4, 10);
+  int checked = 0;
+  for (int trial = 0; trial < 200; ++trial) {
+    const int n = n_dist(rng);
+    bf::GraphBuilder builder = MakeBuilder(MakeRandomData(rng, n, n));
+    std::uniform_int_distribution<int> vpick(0, n - 1);
+    std::uniform_real_distribution<double> seed(0.0, 20.0);
+    // Goals may sit anywhere, including on another goal's path -- the shape a
+    // super-sink-less Yen misses.
+    std::set<int> used;
+    std::vector<bf::SeededEndpoint> sources, goals;
+    for (int t = 0; t < 2; ++t) {
+      const int v = vpick(rng);
+      if (used.insert(v).second) {
+        sources.push_back({v, seed(rng)});
+      }
+    }
+    for (int t = 0; t < 3; ++t) {
+      const int v = vpick(rng);
+      if (used.insert(v).second) {
+        goals.push_back({v, seed(rng)});
+      }
+    }
+    if (sources.empty() || goals.empty()) {
+      continue;
+    }
+    const int k = 1 + (trial % 10);
+    const std::vector<bf::ShortestPath> got =
+        bf::FindKShortestPathsMulti(builder.graph(), sources, goals, k, bf::SearchOptions{});
+    const std::vector<double> want = BruteKCostsMulti(builder.graph(), sources, goals, k);
+    CAPTURE(trial);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); ++i) {
+      CHECK_THAT(got[i].cost, Catch::Matchers::WithinRel(want[i], 1e-9));
     }
     ++checked;
   }
