@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -658,11 +659,12 @@ Result<void> LoadMoraGrid(sqlite3* conn, NavData& data) {
 // scan, and a single Runways scan, then emits one CifpData per airport via the
 // shared EmitTerminalProcedure.
 
-// One procedure's legs grouped by transition.  `runway` holds the runway ident
-// only when `transition` is a runway transition (RW-prefixed, e.g. "RW18L");
-// otherwise it is empty (enroute/IAF transitions name a fix, not a runway).
-// "ALL" legs are split out into common_legs below. `route_type` is taken from
-// TerminalLegs.Type (ARINC route type for approaches; numeric for SID/STAR).
+// One published transition record of a terminal: the legs sharing a
+// (Transition, route type) pair, in TerminalLegs.ID order. `runway` holds the
+// runway ident only when `transition` is a runway transition (RW-prefixed, e.g.
+// "RW18L"); otherwise it is empty (enroute/IAF transitions name a fix, not a
+// runway). `route_type` is TerminalLegs.Type (ARINC route type: numeric for
+// SID/STAR, alpha for approaches).
 struct LegGroup {
   std::vector<ProcedureLeg> legs;
   std::string transition;
@@ -670,14 +672,16 @@ struct LegGroup {
   int route_type = 0;
 };
 
-// One TerminalLegs scan → leg_groups (keyed by TerminalID) + common_legs
-// (the "ALL" transition legs, appended to every per-runway procedure).
+// One TerminalLegs scan -> leg_groups (keyed by TerminalID), one LegGroup per
+// (Transition, route type) in order of first appearance. Rows are grouped by key,
+// not by adjacency: TerminalLegs interleaves a terminal's runway transitions by
+// ID (RW04L, RW04R, RW04L, ...), so starting a group whenever the transition
+// changes from the previous row split one transition into several fragments.
 // When `allowed_tids` is non-null, only legs whose TerminalID is in the set
 // are processed (the single-airport path); when null, every leg is processed
 // (the bulk path).  A single scan either way — no per-airport re-scan.
 Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowed_tids,
-                            std::unordered_map<int, std::vector<LegGroup>>& leg_groups,
-                            std::unordered_map<int, std::vector<ProcedureLeg>>& common_legs) {
+                            std::unordered_map<int, std::vector<LegGroup>>& leg_groups) {
   // Waypoint ident/region/position lookup for leg-fix resolution. The position
   // lets the connector pick the leg's exact point among same-key vertices.
   struct WptInfo {
@@ -727,12 +731,9 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
 
       std::string trans = ColumnText(stmt, 1);
       ProcedureLeg leg;
+      // An unrecognized TrackCode is kept as kUnknown (like the other loaders)
+      // rather than dropped, so the record keeps its leg count and order.
       leg.path_term = ParsePathTerminator(ColumnText(stmt, 2));
-      // Unknown TrackCode → skip the entire leg.  Real data has 'RWYTF'×4 and
-      // 'RWY15'×2 — these legs are discarded silently.
-      if (leg.path_term == PathTerminator::kUnknown) {
-        return;
-      }
 
       int wpt_id = ColumnOptInt(stmt, 7);
       if (wpt_id > 0) {
@@ -769,8 +770,13 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
       leg.is_mapt = IsMaptDesc(ColumnText(stmt, 9));
       const int route_type = ParseRouteTypeToken(ColumnText(stmt, 10));
 
+      // A terminal has at most a few dozen transitions, so a linear scan finds
+      // the row's group faster than a per-terminal map would.
       auto& groups = leg_groups[tid];
-      if (groups.empty() || groups.back().transition != trans) {
+      auto git = std::find_if(groups.begin(), groups.end(), [&](const LegGroup& g) {
+        return g.transition == trans && g.route_type == route_type;
+      });
+      if (git == groups.end()) {
         // `runway` is set only when this transition is a runway transition
         // (ident prefixed "RW", e.g. "RW18L"); enroute/IAF transitions carry a
         // fix name, not a runway, so they leave `runway` empty. Mirrors the
@@ -778,37 +784,30 @@ Result<void> BuildLegGroups(sqlite3* conn, const std::unordered_set<int>* allowe
         // Terminals.Rwy at emit time (not from Transition).
         groups.push_back(
             LegGroup{{}, trans, trans.rfind(kRunwayPrefix, 0) == 0 ? trans : "", route_type});
+        git = std::prev(groups.end());
       }
-      groups.back().legs.push_back(std::move(leg));
+      git->legs.push_back(std::move(leg));
     });
     if (!rows) {
       return Result<void>::Err(rows.error());
     }
   }
-
-  // Split "ALL" transitions into common_legs; every per-runway procedure
-  // appends them.
-  for (auto& [tid, groups] : leg_groups) {
-    for (auto it = groups.begin(); it != groups.end();) {
-      if (it->transition == "ALL") {
-        common_legs[tid] = std::move(it->legs);
-        it = groups.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-
   return Result<void>::Ok();
 }
 
-// Emit one terminal's procedures (common segment + per-runway transitions)
-// into `cifp`.  Shared by the bulk and single-airport paths so both produce
-// byte-identical procedure structures.  `leg_groups` is read (not moved) so
-// the bulk path can reuse it across airports.
+// Emit one terminal's procedures into `cifp`: one Procedure per published
+// transition record, each with only its own legs -- the same shape the DFD and
+// X-Plane loaders produce, where the procedure connector walks the runway
+// transition, the common route, and the enroute transition as separate records.
+// (Splicing the common "ALL" legs onto every transition got the order wrong for
+// SID enroute and STAR runway transitions, whose common route comes FIRST: a
+// KJFK DEEZZ5.CANDR record ended at HEERO instead of CANDR.) Fenix names every
+// common route "ALL"; it is kept as published (DFD/X-Plane use "ALL" or blank
+// per procedure, a distinction Fenix does not carry). Shared by the bulk and
+// single-airport paths so both produce byte-identical procedure structures.
+// `leg_groups` is read (not moved) so the bulk path can reuse it across airports.
 void EmitTerminalProcedure(int tid, const std::unordered_map<int, Procedure>& proc_by_tid,
                            const std::unordered_map<int, std::vector<LegGroup>>& leg_groups,
-                           const std::unordered_map<int, std::vector<ProcedureLeg>>& common_legs,
                            CifpData& cifp) {
   auto pit = proc_by_tid.find(tid);
   if (pit == proc_by_tid.end()) {
@@ -819,36 +818,16 @@ void EmitTerminalProcedure(int tid, const std::unordered_map<int, Procedure>& pr
     return;
   }
   const Procedure& base = pit->second;
-  auto cit = common_legs.find(tid);
-
-  // Common-segment procedure (transition="", no runway) — the most direct
-  // path to the exit fix.
-  if (cit != common_legs.end() && !cit->second.empty()) {
-    Procedure proc = base;
-    proc.transition_ident = "";
-    // Approaches: Terminals.Rwy is the structured runway (already normalized
-    // into base.runway). SID/STAR common segments stay runway-independent.
-    if (base.type != ProcedureType::kApproach) {
-      proc.runway = "";
-    }
-    proc.legs = cit->second;
-    cifp.procedures.push_back(std::move(proc));
-  }
-
-  // Per-runway-transition procedures with common legs appended.
-  for (const auto& group : git->second) {
+  for (const LegGroup& group : git->second) {
     Procedure proc = base;
     proc.transition_ident = group.transition;
     proc.route_type = group.route_type;
-    if (base.type == ProcedureType::kApproach) {
-      // Keep Terminals.Rwy (normalized into base.runway); Transition is an IAF.
-    } else {
+    if (base.type != ProcedureType::kApproach) {
+      // Approaches keep Terminals.Rwy (normalized into base.runway) since their
+      // Transition is an IAF; SID/STAR runway comes from a runway transition.
       proc.runway = group.runway;
     }
     proc.legs = group.legs;
-    if (cit != common_legs.end()) {
-      proc.legs.insert(proc.legs.end(), cit->second.begin(), cit->second.end());
-    }
     cifp.procedures.push_back(std::move(proc));
   }
 }
@@ -930,9 +909,7 @@ Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
     }
   }
   std::unordered_map<int, std::vector<LegGroup>> leg_groups;
-  std::unordered_map<int, std::vector<ProcedureLeg>> common_legs;
-  Result<void> lr =
-      BuildLegGroups(conn, airport_ids ? &allowed_tids : nullptr, leg_groups, common_legs);
+  Result<void> lr = BuildLegGroups(conn, airport_ids ? &allowed_tids : nullptr, leg_groups);
   if (!lr) {
     return Result<std::unordered_map<int, CifpData>>::Err(lr.error());
   }
@@ -976,7 +953,7 @@ Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
   for (auto& [aid, tids] : airport_tids) {
     CifpData cifp;
     for (int tid : tids) {
-      EmitTerminalProcedure(tid, proc_by_tid, leg_groups, common_legs, cifp);
+      EmitTerminalProcedure(tid, proc_by_tid, leg_groups, cifp);
     }
     auto rit = runways_by_airport.find(aid);
     if (rit != runways_by_airport.end()) {

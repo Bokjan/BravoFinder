@@ -12,8 +12,11 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "core/base/env.h"
 #include "io/loaders/dfd1/dfd1_loader.h"
@@ -294,6 +297,61 @@ TEST_CASE("fenix: Procedure::runway is RW-prefixed only", "[integration][fenix]"
   // pre-fix loader populated ~120k records with a bogus fix-name runway.
   for (const auto& p : r->procedures) {
     CHECK((p.runway.empty() || p.runway.rfind("RW", 0) == 0));
+  }
+}
+
+TEST_CASE("fenix/dfd1: SID/STAR transition records match leg-for-leg", "[integration][fenix]") {
+  // Each published transition is one record carrying only its own legs, in
+  // published order -- the shape DFD produces. Fenix interleaves a terminal's
+  // runway transitions by row ID and stores the common route as "ALL"; the old
+  // grouping split transitions into fragments and appended "ALL" after every
+  // transition (wrong for SID enroute / STAR runway transitions, whose common
+  // route comes first: KJFK DEEZZ5.CANDR ended at HEERO, not CANDR). Fenix names
+  // every common route "ALL" where DFD sometimes leaves it blank.
+  auto fd = EnsureFenix(), dd = EnsureDfd1ForFenix();
+  if (fd.empty() || dd.empty()) SKIP("data missing");
+  bf::FenixLoader fl;
+  bf::Dfd1Loader dl;
+  for (const char* icao : {"KJFK", "KATL"}) {
+    INFO(icao);
+    auto f = fl.LoadProcedure(fd, icao);
+    auto d = dl.LoadProcedure(dd, icao);
+    REQUIRE(f.has_value());
+    REQUIRE(d.has_value());
+    std::map<std::pair<std::string, std::string>, int> count;
+    for (const auto& p : f->procedures) {
+      if (p.type != bf::ProcedureType::kApproach) {
+        ++count[{p.name, p.transition_ident}];
+      }
+    }
+    for (const auto& [key, n] : count) {
+      INFO(key.first << "." << key.second);
+      CHECK(n == 1);  // no fragmented / duplicated transition records
+    }
+    auto fixes = [](const bf::Procedure& p) {
+      std::vector<std::string> out;
+      for (const auto& leg : p.legs) {
+        out.emplace_back(leg.fix.IdentView());
+      }
+      return out;
+    };
+    int compared = 0;
+    for (const auto& dp : d->procedures) {
+      // DFD merges parallel runways ("RW04B"); Fenix lists each runway, so only
+      // the common route and enroute transitions compare one-to-one.
+      if (dp.type == bf::ProcedureType::kApproach || dp.transition_ident.rfind("RW", 0) == 0) {
+        continue;
+      }
+      INFO(dp.name << "." << dp.transition_ident);
+      const std::string trans = dp.transition_ident.empty() ? "ALL" : dp.transition_ident;
+      auto fit = std::find_if(f->procedures.begin(), f->procedures.end(), [&](const auto& fp) {
+        return fp.type == dp.type && fp.name == dp.name && fp.transition_ident == trans;
+      });
+      REQUIRE(fit != f->procedures.end());
+      CHECK(fixes(*fit) == fixes(dp));
+      ++compared;
+    }
+    CHECK(compared > 10);
   }
 }
 
