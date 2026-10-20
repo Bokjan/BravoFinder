@@ -86,6 +86,10 @@ std::vector<std::optional<AirportInfo>> NavDatabase::LookupAirports(
 Result<std::vector<std::optional<AirportProcedures>>> NavDatabase::LookupProcedures(
     const std::vector<std::string>& icaos) const {
   std::vector<std::optional<AirportProcedures>> out(icaos.size());
+  if (!impl_) {
+    return Result<std::vector<std::optional<AirportProcedures>>>::Err(
+        Error(ErrorCode::kDataMissing, "database not loaded"));
+  }
   for (size_t i = 0; i < icaos.size(); ++i) {
     const std::string up = ToUpper(icaos[i]);
     Result<const CifpData*> cifp_r = impl_->ProceduresFor(up);
@@ -130,6 +134,10 @@ std::string FormatAltToken(const AltitudeConstraint& a) {
 
 Result<std::optional<AirportProcedureDetail>> NavDatabase::LookupProcedureDetail(
     const std::string& icao, const std::string& procedure_name) const {
+  if (!impl_) {
+    return Result<std::optional<AirportProcedureDetail>>::Err(
+        Error(ErrorCode::kDataMissing, "database not loaded"));
+  }
   const std::string up_icao = ToUpper(icao);
   const std::string up_name = ToUpper(procedure_name);
   Result<const CifpData*> cifp_r = impl_->ProceduresFor(up_icao);
@@ -177,6 +185,9 @@ Result<std::optional<AirportProcedureDetail>> NavDatabase::LookupProcedureDetail
 std::vector<std::optional<AirwayInfo>> NavDatabase::LookupAirways(
     const std::vector<std::string>& names) const {
   std::vector<std::optional<AirwayInfo>> out(names.size());
+  if (!impl_) {
+    return out;  // moved-from: nothing is known
+  }
   for (size_t i = 0; i < names.size(); ++i) {
     const AirwayInfo* info = impl_->FindAirway(ToUpper(names[i]));
     if (info != nullptr) {

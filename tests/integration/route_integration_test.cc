@@ -5,6 +5,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <format>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -628,6 +629,24 @@ TEST_CASE("real data: a runway the airport does not have is an error", "[integra
   bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
   REQUIRE_FALSE(r);
   CHECK(r.error().message.find("arrival airport YBBN has no runway 'RW99'") != std::string::npos);
+}
+
+TEST_CASE("a moved-from database answers every query as not loaded", "[integration]") {
+  // No data needed: the moved-from state is what is under test.
+  bf::NavDatabase source;
+  bf::NavDatabase taken(std::move(source));
+  const bf::NavDatabase& moved = source;  // NOLINT(bugprone-use-after-move)
+  CHECK_FALSE(moved.LookupProcedures({"KJFK"}));
+  CHECK_FALSE(moved.LookupProcedureDetail("KJFK", "DEEZZ5"));
+  const std::vector<std::optional<bf::AirwayInfo>> airways = moved.LookupAirways({"J60"});
+  REQUIRE(airways.size() == 1);
+  CHECK_FALSE(airways.front().has_value());
+  CHECK_FALSE(moved.FindRoutes(MakeRequest("KJFK", "KLAX")));
+  const bf::LoaderCapabilities& caps = moved.capabilities();
+  CHECK_FALSE(caps.airway_direction);
+  CHECK_FALSE(caps.altitude_bands);
+  CHECK_FALSE(caps.mora_grid);
+  CHECK_FALSE(caps.msa_sectors);
 }
 
 TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {

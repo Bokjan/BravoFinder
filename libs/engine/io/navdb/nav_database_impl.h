@@ -46,7 +46,8 @@ struct NavDatabase::Impl {
   std::vector<std::pair<FixedName8, AirwayInfo>> airway_index_;
   // Optional CIFP procedure cache. When present, ProceduresFor fetches segments
   // from it instead of parsing CIFP/<ICAO>.dat files. Immutable after Open, so
-  // it needs no lock (its Fetch opens an independent ifstream per call).
+  // it needs no lock (its Fetch reads with positional reads on one shared
+  // handle, which concurrent callers can use without coordinating).
   std::unique_ptr<CifpArchive> cifp_archive_;
   // Optional navaid detail + hold cache, loaded eagerly at Open.
   // Immutable after Open; FindNavaids/FindHolds are const and lock-free.

@@ -57,8 +57,11 @@ const std::string& NavDatabase::source_loader() const {
 }
 
 const LoaderCapabilities& NavDatabase::capabilities() const {
-  static const LoaderCapabilities kEmpty;
-  return impl_ ? impl_->capabilities_ : kEmpty;
+  // A moved-from database expresses nothing; the struct's defaults describe the
+  // full X-Plane / DFD model, so spell out the empty answer instead.
+  static const LoaderCapabilities kNone{
+      .airway_direction = false, .altitude_bands = false, .mora_grid = false, .msa_sectors = false};
+  return impl_ ? impl_->capabilities_ : kNone;
 }
 
 Result<NavDatabase> NavDatabase::Open(const std::string& source_dir,

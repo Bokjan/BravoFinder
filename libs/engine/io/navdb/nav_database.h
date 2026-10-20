@@ -40,7 +40,8 @@ enum class CifpLoad {
 // everything else (graph, MORA, MSA) is immutable after Open().
 //
 // Moved-from instances are NOT queryable: a moved-from database has a null
-// `impl_` and any query that needs state returns empty / "not loaded". Current
+// `impl_` and any query that needs state returns empty / "not loaded" (and
+// capabilities() reports none). Current
 // call sites never query a moved-from instance; treat "moved from" as
 // "consumed", not "reset for reuse".
 class NavDatabase {
