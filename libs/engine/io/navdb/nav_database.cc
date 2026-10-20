@@ -34,6 +34,16 @@
 
 namespace bf {
 
+namespace {
+
+// " for runway RW01R" when the request restricted the runway, else nothing; for
+// a "has no SID matching" error, where the runway may be what rules it out.
+std::string ForRunway(const std::string& runway) {
+  return runway.empty() ? std::string() : " for runway " + runway;
+}
+
+}  // namespace
+
 NavDatabase::NavDatabase() : impl_(std::make_unique<Impl>()) {}
 NavDatabase::~NavDatabase() = default;
 NavDatabase::NavDatabase(NavDatabase&&) noexcept = default;
@@ -364,10 +374,16 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     return Result<Routes>::Err(std::move(dep_r).error());
   }
   EndpointPlan dep = std::move(dep_r).value();
-  if (dep.named_procedure_unmatched) {
+  if (dep.unknown_runway) {
     return Result<Routes>::Err(Error(ErrorCode::kProcedureNotFound,
-                                     "departure airport " + request.departure +
-                                         " has no SID matching '" + request.departure_sid + "'"));
+                                     "departure airport " + request.departure + " has no runway '" +
+                                         request.departure_runway + "'"));
+  }
+  if (dep.named_procedure_unmatched) {
+    return Result<Routes>::Err(
+        Error(ErrorCode::kProcedureNotFound, "departure airport " + request.departure +
+                                                 " has no SID matching '" + request.departure_sid +
+                                                 "'" + ForRunway(dep.runway)));
   }
   if (dep.connections.empty()) {
     return Result<Routes>::Err(Error(
@@ -381,10 +397,16 @@ Result<std::vector<Route>> NavDatabase::FindRoutes(const RouteRequest& request) 
     return Result<Routes>::Err(std::move(arr_r).error());
   }
   EndpointPlan arr = std::move(arr_r).value();
+  if (arr.unknown_runway) {
+    return Result<Routes>::Err(Error(
+        ErrorCode::kProcedureNotFound,
+        "arrival airport " + request.arrival + " has no runway '" + request.arrival_runway + "'"));
+  }
   if (arr.named_procedure_unmatched) {
-    return Result<Routes>::Err(Error(ErrorCode::kProcedureNotFound,
-                                     "arrival airport " + request.arrival +
-                                         " has no STAR matching '" + request.arrival_star + "'"));
+    return Result<Routes>::Err(
+        Error(ErrorCode::kProcedureNotFound, "arrival airport " + request.arrival +
+                                                 " has no STAR matching '" + request.arrival_star +
+                                                 "'" + ForRunway(arr.runway)));
   }
   if (arr.connections.empty()) {
     return Result<Routes>::Err(Error(

@@ -65,9 +65,9 @@ void RegisterRoute(CLI::App& app, int& exit_code) {
       ->capture_default_str()
       ->check(CLI::PositiveNumber);
   route->add_option("--rwy-dep", a->rwy_dep,
-                    "Departure runway to restrict the SID, e.g. RW31L (default: any)");
+                    "Departure runway to restrict the SID, e.g. RW31L or 31L (default: any)");
   route->add_option("--rwy-arr", a->rwy_arr,
-                    "Arrival runway to restrict the STAR, e.g. RW25L (default: any)");
+                    "Arrival runway to restrict the STAR, e.g. RW25L or 25L (default: any)");
   route->add_option("--sid", a->sid,
                     "Select a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN (default: auto)");
   route->add_option("--star", a->star,

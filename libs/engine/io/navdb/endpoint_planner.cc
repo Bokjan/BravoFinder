@@ -13,8 +13,8 @@ namespace {
 
 // Whether a procedure ref matches a requested selector. The selector is either
 // a bare name ("DEEZZ5", matches any transition) or "NAME.TRANSITION"
-// ("DEEZZ5.TOWIN", matches that transition exactly). Comparison is
-// case-sensitive (CIFP names are already upper-case).
+// ("DEEZZ5.TOWIN", matches that transition exactly). Comparison is exact:
+// CIFP names are upper-case and Plan upper-cases the selector.
 bool RefMatchesSelector(const ProcedureRef& ref, const std::string& selector) {
   const size_t dot = selector.find('.');
   if (dot == std::string::npos) {
@@ -56,6 +56,32 @@ bool FilterConnectionsByName(std::vector<Connection>& connections, const std::st
     connections = std::move(filtered);
   }
   return any;
+}
+
+// A requested runway in the procedure data's form: upper-case with the "RW"
+// prefix, so "01l", "RW01L" and "rw01l" all name RW01L. Empty stays empty.
+std::string NormalizeRunway(const std::string& runway) {
+  std::string up = ToUpper(runway);
+  if (!up.empty() && !up.starts_with("RW")) {
+    up.insert(0, "RW");
+  }
+  return up;
+}
+
+// Whether the airport has `runway` (normalized): in its runway list, or -- for
+// data that carries no runway list -- named by one of its procedures.
+bool AirportHasRunway(const CifpData& cifp, const std::string& runway) {
+  for (const Runway& r : cifp.runways) {
+    if (r.ident == runway) {
+      return true;
+    }
+  }
+  for (const Procedure& p : cifp.procedures) {
+    if (p.runway == runway) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool IsApproachFront(const Connection& c) {
@@ -179,8 +205,16 @@ Result<EndpointPlan> EndpointPlanner::Plan(const GraphBuilder& builder, const Ro
           break;
         }
       }
-      const std::string& rwy = departure ? request.departure_runway : request.arrival_runway;
-      const std::string& sel = departure ? request.departure_sid : request.arrival_star;
+      // Selectors are matched against upper-case CIFP names, so normalize the
+      // request's spelling once here rather than make every matcher fold case.
+      const std::string rwy =
+          NormalizeRunway(departure ? request.departure_runway : request.arrival_runway);
+      const std::string sel = ToUpper(departure ? request.departure_sid : request.arrival_star);
+      plan.runway = rwy;
+      if (!rwy.empty() && !AirportHasRunway(*cifp, rwy)) {
+        plan.unknown_runway = true;
+        return Result<EndpointPlan>::Ok(std::move(plan));
+      }
       if (departure) {
         plan.connections = ProcedureConnector::BuildDeparture(*cifp, apt, builder, rwy);
         if (!sel.empty()) {

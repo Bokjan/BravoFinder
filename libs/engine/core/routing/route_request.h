@@ -122,14 +122,16 @@ struct RouteRequest {
 
   // Optional runway filters for procedure selection. When set, only SIDs/STARs
   // serving that runway (or runway-independent ones) are considered for the
-  // departure/arrival airport. Empty means "any runway".
+  // departure/arrival airport. Empty means "any runway". Case-insensitive, and
+  // the "RW" prefix is optional ("31l" == "RW31L"); a runway the airport's
+  // procedure data does not have makes FindRoutes return an Error.
   std::string departure_runway{};
   std::string arrival_runway{};
 
   // Optional SID/STAR selection by name. When set, only the named procedure is
   // used to connect the departure/arrival airport; a bare name ("DEEZZ5")
   // matches any transition, and "NAME.TRANSITION" ("DEEZZ5.TOWIN") pins the
-  // transition. Empty means "choose automatically". Composes with the runway
+  // transition; case-insensitive. Empty means "choose automatically". Composes with the runway
   // filters. If the airport publishes no matching procedure, FindRoutes returns
   // an Error rather than silently falling back.
   std::string departure_sid{};

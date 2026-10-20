@@ -33,6 +33,13 @@ struct EndpointPlan {
   // whose fixes reach no on-network vertex): the caller reports an Error instead
   // of silently falling back to DCT or another procedure.
   bool named_procedure_unmatched = false;
+  // Set when the request named a runway the airport's procedure data does not
+  // have: the caller reports an Error rather than letting a typo silently match
+  // nothing and fall back to DCT.
+  bool unknown_runway = false;
+  // The requested runway, normalized ("01l" -> "RW01L"); empty when none was
+  // requested or the airport has no procedure data to check it against.
+  std::string runway;
   // Armed when Plan built a mixed STAR∪approach arrival pool (issue #30). Written
   // once at plan time so seeding / reported-distance strip do not re-derive it.
   bool soft_prefer_star = false;

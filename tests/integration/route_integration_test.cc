@@ -573,6 +573,63 @@ TEST_CASE("real data: an avoided SID exit or STAR IF is not spliced in", "[integ
   }
 }
 
+TEST_CASE("real data: procedure and runway selectors ignore case and the RW prefix",
+          "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // The same requests spelled as the procedure data spells them, and as a user
+  // might type them, pick the same SID.
+  bf::RouteRequest canonical = MakeRequest("YBBN", "YSSY");
+  canonical.departure_sid = "SANEG2";
+  canonical.departure_runway = "RW01R";
+  bf::RouteRequest typed = MakeRequest("YBBN", "YSSY");
+  typed.departure_sid = "saneg2";
+  typed.departure_runway = "01r";
+  bf::Result<std::vector<bf::Route>> a = db->FindRoutes(canonical);
+  bf::Result<std::vector<bf::Route>> b = db->FindRoutes(typed);
+  REQUIRE(a);
+  REQUIRE(b);
+  REQUIRE_FALSE(a.value().empty());
+  REQUIRE_FALSE(b.value().empty());
+  CHECK(a.value().front().sid == "SANEG2");
+  CHECK(b.value().front().route_string == a.value().front().route_string);
+  CHECK(b.value().front().dep_runway == "RW01R");
+
+  bf::RouteRequest pinned = MakeRequest("KJFK", "KLAX");
+  pinned.departure_sid = "deezz5.towin";
+  bf::Result<std::vector<bf::Route>> c = db->FindRoutes(pinned);
+  REQUIRE(c);
+  REQUIRE_FALSE(c.value().empty());
+  CHECK(c.value().front().sid == "DEEZZ5");
+}
+
+TEST_CASE("real data: a runway the airport does not have is an error", "[integration]") {
+  const bf::NavDatabase* db = SharedDb();
+  if (db == nullptr) {
+    SKIP("navigation data not found in '" << NavDataDir() << "' (set BRAVOFINDER_NAVDATA)");
+  }
+  // YBBN's SIDs are all runway-specific, so a typo used to match nothing and
+  // fall back to radar vectors; KJFK and ZBAA publish runway-independent
+  // segments, so there a typo used to be ignored outright. Neither is an answer
+  // to the question asked.
+  for (const char* dep : {"YBBN", "KJFK", "ZBAA"}) {
+    CAPTURE(dep);
+    bf::RouteRequest req = MakeRequest(dep, "KLAX");
+    req.departure_runway = "BOGUS";
+    bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+    REQUIRE_FALSE(r);
+    CHECK(r.error().code == bf::ErrorCode::kProcedureNotFound);
+    CHECK(r.error().message.find("has no runway 'BOGUS'") != std::string::npos);
+  }
+  bf::RouteRequest req = MakeRequest("KJFK", "YBBN");
+  req.arrival_runway = "RW99";
+  bf::Result<std::vector<bf::Route>> r = db->FindRoutes(req);
+  REQUIRE_FALSE(r);
+  CHECK(r.error().message.find("arrival airport YBBN has no runway 'RW99'") != std::string::npos);
+}
+
 TEST_CASE("real data: KJFK to KLAX uses real SID and STAR procedures", "[integration]") {
   const bf::NavDatabase* db = SharedDb();
   if (db == nullptr) {

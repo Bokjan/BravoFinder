@@ -105,9 +105,9 @@ std::string FindRoutesSchema() {
          JKey(kKeyK) + R"(:{"type":"integer","minimum":1,"maximum":)" + std::to_string(kMaxK) +
          R"(,"description":"Number of candidate routes to return (Yen K-shortest). Defaults to 1; capped at )" +
          std::to_string(kMaxK) + R"(."},)" + JKey(kKeyDepartureRunway) +
-         R"(:{"type":"string","description":"Restrict the SID to this departure runway, e.g. RW31L. Empty=any."},)" +
+         R"(:{"type":"string","description":"Restrict the SID to this departure runway, e.g. RW31L or 31L; an unknown runway is an error. Empty=any."},)" +
          JKey(kKeyArrivalRunway) +
-         R"(:{"type":"string","description":"Restrict the STAR to this arrival runway, e.g. RW25L. Empty=any."},)" +
+         R"(:{"type":"string","description":"Restrict the STAR to this arrival runway, e.g. RW25L or 25L; an unknown runway is an error. Empty=any."},)" +
          JKey(kKeyDepartureSid) +
          R"(:{"type":"string","description":"Pin a specific SID by name, e.g. DEEZZ5 or DEEZZ5.TOWIN. Empty=auto."},)" +
          JKey(kKeyArrivalStar) +
@@ -124,8 +124,7 @@ std::string FindRoutesSchema() {
          JKey(kKeyMatch) + R"(:{"type":"string","enum":[)" + JKey(kMatchExact) + "," +
          JKey(kMatchPrefix) +
          R"(],"description":"How designators are compared; defaults to prefix. Use exact to name individual airways: 1371 designators are a strict prefix of another one, so prefix \"J60\" would also match J603/J604/J605, and \"A3\" would match 52 names. Use prefix for a category rule such as all J routes."},)" +
-         JKey(kKeyAction) + R"(:{"type":"string","enum":[)" + JKey(kActionBlock) + "," +
-         JKey(kActionPenalize) + R"(],"description":"block excludes matching legs outright; penalize (the default) adds a soft cost, keeping them usable. Prefer penalize for bulk region rules: block is an irreversible connectivity break and can leave an airport that depends on a single airway with no route at all."},)" +
+         JKey(kKeyAction) + R"(:{"type":"string","enum":[)" + JKey(kActionBlock) + "," + JKey(kActionPenalize) + R"(],"description":"block excludes matching legs outright; penalize (the default) adds a soft cost, keeping them usable. Prefer penalize for bulk region rules: block is an irreversible connectivity break and can leave an airport that depends on a single airway with no route at all."},)" +
          JKey(kKeyPenaltyFraction) +
          R"(:{"type":"number","minimum":0,"description":"Soft penalty as a fraction of each leg's own length, used only when action is penalize. Defaults to )" +
          std::to_string(bf::kDefaultPenaltyFraction) +
