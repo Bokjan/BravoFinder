@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,13 @@
 #include "tools.h"
 
 namespace bf::mcp {
+
+// The largest JSON-RPC batch the dispatcher accepts. The whole batch is
+// dispatched serially inside one offloaded work item, and a single element can
+// be a full route computation, so the cap keeps the worst case bounded behind
+// the transport's fixed max-in-flight-work admission limit. A larger batch is
+// answered as a whole with one -32600 rather than executed partially.
+inline constexpr std::size_t kMaxBatchSize = 32;
 
 // The MCP protocol versions this server understands. Negotiation echoes the
 // client's requested version when it is one of these; otherwise (an unsupported
@@ -63,6 +71,9 @@ class Dispatcher {
   // non-notification responses into a JSON array. A non-object element becomes
   // a -32600 (id null) entry; an empty batch becomes a single -32600 envelope.
   Response DispatchBatch(const rapidjson::Value& batch) const;
+  // Dispatch one object request. `in_batch` marks a batch element, which the
+  // MCP rules treat differently (initialize is refused there).
+  Response DispatchOne(const rapidjson::Value& request, bool in_batch) const;
   // The registry to serve from. Each database it holds is read-only per
   // NavDatabase thread-safety contract.
   bf::service::NavDatabaseRegistry& registry_;

@@ -71,6 +71,18 @@ const char* NegotiateProtocolVersion(const rapidjson::Value* params) {
   return kDefaultProtocolVersion;
 }
 
+// Read a JSON string as a view over its full stored length. GetString() alone
+// stops at an embedded NUL, so "ping\u0000junk" would compare equal to "ping".
+std::string_view JsonStringView(const rapidjson::Value& v) {
+  return std::string_view(v.GetString(), v.GetStringLength());
+}
+
+// Whether an id may be echoed into the response envelope. Only scalars are
+// safe: the echo goes through the recursive GenericValue::Accept, so a nested
+// array/object client id is a stack-overflow vector, and null is not a usable
+// request id per MCP.
+bool IsEchoableId(const rapidjson::Value& id) { return id.IsString() || id.IsNumber(); }
+
 }  // namespace
 
 Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const {
@@ -79,44 +91,80 @@ Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const
   if (request.IsArray()) {
     return DispatchBatch(request);
   }
+  return DispatchOne(request, /*in_batch=*/false);
+}
+
+Dispatcher::Response Dispatcher::DispatchOne(const rapidjson::Value& request, bool in_batch) const {
   if (!request.IsObject()) {
     return {};  // not a JSON object: nothing to reply to
   }
   const bool has_id = request.HasMember("id");
+  const rapidjson::Value null_id(rapidjson::kNullType);
+  const rapidjson::Value& id = has_id ? request["id"] : null_id;
+  // A present id must be a string or a number. A client-controlled array or
+  // object must never reach the JSON-RPC envelope builders: rapidjson echoes it
+  // with the recursive GenericValue::Accept, so a deeply nested id (a few
+  // hundred KB, well under the 1 MiB body cap) overflows the worker's stack and
+  // takes the whole process down. A null id is not a usable request id either
+  // (MCP: "MUST NOT be null"), so it is answered -- not echoed -- with id null.
+  // An absent id is a notification and stays silent.
+  if (has_id && !IsEchoableId(id)) {
+    return {MakeError(null_id, jsonrpc::kInvalidRequest,
+                      "invalid request: id must be a string or a number"),
+            true};
+  }
   // JSON-RPC 2.0 requires "jsonrpc":"2.0" on every request. Reject early with
-  // -32600 (id echoed when present, else null) so a missing/wrong version is
-  // not silently treated as a well-formed request or notification.
+  // -32600 (id echoed when valid, else null) so a missing/wrong version is not
+  // silently treated as a well-formed request or notification.
   if (!request.HasMember("jsonrpc") || !request["jsonrpc"].IsString() ||
-      std::string_view(request["jsonrpc"].GetString()) != jsonrpc::kVersion) {
-    const rapidjson::Value null_id(rapidjson::kNullType);
-    const rapidjson::Value& id = has_id ? request["id"] : null_id;
+      JsonStringView(request["jsonrpc"]) != jsonrpc::kVersion) {
     return {MakeError(id, jsonrpc::kInvalidRequest, "invalid request: jsonrpc must be \"2.0\""),
             true};
   }
   if (!request.HasMember("method") || !request["method"].IsString()) {
-    // Invalid request: only reply if it carried an id (a notification with no
-    // method is silently dropped, per JSON-RPC).
-    if (has_id) {
-      return {MakeError(request["id"], jsonrpc::kInvalidRequest,
-                        "invalid request: missing or non-string method"),
-              true};
+    // Invalid request: only reply if it carried a usable id (a notification
+    // with no method is silently dropped, per JSON-RPC).
+    if (!has_id) {
+      return {};
     }
-    return {};
+    return {
+        MakeError(id, jsonrpc::kInvalidRequest, "invalid request: missing or non-string method"),
+        true};
   }
-  const std::string method = request["method"].GetString();
+  // Compare the method by its full length rather than its NUL-terminated
+  // prefix: GetString() alone would dispatch "find_routes\0junk" as
+  // "find_routes".
+  const std::string_view method = JsonStringView(request["method"]);
 
   if (method == "initialize") {
+    if (in_batch) {
+      // MCP: an initialize request MUST NOT be part of a JSON-RPC batch. The
+      // session it establishes is a transport-level handshake, so a batch
+      // element cannot carry one.
+      return {MakeError(id, jsonrpc::kInvalidRequest,
+                        "invalid request: initialize must not be part of a batch"),
+              true};
+    }
     if (!has_id) {
       return {};  // notification: no response
     }
     const rapidjson::Value* params = request.HasMember("params") ? &request["params"] : nullptr;
-    return {HandleInitialize(request["id"], params), true};
+    return {HandleInitialize(id, params), true};
+  }
+  if (method == "ping") {
+    // MCP requires ping to return an empty result object; it is also the
+    // liveness check a transport may send without an id.
+    if (!has_id) {
+      return {};
+    }
+    rapidjson::Value empty(rapidjson::kObjectType);
+    return {MakeResult(id, empty), true};
   }
   if (method == "tools/list") {
     if (!has_id) {
       return {};
     }
-    return {HandleToolsList(request["id"]), true};
+    return {HandleToolsList(id), true};
   }
   if (method == "tools/call") {
     if (!has_id) {
@@ -125,16 +173,13 @@ Dispatcher::Response Dispatcher::Dispatch(const rapidjson::Value& request) const
     // A tools/call request must carry a params object; without one it is a
     // protocol error rather than a tool error.
     if (!request.HasMember("params") || !request["params"].IsObject()) {
-      return {
-          MakeError(request["id"], jsonrpc::kInvalidParams, "tools/call requires a params object"),
-          true};
+      return {MakeError(id, jsonrpc::kInvalidParams, "tools/call requires a params object"), true};
     }
-    return {HandleToolsCall(request["id"], request["params"]), true};
+    return {HandleToolsCall(id, request["params"]), true};
   }
   // Unknown method: reply with method-not-found only for a request (has id).
   if (has_id) {
-    return {MakeError(request["id"], jsonrpc::kMethodNotFound,
-                      std::format("method not found: {}", method)),
+    return {MakeError(id, jsonrpc::kMethodNotFound, std::format("method not found: {}", method)),
             true};
   }
   return {};
@@ -146,6 +191,18 @@ Dispatcher::Response Dispatcher::DispatchBatch(const rapidjson::Value& batch) co
   if (batch.Empty()) {
     const rapidjson::Value null_id(rapidjson::kNullType);
     return {MakeError(null_id, jsonrpc::kInvalidRequest, "invalid request: empty batch"), true};
+  }
+  // Cap the batch. One batch element can be a full route computation and the
+  // whole batch is dispatched serially inside a single offloaded work item, so
+  // an unbounded batch is unbounded compute behind the fixed
+  // max-in-flight-work admission limit. Over the cap, answer the batch as a
+  // whole with one -32600: a well-formed message whose contents are refused.
+  if (batch.Size() > kMaxBatchSize) {
+    const rapidjson::Value null_id(rapidjson::kNullType);
+    return {MakeError(null_id, jsonrpc::kInvalidRequest,
+                      std::format("invalid request: batch of {} exceeds the limit of {}",
+                                  batch.Size(), kMaxBatchSize)),
+            true};
   }
   rapidjson::StringBuffer buf;
   rapidjson::Writer<rapidjson::StringBuffer> w(buf);
@@ -162,7 +219,7 @@ Dispatcher::Response Dispatcher::DispatchBatch(const rapidjson::Value& batch) co
       w.RawValue(err.c_str(), err.size(), rapidjson::kObjectType);
       continue;
     }
-    const Response r = Dispatch(item);
+    const Response r = DispatchOne(item, /*in_batch=*/true);
     if (r.has_response) {
       has_response = true;
       // r.body is a complete JSON-RPC envelope; splice it in verbatim.
@@ -340,7 +397,7 @@ std::string Dispatcher::HandleToolsCall(const rapidjson::Value& id,
   if (!params.HasMember("name") || !params["name"].IsString()) {
     return MakeError(id, jsonrpc::kInvalidParams, "missing tool name");
   }
-  const std::string name = params["name"].GetString();
+  const std::string_view name = JsonStringView(params["name"]);
 
   if (name == kListCyclesTool) {
     return HandleListCycles(id);
@@ -387,9 +444,11 @@ std::string Dispatcher::HandleToolsCall(const rapidjson::Value& id,
       return MakeToolResult(id, tr.json_text, tr.is_error, tr.elapsed_ms);
     }
   }
-  // The tool name is client-controlled, so escape it (a name with a quote must
-  // not break the JSON frame).
-  return MakeToolResult(id, bf::service::JsonError(std::format("unknown tool: {}", name)), true);
+  // Unknown tool: an invalid-params protocol error, not a tool result -- the
+  // call names a tool this server does not have, which is a client mistake
+  // rather than a failure of a tool that ran. The name is client-controlled, so
+  // format escapes it into the JSON frame.
+  return MakeError(id, jsonrpc::kInvalidParams, std::format("unknown tool: {}", name));
 }
 
 }  // namespace bf::mcp

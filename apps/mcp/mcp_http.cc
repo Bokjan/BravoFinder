@@ -17,10 +17,10 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <memory>
 #include <random>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "conn.h"  // http_server::Connection
@@ -114,9 +114,15 @@ bool WantsSse(const http_server::HttpRequest& req) {
 // is an HTTP concern (the id rides in a header), so this stays in the transport
 // rather than the transport-neutral Dispatcher.
 bool ContainsInitialize(const rapidjson::Document& req) {
+  // Compare the method's full length, not its NUL-terminated prefix: otherwise
+  // "initialize\u0000junk" would be read as an initialize (the dispatcher
+  // rejects the request, but the transport would already have minted a session).
   const auto is_init = [](const rapidjson::Value& v) {
-    return v.IsObject() && v.HasMember("method") && v["method"].IsString() &&
-           std::strcmp(v["method"].GetString(), "initialize") == 0;
+    if (!v.IsObject() || !v.HasMember("method") || !v["method"].IsString()) {
+      return false;
+    }
+    const rapidjson::Value& method = v["method"];
+    return std::string_view(method.GetString(), method.GetStringLength()) == "initialize";
   };
   if (req.IsArray()) {
     for (const rapidjson::Value& item : req.GetArray()) {

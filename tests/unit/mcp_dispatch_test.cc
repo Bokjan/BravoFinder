@@ -64,10 +64,21 @@ rapidjson::Document Parse(const std::string& body) {
   return doc;
 }
 
-// Build a request Document from a JSON string.
+// Build a request Document from a JSON string, parsed the way both transports
+// parse a body: iteratively, so a deeply nested value cannot overflow the
+// recursive parser's stack before the dispatcher even sees it.
 rapidjson::Document Req(const char* json) {
   rapidjson::Document doc;
-  doc.Parse(json);
+  doc.Parse<rapidjson::kParseIterativeFlag>(json);
+  REQUIRE_FALSE(doc.HasParseError());
+  return doc;
+}
+
+// Same, for a body that legitimately contains a NUL byte (the raw JSON text
+// spelled "\u0000"), which the const char* overload would truncate at.
+rapidjson::Document Req(const std::string& json) {
+  rapidjson::Document doc;
+  doc.Parse<rapidjson::kParseIterativeFlag>(json.data(), json.size());
   REQUIRE_FALSE(doc.HasParseError());
   return doc;
 }
@@ -181,7 +192,7 @@ TEST_CASE("mcp dispatcher: tools/call rejects a non-integer cycle", "[unit][mcp]
   CHECK(doc["result"]["isError"].GetBool());
 }
 
-TEST_CASE("mcp dispatcher: tools/call on an unknown tool is a tool error", "[unit][mcp]") {
+TEST_CASE("mcp dispatcher: tools/call on an unknown tool is -32602", "[unit][mcp]") {
   const fs::path dir = TempDir("unknown");
   WriteCache(dir, 2601);
   bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
@@ -192,9 +203,9 @@ TEST_CASE("mcp dispatcher: tools/call on an unknown tool is a tool error", "[uni
   const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
   REQUIRE(resp.has_response);
   rapidjson::Document doc = Parse(resp.body);
-  CHECK(doc["result"]["isError"].GetBool());
-  CHECK(std::string(doc["result"]["content"][0]["text"].GetString()).find("unknown tool") !=
-        std::string::npos);
+  CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidParams);
+  CHECK(doc["id"].GetInt() == 9);
+  CHECK(std::string(doc["error"]["message"].GetString()).find("unknown tool") != std::string::npos);
 }
 
 TEST_CASE("mcp dispatcher: JSON-RPC protocol errors", "[unit][mcp]") {
@@ -341,4 +352,156 @@ TEST_CASE("mcp dispatcher: a batch dispatches each element", "[unit][mcp]") {
     REQUIRE(doc.IsObject());
     CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
   }
+}
+
+TEST_CASE("mcp dispatcher: only a string or number id is echoed", "[unit][mcp]") {
+  bf::service::NavDatabaseRegistry reg(bf::BfdbInventory{});
+  bf::mcp::Dispatcher dispatcher(reg);
+
+  // A deeply nested array id: echoing it would recurse once per level through
+  // rapidjson's GenericValue::Accept and overflow the worker stack. It must be
+  // answered with -32600 and a null id instead of being echoed.
+  SECTION("a nested array id is refused, not echoed") {
+    std::string deep;
+    for (int i = 0; i < 100000; ++i) {
+      deep.push_back('[');
+    }
+    for (int i = 0; i < 100000; ++i) {
+      deep.push_back(']');
+    }
+    const rapidjson::Document req =
+        Req((R"({"jsonrpc":"2.0","method":"tools/list","id":)" + deep + "}").c_str());
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+    CHECK(doc["id"].IsNull());
+  }
+
+  SECTION("an object, boolean or null id is -32600 with a null id") {
+    for (const char* json : {R"({"jsonrpc":"2.0","method":"tools/list","id":{"a":1}})",
+                             R"({"jsonrpc":"2.0","method":"tools/list","id":[1,2]})",
+                             R"({"jsonrpc":"2.0","method":"tools/list","id":true})",
+                             R"({"jsonrpc":"2.0","method":"tools/list","id":null})"}) {
+      const rapidjson::Document req = Req(json);
+      const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+      REQUIRE(resp.has_response);
+      rapidjson::Document doc = Parse(resp.body);
+      CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+      CHECK(doc["id"].IsNull());
+    }
+  }
+
+  SECTION("a string or integer id round-trips unchanged") {
+    const rapidjson::Document req = Req(R"({"jsonrpc":"2.0","id":"req-7","method":"ping"})");
+    const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+    REQUIRE(resp.has_response);
+    rapidjson::Document doc = Parse(resp.body);
+    CHECK(std::string(doc["id"].GetString()) == "req-7");
+  }
+}
+
+TEST_CASE("mcp dispatcher: ping returns an empty result", "[unit][mcp]") {
+  bf::service::NavDatabaseRegistry reg(bf::BfdbInventory{});
+  bf::mcp::Dispatcher dispatcher(reg);
+
+  const rapidjson::Document req = Req(R"({"jsonrpc":"2.0","id":11,"method":"ping"})");
+  const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+  REQUIRE(resp.has_response);
+  rapidjson::Document doc = Parse(resp.body);
+  REQUIRE(doc.HasMember("result"));
+  CHECK(doc["result"].IsObject());
+  CHECK(doc["result"].MemberCount() == 0);
+  CHECK(doc["id"].GetInt() == 11);
+
+  // A ping notification is silent like any other notification.
+  const rapidjson::Document note = Req(R"({"jsonrpc":"2.0","method":"ping"})");
+  CHECK_FALSE(dispatcher.Dispatch(note).has_response);
+}
+
+TEST_CASE("mcp dispatcher: a NUL inside a method or tool name does not truncate", "[unit][mcp]") {
+  const fs::path dir = TempDir("nul");
+  WriteCache(dir, 2601);
+  bf::service::NavDatabaseRegistry reg = MakeRegistry(dir);
+  bf::mcp::Dispatcher dispatcher(reg);
+
+  // The body spells the escape "\u0000" as raw JSON text, so the parsed method
+  // literally contains a NUL. It is not "ping": the full string length decides.
+  const std::string ping =
+      std::string(R"({"jsonrpc":"2.0","id":1,"method":"ping)") + "\u0000" + R"(junk"})";
+  const rapidjson::Document req = Req(ping);
+  // "ping", the NUL, "junk" (8 bytes): the length includes the NUL, so a bare
+  // GetString() comparison would only ever see "ping".
+  REQUIRE(req["method"].GetStringLength() == 8);
+  const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+  REQUIRE(resp.has_response);
+  rapidjson::Document doc = Parse(resp.body);
+  CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kMethodNotFound);
+
+  // Same for a tool name: "list_cycles\u0000junk" resolves to no such tool.
+  const std::string call =
+      std::string(
+          R"({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_cycles)") +
+      "\u0000" + R"(junk"}})";
+  const rapidjson::Document call_req = Req(call);
+  const bf::mcp::Dispatcher::Response call_resp = dispatcher.Dispatch(call_req);
+  REQUIRE(call_resp.has_response);
+  rapidjson::Document call_doc = Parse(call_resp.body);
+  CHECK(call_doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidParams);
+}
+
+TEST_CASE("mcp dispatcher: initialize is refused inside a batch", "[unit][mcp]") {
+  bf::service::NavDatabaseRegistry reg(bf::BfdbInventory{});
+  bf::mcp::Dispatcher dispatcher(reg);
+
+  const rapidjson::Document req = Req(
+      R"([{"jsonrpc":"2.0","id":1,"method":"initialize"},{"jsonrpc":"2.0","id":2,"method":"ping"}])");
+  const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+  REQUIRE(resp.has_response);
+  rapidjson::Document doc = Parse(resp.body);
+  REQUIRE(doc.IsArray());
+  REQUIRE(doc.Size() == 2);
+  CHECK(doc[0]["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+  CHECK(doc[0]["id"].GetInt() == 1);
+  CHECK(doc[1]["result"].IsObject());
+}
+
+TEST_CASE("mcp dispatcher: a batch larger than the cap is refused whole", "[unit][mcp]") {
+  bf::service::NavDatabaseRegistry reg(bf::BfdbInventory{});
+  bf::mcp::Dispatcher dispatcher(reg);
+
+  std::string json = "[";
+  for (std::size_t i = 0; i <= bf::mcp::kMaxBatchSize; ++i) {
+    if (i > 0) {
+      json += ",";
+    }
+    json += R"({"jsonrpc":"2.0","id":)" + std::to_string(i) + R"(,"method":"ping"})";
+  }
+  json += "]";
+  const rapidjson::Document req = Req(json.c_str());
+  const bf::mcp::Dispatcher::Response resp = dispatcher.Dispatch(req);
+  REQUIRE(resp.has_response);
+  rapidjson::Document doc = Parse(resp.body);
+  // One error envelope for the batch, not a per-element array.
+  CHECK(doc.IsObject());
+  CHECK(doc["error"]["code"].GetInt() == bf::mcp::jsonrpc::kInvalidRequest);
+  CHECK(doc["id"].IsNull());
+
+  // A batch exactly at the cap is still served.
+  const rapidjson::Document at_cap = Req([] {
+    std::string j = "[";
+    for (std::size_t i = 0; i < bf::mcp::kMaxBatchSize; ++i) {
+      if (i > 0) {
+        j += ",";
+      }
+      j += R"({"jsonrpc":"2.0","id":)" + std::to_string(i) + R"(,"method":"ping"})";
+    }
+    return j + "]";
+  }()
+                                             .c_str());
+  const bf::mcp::Dispatcher::Response at_cap_resp = dispatcher.Dispatch(at_cap);
+  REQUIRE(at_cap_resp.has_response);
+  rapidjson::Document at_cap_doc = Parse(at_cap_resp.body);
+  REQUIRE(at_cap_doc.IsArray());
+  CHECK(at_cap_doc.Size() == bf::mcp::kMaxBatchSize);
 }
