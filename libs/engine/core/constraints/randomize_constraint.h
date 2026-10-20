@@ -35,14 +35,16 @@ class RandomizeConstraint : public Constraint {
   }
 
   EdgeVerdict Evaluate(const EdgeContext& ctx, const RouteRequest&) const override {
-    const double jitter = Hash01(seed_, ctx.edge.to, ctx.edge.airway_id);
+    const double jitter = Hash01(seed_, ctx.from, ctx.edge.to, ctx.edge.airway_id);
     return EdgeVerdict::Penalize(ctx.edge.distance_nm * eps_ * jitter);
   }
 
  private:
-  // Map (seed, to, airway_id) to a value in [0, 1) via a splitmix64-style
+  // Map (seed, from, to, airway_id) to a value in [0, 1) via a splitmix64-style
   // finalizer. Pure and stable across platforms (fixed-width integer math only).
-  static double Hash01(uint32_t seed, int32_t to, uint16_t airway_id) {
+  // `from` is part of the key so the edges entering one vertex -- the same
+  // airway from either side, or different airways -- jitter independently.
+  static double Hash01(uint32_t seed, int32_t from, int32_t to, uint16_t airway_id) {
     // Pack seed and `to` into the two non-overlapping halves of a 64-bit word,
     // then fold airway_id in through a separate mixing round. An earlier layout
     // XOR-ed seed<<32, to<<16 and airway_id, whose bits 32-47 overlapped, so
@@ -55,6 +57,8 @@ class RandomizeConstraint : public Constraint {
     x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
     x ^= static_cast<uint64_t>(airway_id) + 0x9e3779b97f4a7c15ULL;
     x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    x ^= static_cast<uint64_t>(static_cast<uint32_t>(from)) + 0x9e3779b97f4a7c15ULL;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
     x = x ^ (x >> 31);
     // Take the top 53 bits for a uniform double in [0, 1).
     return static_cast<double>(x >> 11) * (1.0 / 9007199254740992.0);  // 2^53

@@ -297,6 +297,20 @@ TEST_CASE("randomize: different seeds generally differ; same seed matches", "[un
   CHECK(a != b);        // different seeds => different perturbation (for this edge)
 }
 
+TEST_CASE("randomize: the two directions into a vertex jitter independently",
+          "[unit][constraint]") {
+  // The same airway entering vertex 5 from vertex 4 and from vertex 6: only the
+  // source differs, and that must be enough to vary the perturbation.
+  bf::RouteRequest r;
+  bf::GraphEdge e = MakeEdge(0, 0, false);
+  e.to = 5;
+  e.airway_id = 2;
+  const bf::RandomizeConstraint c(1);
+  const double west = c.Evaluate(bf::EdgeContext{e, {}, {}, 4}, r).extra_cost;
+  const double east = c.Evaluate(bf::EdgeContext{e, {}, {}, 6}, r).extra_cost;
+  CHECK(west != east);
+}
+
 // --- airway rules ----------------------------------------------------------
 // The constraint itself consumes resolved bitmask tables, so these tests build a
 // tiny two-vertex / three-airway "graph" by hand: vertex 0 matches rule 0, vertex 1
