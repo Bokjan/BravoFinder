@@ -63,6 +63,13 @@ int RunHttp(bf::service::NavDatabaseRegistry& registry, const std::string& host,
   const int rc = server.Listen(host, port);
   if (rc != 0) {
     bf::service::PrintError("cannot listen on {}:{}: {}", host, port, uv_strerror(rc));
+    // Balance the loop before tearing it down: the server's TCP handle was
+    // initialized in its constructor and the signal handlers are not set up yet,
+    // so close the handle (its close callback is a no-op, but the loop must not
+    // have an open handle left in it) and then run the loop once to drain the
+    // close, or uv_loop_close fails with "resource busy".
+    server.Close();
+    uv_run(&loop, UV_RUN_DEFAULT);
     if (const int close_rc = uv_loop_close(&loop); close_rc != 0) {
       bf::service::PrintWarning("uv_loop_close: {}", uv_strerror(close_rc));
     }

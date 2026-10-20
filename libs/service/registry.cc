@@ -25,12 +25,24 @@ Result<const NavDatabase*> NavDatabaseRegistry::Get(std::optional<uint32_t> cycl
 
   const uint32_t key = entry->cycle;
   {
+    std::unique_lock<std::mutex> lock(mutex_);
     // Fast path: already opened. Lock only the map access, not any disk I/O.
-    std::lock_guard<std::mutex> lock(mutex_);
     auto it = cache_.find(key);
     if (it != cache_.end()) {
       return Result<const NavDatabase*>::Ok(it->second.get());
     }
+    // Coalesce a burst of first requests: the first caller opens, the rest wait
+    // here rather than each running (and mostly discarding) a full open. The
+    // wait ends when the opener publishes the database -- or the failure, which
+    // leaves `opening_` without a cache entry, so a waiter retries it itself.
+    if (opening_.contains(key)) {
+      opened_cv_.wait(lock, [&] { return !opening_.contains(key); });
+      auto ready = cache_.find(key);
+      if (ready != cache_.end()) {
+        return Result<const NavDatabase*>::Ok(ready->second.get());
+      }
+    }
+    opening_.emplace(key, true);
   }
 
   // Open outside the lock so concurrent Gets for different cycles parse in
@@ -38,18 +50,19 @@ Result<const NavDatabase*> NavDatabaseRegistry::Get(std::optional<uint32_t> cycl
   // on-demand (per-airport on first query) or eager (all up front, then
   // lock-free) loading after OpenCached.
   Result<NavDatabase> opened = NavDatabase::OpenCached(entry->path, cifp_load_);
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (opened) {
+    cache_.emplace(key, std::make_unique<NavDatabase>(std::move(opened).value()));
+  }
+  opening_.erase(key);
+  // A failed open is not cached: the next caller retries it (a transient read
+  // error should not poison the cycle for the process lifetime).
+  opened_cv_.notify_all();
   if (!opened) {
     return Result<const NavDatabase*>::Err(std::move(opened).error());
   }
-
-  std::lock_guard<std::mutex> lock(mutex_);
-  // Another thread may have opened the same cycle while we parsed; keep the
-  // first winner so a returned pointer is never invalidated.
-  auto it = cache_.find(key);
-  if (it == cache_.end()) {
-    it = cache_.emplace(key, std::make_unique<NavDatabase>(std::move(opened).value())).first;
-  }
-  return Result<const NavDatabase*>::Ok(it->second.get());
+  return Result<const NavDatabase*>::Ok(cache_.at(key).get());
 }
 
 }  // namespace bf::service

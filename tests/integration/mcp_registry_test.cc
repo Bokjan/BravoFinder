@@ -152,13 +152,17 @@ TEST_CASE("mcp registry: concurrent Get is safe and consistent", "[integration][
     th.join();
   }
   // Every thread must have opened its cycle, and all requests for a given cycle
-  // must have received the one cached instance.
-  const bf::NavDatabase* canonical_2601 = reg.Get(2601).value();
-  for (int t = 0; t < kThreads; ++t) {
-    REQUIRE(results[t] != nullptr);
-    CHECK(results[t]->cycle() == requested[t]);
-    if (requested[t] == 2601) {
-      CHECK(results[t] == canonical_2601);
+  // must have received the one cached instance -- including the threads that
+  // raced on the first open, which the registry now coalesces behind one opener
+  // rather than letting each run (and discard) its own.
+  for (uint32_t cycle : {2601u, 2602u, 2603u}) {
+    const bf::NavDatabase* canonical = reg.Get(cycle).value();
+    for (int t = 0; t < kThreads; ++t) {
+      REQUIRE(results[t] != nullptr);
+      CHECK(results[t]->cycle() == requested[t]);
+      if (requested[t] == cycle) {
+        CHECK(results[t] == canonical);
+      }
     }
   }
 }

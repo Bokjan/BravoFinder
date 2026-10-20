@@ -19,12 +19,20 @@ Server::Server(uv_loop_t* loop, RequestHandler& handler, const Limits& limits)
 Server::~Server() { Close(); }
 
 int Server::Listen(const std::string& host, int port) {
-  struct sockaddr_in addr;
-  int rc = uv_ip4_addr(host.c_str(), port, &addr);
+  // A host with a ':' is an IPv6 literal ("::1", "::"); everything else is
+  // IPv4. Parsing only as IPv4 made "--host ::1" fail with EINVAL even though
+  // the listener is address-family agnostic once bound.
+  struct sockaddr_storage storage{};
+  int rc = 0;
+  if (host.find(':') != std::string::npos) {
+    rc = uv_ip6_addr(host.c_str(), port, reinterpret_cast<struct sockaddr_in6*>(&storage));
+  } else {
+    rc = uv_ip4_addr(host.c_str(), port, reinterpret_cast<struct sockaddr_in*>(&storage));
+  }
   if (rc != 0) {
     return rc;
   }
-  rc = uv_tcp_bind(&handle_, reinterpret_cast<const struct sockaddr*>(&addr), 0);
+  rc = uv_tcp_bind(&handle_, reinterpret_cast<const struct sockaddr*>(&storage), 0);
   if (rc != 0) {
     return rc;
   }
@@ -37,11 +45,12 @@ int Server::BoundPort() const {
   if (uv_tcp_getsockname(&handle_, reinterpret_cast<struct sockaddr*>(&ss), &len) != 0) {
     return -1;
   }
-  if (ss.ss_family != AF_INET) {
+  if (ss.ss_family != AF_INET && ss.ss_family != AF_INET6) {
     return -1;
   }
   // sin_port is in network byte order; read its two bytes directly so no
-  // ntohs / platform networking header is needed.
+  // ntohs / platform networking header is needed. Both families carry sin_port
+  // at the same offset within their struct.
   const auto* in4 = reinterpret_cast<const struct sockaddr_in*>(&ss);
   const auto* bytes = reinterpret_cast<const unsigned char*>(&in4->sin_port);
   return (static_cast<int>(bytes[0]) << 8) | static_cast<int>(bytes[1]);

@@ -14,11 +14,14 @@
 //
 // Thread-safety: Get is safe to call concurrently. A mutex guards only the map
 // lookup/insert, never the disk open, mirroring NavDatabase's procedure cache.
+// Concurrent first-requests for the same cycle are coalesced: one thread opens,
+// the others wait for its result instead of each running a full open.
 // The cache stores unique_ptr values and is append-only, so a returned
 // NavDatabase pointer stays valid for the registry's lifetime even when a
 // concurrent insert rehashes the map. Each opened NavDatabase is itself
 // read-only per thread-safety contract, so concurrent queries across cycles are safe.
 
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -56,6 +59,13 @@ class NavDatabaseRegistry {
   // returned pointers stable across rehash.
   std::unordered_map<uint32_t, std::unique_ptr<NavDatabase>> cache_;
   std::mutex mutex_;
+  // Cycles currently being opened, and a wake-up channel for the threads waiting
+  // on them. Without this, a burst of first requests for one cycle each ran a
+  // full OpenCached (~100 MB apiece when eager) and all but one result was
+  // discarded. Only the first caller opens; the rest wait and then find the
+  // cached database (or the same failure).
+  std::unordered_map<uint32_t, bool> opening_;  // cycle -> true while in progress
+  std::condition_variable opened_cv_;
 };
 
 }  // namespace bf::service

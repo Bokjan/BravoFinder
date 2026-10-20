@@ -121,6 +121,13 @@ int main(int argc, char** argv) {
   const int rc = server.Listen(host, port);
   if (rc != 0) {
     bf::service::PrintError("cannot listen on {}:{}: {}", host, port, uv_strerror(rc));
+    // Mirrors the MCP server's teardown: close the handle, drain the loop, then
+    // release it, so the loop does not leak an open handle on the error path.
+    server.Close();
+    uv_run(&loop, UV_RUN_DEFAULT);
+    if (const int close_rc = uv_loop_close(&loop); close_rc != 0) {
+      bf::service::PrintWarning("uv_loop_close: {}", uv_strerror(close_rc));
+    }
     return EXIT_FAILURE;
   }
 
