@@ -114,7 +114,8 @@ Result<void> CheckV2Header(sqlite3* conn) {
   return Result<void>::Ok();
 }
 
-// Map a DFD navaid_class first character to a routable WaypointKind (same as v1).
+// Map a DFD navaid_class to a routable WaypointKind (same as v1; see the class
+// layout there).
 WaypointKind NavaidKindFromClass(const std::string& cls) {
   if (cls.empty()) {
     return WaypointKind::kOther;
@@ -127,7 +128,7 @@ WaypointKind NavaidKindFromClass(const std::string& cls) {
     case 'M':
       return WaypointKind::kDme;
     default:
-      return WaypointKind::kOther;  // I/N/P or space-padded ILS component
+      return WaypointKind::kOther;  // I/N/P: ILS or MLS DME component
   }
 }
 
@@ -225,7 +226,10 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, PointDeduper& seen) {
   return ForEachRow(stmt, [&]() {
     const WaypointKind kind = NavaidKindFromClass(ColumnText(stmt, 3));
     if (kind == WaypointKind::kOther) {
-      return;  // ILS/LOC component: not enroute-routable
+      // ILS/MLS DME component: not enroute-routable. The X-Plane and Fenix
+      // loaders keep these as vertices (kDme / kOther); none carries an
+      // airway edge, so the difference only shows in ident lookups.
+      return;
     }
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
     const std::optional<Coordinate> coord = ColumnCoord(stmt, 7, 8);

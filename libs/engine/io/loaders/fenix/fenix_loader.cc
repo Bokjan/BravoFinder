@@ -827,19 +827,20 @@ void EmitTerminalProcedure(int tid, const std::unordered_map<int, Procedure>& pr
 
 // Build CifpData (procedures + runways) for each airport in `airport_ids`.
 // When `airport_ids` is null, every airport is processed (bulk path).  One
-// Terminals scan, one TerminalLegs scan, one Runways scan — the bulk path
-// scans the whole table, while the single-airport path narrows the Terminals
-// and Runways scans with an indexed `WHERE AirportID = ?` instead of a full
-// table scan plus an in-code filter.  Returns airport_id → CifpData, omitting
-// airports with neither procedures nor runways.
+// Terminals scan, one TerminalLegs scan, one Runways scan.  The single-airport
+// path filters Terminals and Runways with `WHERE AirportID = ?`, but the Fenix
+// database has no index on either AirportID column, so SQLite still scans both
+// tables (EXPLAIN QUERY PLAN: SCAN); the WHERE only saves materializing the
+// other airports' rows.  The full TerminalLegs scan in BuildLegGroups (~0.6 s
+// on 2601's 811k rows) dominates a single-airport load either way.  Returns
+// airport_id → CifpData, omitting airports with neither procedures nor runways.
 Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
     sqlite3* conn, const std::unordered_set<int>* airport_ids) {
   // Terminal → (airport, procedure type/name) + airport → terminal list.
   std::unordered_map<int, Procedure> proc_by_tid;
   std::unordered_map<int, std::vector<int>> airport_tids;
-  // Single-airport requests use an indexed WHERE; bulk scans all rows.  Either
-  // way there is one Terminals scan — the single-airport path stays O(1) on the
-  // index instead of degrading to a full table scan plus an in-code filter.
+  // Single-airport requests filter in SQL (still a table scan, see above); bulk
+  // reads every row.  Either way there is one Terminals scan.
   const bool single_airport = airport_ids != nullptr && airport_ids->size() == 1;
   {
     std::string sql =
@@ -907,8 +908,8 @@ Result<std::unordered_map<int, CifpData>> BuildAirportProcedures(
     return Result<std::unordered_map<int, CifpData>>::Err(lr.error());
   }
 
-  // Runways by airport.  The single-airport query also uses the indexed WHERE
-  // (mirrors the Terminals path above); bulk scans all rows.
+  // Runways by airport.  The single-airport query filters in SQL like the
+  // Terminals path above (still a table scan); bulk reads every row.
   std::unordered_map<int, std::vector<Runway>> runways_by_airport;
   {
     std::string rsql = single_airport ? std::format(

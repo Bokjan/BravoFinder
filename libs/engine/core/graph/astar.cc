@@ -52,8 +52,9 @@ bool EdgeAllowed(const SearchOptions& options, const GraphEdge& edge, int from,
   // Enforce the SearchOptions contract in release, not just debug: a bare
   // assert is stripped under NDEBUG and would let the Evaluate call below
   // dereference null. Refuse the edge instead so a violating caller gets "no
-  // route" rather than UB. The sole caller (NavDatabaseRouting) always sets
-  // request before pushing constraints, so this guard is defensive, not live.
+  // route" rather than UB. Production options come from AssembleConstraints
+  // (io/navdb/constraint_assembly.cc), which sets request before pushing any
+  // constraint, so this guard is defensive, not live.
   if (options.request == nullptr) {
     return false;
   }
@@ -271,7 +272,13 @@ ShortestPath FindShortestPathMulti(const NavGraph& graph,
       continue;
     }
     // With a consistent heuristic, once the cheapest open f-value cannot beat
-    // the best finished total, no remaining goal can improve it.
+    // the best finished total, no remaining goal can improve it. Consistency
+    // holds only up to float rounding: edge lengths are stored as float
+    // (GraphEdge) while the chord bound is double, and on edges shorter than
+    // about 4 NM the chord's slack under the arc is smaller than that rounding,
+    // so an edge can come out ~1e-7 NM shorter than the heuristic drop across
+    // it. At worst that reorders near-exact ties; the turn penalty's single
+    // state per vertex already gives up strict optimality by far more.
     if (top.f >= best_total) {
       break;
     }

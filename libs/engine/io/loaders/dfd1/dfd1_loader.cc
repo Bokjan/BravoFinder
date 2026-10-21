@@ -120,9 +120,13 @@ Result<void> CheckV1Header(sqlite3* conn) {
   return Result<void>::Ok();
 }
 
-// Map a DFD navaid_class first character to a routable WaypointKind. See the
-// plan: V=VOR/VOR-DME/VORTAC, D/T/M=DME/TACAN (kDme), I/N/P=ILS/MLS components
-// (kOther, skipped), leading space = ILS/LOC component (kOther, skipped).
+// Map a DFD navaid_class to a routable WaypointKind. The class is the ARINC 424
+// navaid class: column 1 is 'V' for a VOR or blank for none, column 2 the DME
+// kind (D/T/M = DME/TACAN, I = ILS/LOC DME, N/P = MLS). ColumnText trims the
+// padding, so a blank column 1 drops out and the first character is 'V' for any
+// VOR (kVor), else the DME kind: D/T/M give kDme, I/N/P give kOther (skipped as
+// ILS/MLS components). A leading space is thus a station with no VOR, not an
+// ILS marker: " DH" is a standalone DME, " IT N" an ILS DME.
 WaypointKind NavaidKindFromClass(const std::string& cls) {
   if (cls.empty()) {
     return WaypointKind::kOther;
@@ -135,7 +139,7 @@ WaypointKind NavaidKindFromClass(const std::string& cls) {
     case 'M':
       return WaypointKind::kDme;
     default:
-      return WaypointKind::kOther;  // I/N/P or space-padded ILS component
+      return WaypointKind::kOther;  // I/N/P: ILS or MLS DME component
   }
 }
 
@@ -210,7 +214,10 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, PointDeduper& seen) {
   return ForEachRow(stmt, [&]() {
     const WaypointKind kind = NavaidKindFromClass(ColumnText(stmt, 3));
     if (kind == WaypointKind::kOther) {
-      return;  // ILS/LOC component: not enroute-routable
+      // ILS/MLS DME component: not enroute-routable. The X-Plane and Fenix
+      // loaders keep these as vertices (kDme / kOther); none carries an
+      // airway edge, so the difference only shows in ident lookups.
+      return;
     }
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
     const std::optional<Coordinate> coord = ColumnCoord(stmt, 7, 8);
