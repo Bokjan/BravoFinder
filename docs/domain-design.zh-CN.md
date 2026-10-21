@@ -1,6 +1,6 @@
 # 领域建模与内存设计：值类型、Result、紧凑表示
 
-> BravoFinder 的领域类型为什么这么设计——不可变值类型、自研 `Result<T,E>`、无 `static`/无裸 `new`、以及数据驱动的紧凑内存表示（一度是 `SmallVec`，后为定长 `FixedIdent`）。这些不是零散的风格偏好，而是 v2→v3 重写的核心动机的直接体现。面向想读源码、理解设计宪法的读者。相关代码： `libs/engine/core/domain/`、`libs/engine/core/result.h`、`libs/engine/core/base/small_vec.h`。
+> BravoFinder 的领域类型为什么这么设计——不可变值类型、自研 `Result<T,E>`、无 `static`/无裸 `new`、以及数据驱动的紧凑内存表示（一度是 `SmallVec`，后为定长 `FixedIdent`）。这些不是零散的风格偏好，而是 v2→v3 重写的核心动机的直接体现。面向想读源码、理解设计宪法的读者。相关代码： `libs/engine/core/domain/`、`libs/engine/core/result.h`。
 
 ## 1. 一条主线：v2 的 static 共享 bug
 
@@ -84,7 +84,7 @@ class Result {
 - **只实现用到的操作**（`push_back`、下标、`size`、range 迭代、move），不做成通用容器。最小面 = 最少 bug。
 - **限定 trivial 元素类型**（`static_assert(std::is_trivial_v<T>)`）。堆缓冲是裸 `malloc`，元素直接赋值进去、不 placement-new、不跑析构——非 trivial 类型会 UB。static_assert 把这个约束焊死；想放开就得加真正的构造/析构管线，而这个极简类型刻意不要。
 
-**后续（2026-07 内存紧凑化 #3）：`ident_all_` 连同另外两个 lookup `unordered_map` 一起，被换成了「排序数组 + 二分」。** 起因同样是数据：一个隔离微基准（真实 27 万 idents）量出哈希表 vs 排序数组的查找只差 ~49ns/op、而内存从 ~26MB 降到 ~4MB，且查找不在 A\* 热路径——于是拿确定的内存收益换不可感知的延迟。`SmallVec` 就此失去唯一的生产使用者（类与单测保留作通用工具）。
+**后续（2026-07 内存紧凑化 #3）：`ident_all_` 连同另外两个 lookup `unordered_map` 一起，被换成了「排序数组 + 二分」。** 起因同样是数据：一个隔离微基准（真实 27 万 idents）量出哈希表 vs 排序数组的查找只差 ~49ns/op、而内存从 ~26MB 降到 ~4MB，且查找不在 A\* 热路径——于是拿确定的内存收益换不可感知的延迟。`SmallVec` 就此失去唯一的生产使用者；之后只剩它自己的单测在用，类与单测于 2026-10 一并删除（实现可在 git 历史里找到）。
 
 这恰恰是本节主线的完整弧：**局部优化要有数据支撑、且不外溢成通用抽象**——`SmallVec` 诞生自一次 profile、注释里警告别人别乱复用 `N`；而当另一份数据表明排序数组整体更优时，同一套克制又把它退役。「有数据才优化」既是它出生的理由，也是它让位的理由。
 
