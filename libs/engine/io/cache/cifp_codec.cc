@@ -49,7 +49,7 @@ struct WireProcedureLeg {
   uint32_t fix_io, fix_il, fix_ro, fix_rl;
   float fix_lat, fix_lon;  // NaN when the source gives no fix position
   uint8_t path_term;
-  double course_deg, distance_nm;
+  float course_deg, distance_nm;  // float, as in ProcedureLeg (a wider wire type adds no bits)
   uint8_t alt_kind;
   int32_t alt1_ft, alt2_ft;
   uint16_t rnp_centinm;
@@ -74,11 +74,11 @@ struct WireDirEntry {
 // leg_count * kProcedureLegSize bytes); the leg tail is fused per-procedure in
 // the read loop below against the then-remaining bytes.
 constexpr size_t kProcedureHeaderSize = sizeof(WireProcedureHeader);  // 33
-constexpr size_t kProcedureLegSize = sizeof(WireProcedureLeg);        // 56
+constexpr size_t kProcedureLegSize = sizeof(WireProcedureLeg);        // 48
 constexpr size_t kRunwaySize = sizeof(WireRunway);                    // 28
 constexpr size_t kDirEntrySize = sizeof(WireDirEntry);                // 24
 static_assert(kProcedureHeaderSize == 33, "procedure-header wire layout drifted");
-static_assert(kProcedureLegSize == 56, "procedure-leg wire layout drifted");
+static_assert(kProcedureLegSize == 48, "procedure-leg wire layout drifted");
 static_assert(kRunwaySize == 28, "runway wire layout drifted");
 static_assert(kDirEntrySize == 24, "directory-entry wire layout drifted");
 
@@ -116,8 +116,8 @@ std::vector<uint8_t> SerializeSegment(const CifpData& data, StringPool& pool) {
       w.F32(leg.fix_lat);
       w.F32(leg.fix_lon);
       w.U8(static_cast<uint8_t>(leg.path_term));
-      w.F64(leg.course_deg);
-      w.F64(leg.distance_nm);
+      w.F32(leg.course_deg);
+      w.F32(leg.distance_nm);
       w.U8(static_cast<uint8_t>(leg.alt_kind));
       w.I32(leg.alt1_ft);
       w.I32(leg.alt2_ft);
@@ -220,8 +220,8 @@ Result<CifpData> DeserializeSegment(std::span<const uint8_t> data, std::span<con
         return bad("invalid procedure path terminator");
       }
       leg.path_term = static_cast<PathTerminator>(path_byte);
-      leg.course_deg = static_cast<float>(br.F64());
-      leg.distance_nm = static_cast<float>(br.F64());
+      leg.course_deg = br.F32();
+      leg.distance_nm = br.F32();
       const uint8_t alt_byte = br.U8();
       if (alt_byte > static_cast<uint8_t>(AltConstraintKind::kBetween)) {
         return bad("invalid procedure altitude constraint");

@@ -130,7 +130,8 @@ int ParseRouteTypeToken(std::string_view token);
 //   + one byte of flag bits (1).
 // course/distance are float: CIFP source quantum is 0.1, and seed/route A/B
 // confirmed no fingerprint drift (see research/2026-08-05_struct_layout_audit).
-// Wire (cifp_codec) stores F64 for course/distance and a U8 for is_mapt.
+// Wire (cifp_codec) stores the same F32 course/distance, and is_mapt /
+// course_true as bits of one flag byte.
 struct ProcedureLeg {
   // Compact 12-byte fixed ident (vs 64B Ident): the leg array is by far the
   // largest CIFP structure (~765k legs), so this cuts eager-mode resident memory
