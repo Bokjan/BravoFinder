@@ -94,7 +94,11 @@ target_compile_features(bravofinder PUBLIC cxx_std_20)
 # Compile-time log-level gate. Levels below BF_LOG_MIN_LEVEL expand to
 # ((void)0) in log.h, their format string never entering the binary (min-size).
 # BF_LOG_FATAL is never stripped (always compiled in). Default "trace" keeps
-# everything; a min-size build may raise this.
+# everything; a min-size build may raise this. PRIVATE on purpose: the engine's
+# own sources are the only BF_LOG_* call sites in the shipped binaries (apps,
+# service and http_server log nothing through it, and log.h is not installed),
+# while tests/unit/log_test.cc includes log.h and relies on its default
+# (trace), which a PUBLIC definition would override.
 set(BF_LOG_MIN_LEVEL "trace" CACHE STRING
     "Lowest log level kept in binary (trace/debug/info/warn/error/fatal)")
 set_property(CACHE BF_LOG_MIN_LEVEL PROPERTY STRINGS trace debug info warn error fatal)
@@ -143,32 +147,28 @@ set_target_properties(bravofinder PROPERTIES EXPORT_NAME bravofinder OUTPUT_NAME
 add_library(bf::bravofinder ALIAS bravofinder)
 
 # ---------- Install / export (SDK distribution) --------------------------------
-# Public header allowlist: the FULL transitive include graph of navdb/nav_database.h
-# (the SDK entry point) plus the generated version.h. Consumers #including
-# navdb/nav_database.h reach every one of these, so all must ship. NavDatabase is
-# opaque (Pimpl): loader.h / loaders/nav_data.h / archive codecs / graph_builder stay
-# out of the install set. loader_capabilities.h is the thin public leaf for
-# NavDatabase::capabilities(). Verified: none of the installed headers pulls in
-# <sqlite3.h> (sqlite_util.h is NOT in the graph), so the SDK needs no sqlite3
-# headers.
+# Public header allowlist: exactly the transitive include graph of
+# navdb/nav_database.h (the SDK entry point) plus the generated version.h.
+# Consumers #including navdb/nav_database.h reach every one of these, so all must
+# ship, and nothing outside that graph is installed: a header no public API
+# reaches would only be dead weight that consumers might start depending on.
+# Adding an #include to any header listed here means installing its target too.
+# NavDatabase is opaque (Pimpl): loader.h / loaders/nav_data.h / archive codecs /
+# graph_builder stay out of the install set. loader_capabilities.h is the thin
+# public leaf for NavDatabase::capabilities(). Verified: none of the installed
+# headers pulls in <sqlite3.h> (sqlite_util.h is NOT in the graph), so the SDK
+# needs no sqlite3 headers.
 if(BRAVOFINDER_INSTALL)
   install(TARGETS bravofinder EXPORT bravofinderTargets
           ARCHIVE DESTINATION lib)
 
   install(FILES core/result.h                          DESTINATION include/bf/core)
   install(FILES core/base/attributes.h                 DESTINATION include/bf/core/base)
-  install(FILES core/domain/arinc_codes.h             DESTINATION include/bf/core/domain)
-  install(FILES core/domain/airport.h                  DESTINATION include/bf/core/domain)
   install(FILES core/domain/airway.h                   DESTINATION include/bf/core/domain)
   install(FILES core/domain/coordinate.h               DESTINATION include/bf/core/domain)
-  install(FILES core/domain/encoding_scale.h           DESTINATION include/bf/core/domain)
   install(FILES core/domain/fixed_string.h             DESTINATION include/bf/core/domain)
-  install(FILES core/domain/hold_fix.h                 DESTINATION include/bf/core/domain)
   install(FILES core/domain/ident.h                    DESTINATION include/bf/core/domain)
-  install(FILES core/domain/mora_grid.h                DESTINATION include/bf/core/domain)
   install(FILES core/domain/msa.h                     DESTINATION include/bf/core/domain)
-  install(FILES core/domain/nav_tokens.h              DESTINATION include/bf/core/domain)
-  install(FILES core/domain/navaid_detail.h            DESTINATION include/bf/core/domain)
   install(FILES core/domain/procedure.h                DESTINATION include/bf/core/domain)
   install(FILES core/domain/sentinels.h                DESTINATION include/bf/core/domain)
   install(FILES core/domain/waypoint.h                 DESTINATION include/bf/core/domain)
