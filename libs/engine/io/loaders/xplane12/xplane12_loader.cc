@@ -20,6 +20,7 @@
 #include "core/domain/hold_fix.h"
 #include "core/domain/ident.h"
 #include "core/domain/navaid_detail.h"
+#include "io/fs_util.h"
 #include "io/loaders/point_dedup.h"
 #include "io/loaders/xplane12/cifp_parser.h"
 
@@ -489,27 +490,28 @@ Result<std::vector<AirportProcedureData>> XPlane12Loader::LoadProcedures(
   // CIFP legs carry no positions; look each fix up in the enroute files so the
   // legs can be wired to the right one of several same-key points.
   const PointIndex index = LoadPointIndex(data_dir);
+  Result<std::vector<std::string>> files = ListFiles(cifp_dir.string(), ".dat");
+  if (!files) {
+    return Result<std::vector<AirportProcedureData>>::Err(std::move(files).error());
+  }
   std::vector<AirportProcedureData> out;
-  for (const fs::directory_entry& de : fs::directory_iterator(cifp_dir, ec)) {
-    if (!de.is_regular_file() || de.path().extension() != ".dat") {
-      continue;
-    }
+  for (const std::string& file : files.value()) {
     // The ICAO is the file stem, e.g. "CIFP/KJFK.dat" -> "KJFK". A stem that
     // cannot be an airport key (a stray file such as "KJFK.backup.dat") is
     // skipped: the cache could not store it.
-    std::string icao = de.path().stem().string();
+    std::string icao = fs::path(file).stem().string();
     if (!FixedName8::From(icao)) {
-      BF_LOG_WARN("xplane12: skipping CIFP file '{}' (not an airport ICAO)", de.path().string());
+      BF_LOG_WARN("xplane12: skipping CIFP file '{}' (not an airport ICAO)", file);
       continue;
     }
-    Result<CifpData> parsed = CifpParser::Parse(de.path().string(), LocatorFor(index, icao));
+    Result<CifpData> parsed = CifpParser::Parse(file, LocatorFor(index, icao));
     if (!parsed) {
       continue;  // skip an unreadable file; not fatal for the set as a whole
     }
     out.emplace_back(std::move(icao), std::move(parsed).value());
   }
-  // directory_iterator order is filesystem-defined; sort so the output (and the
-  // .bfdb built from it) is reproducible across machines and runs.
+  // Sort on the ICAO itself so the output (and the .bfdb built from it) is
+  // reproducible across machines and runs, independent of how files are listed.
   std::sort(out.begin(), out.end(),
             [](const AirportProcedureData& a, const AirportProcedureData& b) {
               return a.first < b.first;

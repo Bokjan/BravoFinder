@@ -31,6 +31,7 @@
 #include "core/domain/procedure.h"
 #include "core/domain/waypoint.h"
 #include "core/result.h"
+#include "io/fs_util.h"
 #include "io/loaders/loader_constants.h"
 #include "io/loaders/nav_data.h"
 #include "io/loaders/point_dedup.h"
@@ -74,10 +75,12 @@ Result<std::string> FindFenixDb(const std::string& source_dir) {
       return Result<std::string>::Ok(p.string());
     }
   }
-  for (const fs::directory_entry& de : fs::directory_iterator(source_dir, ec)) {
-    if (de.is_regular_file() && de.path().extension() == ".db3") {
-      return Result<std::string>::Ok(de.path().string());
-    }
+  Result<std::vector<std::string>> found = ListFiles(source_dir, ".db3");
+  if (!found) {
+    return Result<std::string>::Err(std::move(found).error());
+  }
+  if (!found.value().empty()) {
+    return Result<std::string>::Ok(std::move(found.value().front()));
   }
   return Result<std::string>::Err(
       Error(ErrorCode::kDataMissing, "no Fenix .db3 under " + source_dir));

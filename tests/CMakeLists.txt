@@ -22,6 +22,7 @@ add_executable(bf_tests
                unit/mora_grid_test.cc
                unit/codec_fuzz_test.cc
                unit/bfdb_naming_test.cc
+               unit/fs_util_test.cc
                unit/byte_io_test.cc
                unit/nav_detail_codec_test.cc
                unit/query_render_test.cc

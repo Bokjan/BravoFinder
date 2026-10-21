@@ -2,6 +2,7 @@
 #include "io/cache/bfdb_inventory.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -79,12 +80,14 @@ TEST_CASE("inventory: scans a directory of caches indexed by cycle", "[integrati
 
 TEST_CASE("inventory: same-cycle duplicates keep one and record the rest",
           "[integration][inventory]") {
-  const fs::path dir = TempDir("dup");
   // Two files with the same header cycle but different names. Only one wins per
-  // cycle; the other is surfaced in discarded(), not silently dropped. (There is
-  // no build stamp to rank them by anymore.)
+  // cycle -- the one named for its cycle, wherever it falls in the listing --
+  // and the other is surfaced in discarded(), not silently dropped.
+  const char* stray = GENERATE("nav.bfdb", "nav_9998.bfdb");  // sorts before / after
+  const fs::path dir = TempDir("dup");
   WriteCacheAt((dir / "nav_2601.bfdb").string(), 2601);
-  WriteCacheAt((dir / "nav_9998.bfdb").string(), 2601);  // header says 2601 too
+  WriteCacheAt((dir / stray).string(), 2601);  // header says 2601 too
+  CAPTURE(stray);
 
   bf::Result<bf::BfdbInventory> inv = bf::BfdbInventory::Scan(dir.string());
   REQUIRE(inv);
@@ -92,8 +95,27 @@ TEST_CASE("inventory: same-cycle duplicates keep one and record the rest",
 
   REQUIRE(v.entries().size() == 1);
   CHECK(v.entries()[0].cycle == 2601);
+  CHECK(v.entries()[0].path == (dir / "nav_2601.bfdb").string());
   REQUIRE(v.discarded().size() == 1);
   CHECK(v.discarded()[0].cycle == 2601);
+  CHECK(v.discarded()[0].path == (dir / stray).string());
+}
+
+TEST_CASE("inventory: among same-cycle strays the first in path order wins",
+          "[integration][inventory]") {
+  // Neither file carries the canonical name for 2601, so the tie breaks on the
+  // path -- not on the order the filesystem happens to list them in.
+  const fs::path dir = TempDir("dup_stray");
+  WriteCacheAt((dir / "nav_9998.bfdb").string(), 2601);
+  WriteCacheAt((dir / "nav_9997.bfdb").string(), 2601);
+
+  bf::Result<bf::BfdbInventory> inv = bf::BfdbInventory::Scan(dir.string());
+  REQUIRE(inv);
+  const bf::BfdbInventory& v = inv.value();
+  REQUIRE(v.entries().size() == 1);
+  CHECK(v.entries()[0].path == (dir / "nav_9997.bfdb").string());
+  REQUIRE(v.discarded().size() == 1);
+  CHECK(v.discarded()[0].path == (dir / "nav_9998.bfdb").string());
 }
 
 TEST_CASE("inventory: header is authoritative over a misleading filename",

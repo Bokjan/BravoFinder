@@ -43,6 +43,7 @@ add_library(bravofinder STATIC
   ${_bf_yen}
   core/routing/route_parser.cc
   core/routing/route_string.cc
+  io/fs_util.cc
   io/loaders/sqlite_util.cc
   io/loaders/loader_registry.cc
   io/loaders/dfd1/dfd1_loader.cc

@@ -4,36 +4,37 @@
 #include <algorithm>
 #include <cassert>
 #include <filesystem>
-#include <system_error>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "io/cache/bfdb_naming.h"
 #include "io/cache/unified_cache.h"
+#include "io/fs_util.h"
 
 namespace bf {
 
 namespace fs = std::filesystem;
 
 Result<BfdbInventory> BfdbInventory::Scan(const std::string& dir) {
-  std::error_code ec;
-  fs::directory_iterator it(dir, ec);
-  if (ec) {
-    return Result<BfdbInventory>::Err(Error(
-        ErrorCode::kDataMissing, "cannot read directory: " + dir + " (" + ec.message() + ")"));
+  // ListFiles never throws (a range-for over directory_iterator would, on an
+  // unreadable entry) and returns the files in a fixed order.
+  Result<std::vector<std::string>> files = ListFiles(dir, ".bfdb");
+  if (!files) {
+    return Result<BfdbInventory>::Err(std::move(files).error());
   }
 
   BfdbInventory inv;
   // Best cache seen per cycle so far. The header is authoritative for the cycle;
   // ParseBfdbName only gates which files we bother opening.
   std::unordered_map<uint32_t, BfdbEntry> best;
+  const auto canonical = [](const BfdbEntry& e) {
+    return fs::path(e.path).filename().string() == FormatBfdbName(e.cycle);
+  };
 
-  for (const fs::directory_entry& de : it) {
-    if (!de.is_regular_file(ec) || ec) {
-      continue;
-    }
+  for (const std::string& path : files.value()) {
     // Only "nav_<cycle>.bfdb" names are candidates.
-    const std::string path = de.path().string();
-    if (!ParseBfdbName(de.path().filename().string())) {
+    if (!ParseBfdbName(path)) {
       continue;
     }
     // The filename got us here; the header decides the real cycle.
@@ -46,11 +47,13 @@ Result<BfdbInventory> BfdbInventory::Scan(const std::string& dir) {
     auto found = best.find(entry.cycle);
     if (found == best.end()) {
       best.emplace(entry.cycle, entry);
-    } else {
-      // No build stamp to rank same-cycle files by: the later-scanned file wins
-      // and the previous one is surfaced in discarded() rather than dropped.
+    } else if (canonical(entry) && !canonical(found->second)) {
+      // The file named for its own cycle beats a stray copy (a legacy
+      // nav.bfdb, a renamed file); otherwise the first in path order stays.
       inv.discarded_.push_back(found->second);
       found->second = entry;
+    } else {
+      inv.discarded_.push_back(entry);
     }
   }
 

@@ -192,6 +192,10 @@ int main(int argc, char** argv) {
   for (const std::string& skipped : inventory.value().skipped()) {
     bf::service::PrintWarning("ignoring unreadable cache '{}'", skipped);
   }
+  for (const bf::BfdbEntry& shadowed : inventory.value().discarded()) {
+    bf::service::PrintWarning("ignoring cache '{}': cycle {} is served from '{}'", shadowed.path,
+                              shadowed.cycle, inventory.value().Find(shadowed.cycle)->path);
+  }
   const size_t cycle_count = inventory.value().entries().size();
   const auto cifp_mode = cifp_load == "eager" ? bf::CifpLoad::kEager : bf::CifpLoad::kOnDemand;
   bf::service::NavDatabaseRegistry registry(std::move(inventory.value()), cifp_mode);

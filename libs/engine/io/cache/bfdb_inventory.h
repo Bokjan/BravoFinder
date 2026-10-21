@@ -8,9 +8,11 @@
 // renamed file is still cataloged correctly. The filename is used only to find
 // candidate files (nav_*.bfdb); see bfdb_naming.h.
 //
-// When several caches share a cycle, the last one scanned wins and the rest are
-// recorded in discarded() -- never silently dropped -- so the caller can report
-// them. (There is no `build` stamp to rank same-cycle files by anymore.)
+// When several caches share a cycle, one wins and the rest are recorded in
+// discarded() -- never silently dropped -- so the caller can report them. The
+// winner is the file carrying the canonical name for its cycle
+// (FormatBfdbName), else the first in path order; either way the choice does
+// not depend on the order the filesystem lists the directory in.
 
 #include <cstdint>
 #include <optional>
@@ -39,7 +41,7 @@ class BfdbInventory {
   // directory held no valid caches.
   const std::vector<BfdbEntry>& entries() const { return entries_; }
 
-  // Same-cycle caches shadowed by a later-scanned winner, and files skipped for
+  // Same-cycle caches shadowed by the winner, and files skipped for
   // a bad/unreadable header. Non-authoritative; exposed so a caller can warn
   // rather than have coverage silently reduced.
   const std::vector<BfdbEntry>& discarded() const { return discarded_; }
