@@ -61,7 +61,7 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 > User-facing CLI usage (`bf build` / `bf route` arguments) lives in README; this section only lists the presets you must run after making changes. **Always use `--preset`, never the path form.**
 ```
 cmake --preset debug      # Debug + ASan/UBSan + warnings-as-errors
-cmake --preset release    # Release -O2
+cmake --preset release    # Release -O3 (CMake's Release default)
 cmake --preset tsan       # ThreadSanitizer (concurrency verification)
 cmake --build --preset <debug|release|tsan> -j 32
 ctest --preset <debug|release|tsan> -j 32

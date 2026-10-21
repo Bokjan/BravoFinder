@@ -122,7 +122,7 @@ target_compile_definitions(bravofinder PRIVATE BF_LOG_MIN_LEVEL=${_bf_log_level_
 # (serialized default) plus per-connection SQLITE_OPEN_NOMUTEX (thread_local
 # connections, never shared across threads) gives correct, lock-free reads.
 #
-# sqlite3.c stays at the config's full -O3/-O2 (not downgraded): it is the single
+# sqlite3.c stays at the config's full optimization level (not downgraded): it is the single
 # slowest TU (~21s under release -O3 on one core), so to keep it off the
 # parallel-build critical path on low-core machines it is listed FIRST in the
 # source list above (starts at t=0 instead of queuing ~7s behind the ~23 C++

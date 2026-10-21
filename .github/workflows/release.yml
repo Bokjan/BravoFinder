@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.0
 
-      # ccache on Linux/macOS: Apple clang -O2 takes ~25 min on the full build
+      # ccache on Linux/macOS: Apple clang -O3 takes ~25 min on the full build
       # (Catch2 + sqlite3.c). A stable bucket keyed on (os, preset) -- NOT the
       # tag or sha -- is shared across release tags, so v3.7.1-test warms it and
       # the real v3.7.1 release hits it (same key, no ref/sha in it). ccache

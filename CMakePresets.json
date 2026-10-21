@@ -26,11 +26,11 @@
     },
     {
       "name": "release",
-      "displayName": "Release (-O2)",
+      "displayName": "Release (-O3)",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_FLAGS": "-O2 -Wall -Wextra"
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra"
       }
     },
     {
