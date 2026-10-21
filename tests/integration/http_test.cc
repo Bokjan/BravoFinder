@@ -31,6 +31,8 @@ TEST_CASE("http server e2e: skipped on Windows", "[integration][http]") {
 #include <chrono>
 #include <cstdint>
 #include <future>
+#include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -54,14 +56,18 @@ using bf::test::NavDataDir;
 // A bf-http server on its own loop thread, bound to a loopback port. The port is
 // handed back through a promise once Listen succeeds. The destructor lets any
 // in-flight work and client disconnects drain, then stops the loop and joins.
+// It serves the REST Router over `registry`, or any other `handler` (which must
+// outlive the harness) for transport-only checks.
 class ServerHarness {
  public:
   ServerHarness(bf::service::NavDatabaseRegistry& registry, const bf::http_server::Limits& limits)
-      : registry_(registry), limits_(limits) {
-    std::promise<int> port_promise;
-    std::future<int> port_future = port_promise.get_future();
-    thread_ = std::thread([this, p = std::move(port_promise)]() mutable { RunLoop(std::move(p)); });
-    port_ = port_future.get();
+      : registry_(&registry), limits_(limits) {
+    Start();
+  }
+
+  ServerHarness(bf::http_server::RequestHandler& handler, const bf::http_server::Limits& limits)
+      : handler_(&handler), limits_(limits) {
+    Start();
   }
 
   ~ServerHarness() {
@@ -76,6 +82,13 @@ class ServerHarness {
   int port() const { return port_; }
 
  private:
+  void Start() {
+    std::promise<int> port_promise;
+    std::future<int> port_future = port_promise.get_future();
+    thread_ = std::thread([this, p = std::move(port_promise)]() mutable { RunLoop(std::move(p)); });
+    port_ = port_future.get();
+  }
+
   void RunLoop(std::promise<int> port_promise) {
     uv_loop_init(&loop_);
     uv_async_init(&loop_, &stop_, [](uv_async_t* a) {
@@ -87,8 +100,12 @@ class ServerHarness {
       server->Shutdown();
       uv_close(reinterpret_cast<uv_handle_t*>(a), nullptr);
     });
-    bf::http::Router router(registry_, &loop_, "127.0.0.1");
-    bf::http_server::Server server(&loop_, router, limits_);
+    std::optional<bf::http::Router> router;
+    bf::http_server::RequestHandler* handler = handler_;
+    if (handler == nullptr) {
+      handler = &router.emplace(*registry_, &loop_, "127.0.0.1");
+    }
+    bf::http_server::Server server(&loop_, *handler, limits_);
     // The async callback needs the server for Shutdown. Safe to set before the
     // send: the destructor cannot fire the async until the ctor has returned,
     // which is after port_promise is fulfilled below.
@@ -110,7 +127,8 @@ class ServerHarness {
     uv_loop_close(&loop_);
   }
 
-  bf::service::NavDatabaseRegistry& registry_;
+  bf::service::NavDatabaseRegistry* registry_ = nullptr;
+  bf::http_server::RequestHandler* handler_ = nullptr;
   bf::http_server::Limits limits_;
   uv_loop_t loop_{};
   uv_async_t stop_{};
@@ -259,6 +277,21 @@ std::string RoundTrip(int port, const std::string& request) {
   close(fd);
   return response;
 }
+
+// Answers every request inline with one large body and then closes. A client
+// that never reads leaves that write queued, which only the write-stall
+// timeout can end.
+class LargeBodyHandler : public bf::http_server::RequestHandler {
+ public:
+  explicit LargeBodyHandler(size_t bytes) : body_(bytes, 'x') {}
+  void Handle(std::shared_ptr<bf::http_server::Connection> conn,
+              const bf::http_server::HttpRequest& /*req*/) override {
+    conn->WriteResponse(200, body_, false);
+  }
+
+ private:
+  std::string body_;
+};
 
 }  // namespace
 
@@ -583,6 +616,40 @@ TEST_CASE("http hardening: header limits and idle timeout", "[integration][http]
     close(extra);
     close(held);
   }
+}
+
+TEST_CASE("http hardening: a client that stops reading is dropped after the io timeout",
+          "[integration][http]") {
+  signal(SIGPIPE, SIG_IGN);
+  // Far more than the loopback socket buffers hold (a few MB each side), so most
+  // of the response is still queued in the server's uv_write when the client
+  // stops reading and the TCP window closes.
+  constexpr size_t kBodyBytes = size_t{64} << 20;
+  LargeBodyHandler handler(kBodyBytes);
+  bf::http_server::Limits limits;
+  limits.io_timeout_ms = 300;
+  ServerHarness harness(handler, limits);
+  REQUIRE(harness.port() > 0);
+  const int fd = ConnectTo(harness.port());
+  REQUIRE(fd >= 0);
+  REQUIRE(SendAll(fd, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"));
+  // Stall for several io timeouts. A server without a write deadline keeps the
+  // connection (and its max_connections slot) for as long as the client waits.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  // Drain what the kernel buffers already hold: the server has closed, so the
+  // stream ends well short of the full response instead of delivering it all.
+  size_t received = 0;
+  char buf[64 * 1024];
+  while (true) {
+    const ssize_t n = recv(fd, buf, sizeof(buf), 0);
+    if (n <= 0) {
+      break;
+    }
+    received += static_cast<size_t>(n);
+  }
+  close(fd);
+  CHECK(received > 0);
+  CHECK(received < kBodyBytes);
 }
 
 #endif  // _WIN32

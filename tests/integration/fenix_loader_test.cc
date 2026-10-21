@@ -87,6 +87,10 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
     CHECK(!fd.data.mora.Empty());
     CHECK(fd.data.msa.empty());
   }
+  SECTION("cycle") {
+    // The loader reads the AIRAC cycle from the config table's CycleName row.
+    CHECK(fd.data.cycle == 2601);
+  }
   SECTION("waypoint coords") {
     int bad = 0, reg_long = 0;
     for (const auto& w : fd.data.waypoints) {

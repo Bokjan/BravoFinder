@@ -744,4 +744,77 @@ TEST_CASE("multi-source Yen finds the same k cheapest as exhaustive search", "[u
   CHECK(checked > 150);
 }
 
+TEST_CASE("A* and Yen costs match CostOfPath with turn penalties on random graphs", "[unit][yen]") {
+  // The turn penalty makes the cost path-dependent, so the searches track it
+  // incrementally; CostOfPathMulti re-prices a finished path from scratch. The
+  // two must agree on every returned path, including bearing-less endpoints.
+  std::mt19937 rng(0x7A2B);  // fixed seed: reproducible
+  std::uniform_int_distribution<int> n_dist(4, 15);
+  std::uniform_real_distribution<double> seed(0.0, 20.0);
+  std::uniform_real_distribution<double> bearing(0.0, 360.0);
+  std::bernoulli_distribution has_bearing(0.7);
+  bf::SearchOptions opts;
+  opts.turn_penalty.enabled = true;
+  int checked = 0;
+  for (int trial = 0; trial < 200; ++trial) {
+    const int n = n_dist(rng);
+    bf::GraphBuilder builder = MakeBuilder(MakeRandomData(rng, n, n));
+    const bf::NavGraph& graph = builder.graph();
+    std::uniform_int_distribution<int> vpick(0, n - 1);
+    std::set<int> used;
+    std::vector<bf::SeededEndpoint> sources, goals;
+    std::vector<double> source_bearing(n, bf::kNoBearing);
+    std::vector<double> goal_bearing(n, bf::kNoBearing);
+    for (int t = 0; t < 4; ++t) {
+      const int v = vpick(rng);
+      if (!used.insert(v).second) {
+        continue;
+      }
+      const double b = has_bearing(rng) ? bearing(rng) : bf::kNoBearing;
+      if (t < 2) {
+        sources.push_back({v, seed(rng), b});
+        source_bearing[v] = b;
+      } else {
+        goals.push_back({v, seed(rng), b});
+        goal_bearing[v] = b;
+      }
+    }
+    if (sources.empty() || goals.empty()) {
+      continue;
+    }
+    const std::vector<double> src_seed = RefSeedTable(sources, n);
+    const std::vector<double> goal_seed = RefSeedTable(goals, n);
+    const auto recost = [&](const bf::ShortestPath& p) {
+      double cost = 0.0, dist = 0.0;
+      REQUIRE(bf::CostOfPathMulti(graph, p.vertices, src_seed, goal_seed, source_bearing,
+                                  goal_bearing, opts, cost, dist));
+      CHECK_THAT(p.cost, Catch::Matchers::WithinRel(cost, 1e-9));
+      CHECK_THAT(p.distance_nm, Catch::Matchers::WithinRel(dist, 1e-9));
+    };
+    CAPTURE(trial);
+    const bf::ShortestPath best = bf::FindShortestPathMulti(graph, sources, goals, opts);
+    const int k = 1 + (trial % 10);
+    const std::vector<bf::ShortestPath> paths =
+        bf::FindKShortestPathsMulti(graph, sources, goals, k, opts);
+    REQUIRE(best.found == !paths.empty());
+    if (!best.found) {
+      continue;
+    }
+    recost(best);
+    CHECK(paths.front().vertices == best.vertices);
+    std::set<std::vector<int>> seen;
+    for (const bf::ShortestPath& p : paths) {
+      REQUIRE(p.found);
+      REQUIRE_FALSE(p.vertices.empty());
+      CHECK(src_seed[p.vertices.front()] >= 0.0);
+      CHECK(goal_seed[p.vertices.back()] >= 0.0);
+      CHECK(std::set<int>(p.vertices.begin(), p.vertices.end()).size() == p.vertices.size());
+      CHECK(seen.insert(p.vertices).second);
+      recost(p);
+    }
+    ++checked;
+  }
+  CHECK(checked > 150);
+}
+
 }  // namespace

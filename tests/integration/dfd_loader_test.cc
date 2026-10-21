@@ -464,34 +464,27 @@ TEST_CASE("dfd: AROKE fix coordinate matches across loaders", "[integration][dfd
   CHECK(std::fabs(a1->coord.longitude - a2->coord.longitude) < 1e-6);
 }
 
-TEST_CASE("dfd/xplane: KJFK procedure legs agree on rnp/turn/speed across loaders",
+TEST_CASE("KJFK procedure legs agree field by field across all four loaders",
           "[integration][dfd]") {
-  // The three leg fields (rnp/turn/speed) derive from the same underlying ARINC
-  // source, so a leg identified the same way (procedure name + transition + fix +
-  // path terminator) must carry identical values whether parsed from the X-Plane
-  // CIFP file or the DFD v1 SQLite database. This is both the cross-loader
-  // consistency net and the check that the X-Plane column mapping is correct.
+  // Every leg field derives from the same underlying ARINC 424 source, so a leg
+  // identified the same way (procedure name + transition + fix + path
+  // terminator) must carry the same values whether parsed from the X-Plane CIFP
+  // file, either DFD SQLite version, or the Fenix database. X-Plane is the
+  // reference; each other loader is compared against it. This is both the
+  // cross-loader consistency net and the check of each loader's column mapping.
   const std::string xp = EnsureXPlane12();  // captured before EnsureDfd1 overwrites env
   const std::string d1 = EnsureDfd1();
-  if (d1.empty() || !HasCifp(xp, "KJFK")) {
-    SKIP("xplane12 CIFP and/or DFD v1 data not found");
+  const std::string d2 = EnsureDfd2();
+  bf::test::SetNavDataDir("navdata/fenix");
+  const std::string fx = bf::test::NavDataDir();
+  if (d1.empty() || d2.empty() || !bf::test::HasDb3(fx) || !HasCifp(xp, "KJFK")) {
+    SKIP("needs navdata/xplane12 CIFP, dfd1, dfd2 and fenix");
   }
 
-  bf::Result<bf::CifpData> xplane = bf::CifpParser::Parse(xp + "/CIFP/KJFK.dat");
-  REQUIRE(xplane);
-  bf::Dfd1Loader loader;
-  std::optional<bf::CifpData> dfd = Loaded(loader.LoadProcedure(d1, "KJFK"));
-  REQUIRE(dfd.has_value());
-
-  struct Extras {
-    uint16_t rnp;
-    char turn;
-    uint16_t speed;
-  };
   // Key a leg by name|transition|fix|path_term. Keys occurring more than once in
   // one dataset are ambiguous (can't line up which is which), so drop them.
   auto index = [](const bf::CifpData& c) {
-    std::unordered_map<std::string, Extras> unique;
+    std::unordered_map<std::string, bf::ProcedureLeg> unique;
     std::unordered_map<std::string, int> counts;
     for (const bf::Procedure& p : c.procedures) {
       for (const bf::ProcedureLeg& leg : p.legs) {
@@ -499,7 +492,7 @@ TEST_CASE("dfd/xplane: KJFK procedure legs agree on rnp/turn/speed across loader
                           std::string(leg.fix.IdentView()) + "|" +
                           bf::PathTerminatorName(leg.path_term);
         if (++counts[key] == 1) {
-          unique[key] = Extras{leg.rnp_centinm, leg.turn_dir, leg.speed_limit_kt};
+          unique.emplace(key, leg);
         } else {
           unique.erase(key);
         }
@@ -507,33 +500,77 @@ TEST_CASE("dfd/xplane: KJFK procedure legs agree on rnp/turn/speed across loader
     }
     return unique;
   };
-  const std::unordered_map<std::string, Extras> xa = index(xplane.value());
-  const std::unordered_map<std::string, Extras> db = index(*dfd);
+  bf::Result<bf::CifpData> xplane = bf::CifpParser::Parse(xp + "/CIFP/KJFK.dat");
+  REQUIRE(xplane);
+  const std::unordered_map<std::string, bf::ProcedureLeg> ref = index(xplane.value());
 
-  int matched = 0;
-  int with_rnp = 0;
-  int with_speed = 0;
-  for (const auto& [key, xe] : xa) {
-    auto it = db.find(key);
-    if (it == db.end()) {
-      continue;
+  // Fenix's database is lossier than ARINC 424: it has no RNP column, its Alt
+  // text drops the glide-slope / intercept descriptors (MEALS "H 1800" is stored
+  // as "01800", read as kAt) and writes "MAP" with no altitude at a missed
+  // approach point, and it gives hold legs a length where ARINC has a time
+  // (DPK HM "T010" vs 4.0 NM). Those fields are only checked where Fenix has
+  // them; everything it carries in full is compared exactly.
+  struct Other {
+    const char* name;
+    std::string dir;
+    std::unique_ptr<bf::Loader> loader;
+    bool full_arinc = true;
+  };
+  std::vector<Other> others;
+  others.push_back({"dfd1", d1, std::make_unique<bf::Dfd1Loader>()});
+  others.push_back({"dfd2", d2, std::make_unique<bf::Dfd2Loader>()});
+  others.push_back({"fenix", fx, std::make_unique<bf::FenixLoader>(), false});
+  for (const Other& o : others) {
+    INFO("loader " << o.name);
+    std::optional<bf::CifpData> data = Loaded(o.loader->LoadProcedure(o.dir, "KJFK"));
+    REQUIRE(data.has_value());
+    const std::unordered_map<std::string, bf::ProcedureLeg> legs = index(*data);
+    int matched = 0;
+    int with_rnp = 0;
+    int with_speed = 0;
+    int with_alt = 0;
+    for (const auto& [key, x] : ref) {
+      auto it = legs.find(key);
+      if (it == legs.end()) {
+        continue;
+      }
+      INFO("leg " << key);
+      const bf::ProcedureLeg& y = it->second;
+      ++matched;
+      CHECK(x.turn_dir == y.turn_dir);
+      CHECK(x.speed_limit_kt == y.speed_limit_kt);
+      CHECK(x.is_mapt == y.is_mapt);
+      CHECK(x.course_true == y.course_true);
+      // ARINC 424 gives an RF leg no course: X-Plane and DFD v2 leave it blank,
+      // while the PMDG DFD v1 and Fenix databases fill one in (R13L JEVNI 133.2).
+      if (x.path_term != bf::PathTerminator::kRF) {
+        CHECK(std::fabs(x.course_deg - y.course_deg) < 0.15f);
+      }
+      const bool hold = x.path_term == bf::PathTerminator::kHA ||
+                        x.path_term == bf::PathTerminator::kHF ||
+                        x.path_term == bf::PathTerminator::kHM;
+      if (o.full_arinc || !hold) {
+        CHECK(std::fabs(x.distance_nm - y.distance_nm) < 0.15f);
+      }
+      if (o.full_arinc) {
+        CHECK(x.rnp_centinm == y.rnp_centinm);
+        CHECK(x.alt_kind == y.alt_kind);
+      }
+      if (o.full_arinc || y.alt_kind != bf::AltConstraintKind::kNone) {
+        CHECK(x.alt1_ft == y.alt1_ft);
+        CHECK(x.alt2_ft == y.alt2_ft);
+      }
+      with_rnp += y.rnp_centinm > 0 ? 1 : 0;
+      with_speed += y.speed_limit_kt > 0 ? 1 : 0;
+      with_alt += y.alt_kind != bf::AltConstraintKind::kNone ? 1 : 0;
     }
-    ++matched;
-    CHECK(xe.rnp == it->second.rnp);
-    CHECK(xe.turn == it->second.turn);
-    CHECK(xe.speed == it->second.speed);
-    if (xe.rnp > 0) {
-      ++with_rnp;
-    }
-    if (xe.speed > 0) {
-      ++with_speed;
-    }
+    // KJFK must share many legs, and the fields must actually populate (not a
+    // vacuous all-zero match).
+    CHECK(matched > 20);
+    CHECK((with_rnp > 0) == o.full_arinc);
+    CHECK(with_speed > 0);
+    CHECK(with_alt > 0);
   }
-  // KJFK must share many legs, and the new fields must actually populate (not a
-  // vacuous all-zero match), so require some non-zero rnp and speed among them.
-  CHECK(matched > 20);
-  CHECK(with_rnp > 0);
-  CHECK(with_speed > 0);
 }
 
 // ---------------------------------------------------------------------------
