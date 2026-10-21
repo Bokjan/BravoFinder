@@ -52,9 +52,11 @@ jobs:
 
       - name: Install ccache (macOS)
         if: runner.os == 'macOS'
-        run: |
-          export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
-          brew install ccache
+        # No HOMEBREW_NO_REQUIRE_TAP_TRUST: ccache comes from the official
+        # homebrew/core tap, and current Homebrew deprecates that variable
+        # ("Use `brew trust` for each non-official tap..."), so setting it only
+        # adds a deprecation line to every macOS job.
+        run: brew install ccache
 
       - name: Cache ccache (Linux)
         if: runner.os == 'Linux'
