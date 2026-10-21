@@ -83,7 +83,10 @@ class MoraConstraint : public Constraint {
     // Points along the great circle by spherical linear interpolation between
     // the endpoints' unit vectors. Each piece starts where the last ended, with
     // its longitude unwrapped relative to it so a piece never wraps.
-    const auto unit = [kDegToRad](const Coordinate& c) {
+    // kDegToRad is constexpr, so the lambda reads it as a constant expression
+    // and must not capture it: an explicit capture of a constexpr local is
+    // rejected by clang as -Wunused-lambda-capture (warnings-as-errors in CI).
+    const auto unit = [](const Coordinate& c) {
       const double lat = c.latitude * kDegToRad;
       const double lon = c.longitude * kDegToRad;
       return std::array<double, 3>{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon),
