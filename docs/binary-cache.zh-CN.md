@@ -122,7 +122,7 @@ uint8  level        // AirwayLevel low/high/both 的原始 enum 值（三态互�
 
 统一后有清晰的两层：
 
-- **容器 `UnifiedCache`**：唯一做文件 I/O 的一层，拥有文件头、段表、全局池、以及**唯一**的容器级 `format_version`。`Build` 编排三段 codec 写盘，`Open` 读回并分发，`ReadHeader` 只读容器头（cycle + provenance）供 `BfdbInventory` 廉价编目。
+- **容器 `UnifiedCache`**：唯一做文件 I/O 的一层，拥有文件头、段表、全局池、以及**唯一**的容器级 `format_version`。`Build` 编排三段 codec 写盘，`Open` 读回并分发，`ReadHeader` 只读容器头（cycle + provenance）供 `BfdbInventory` 廉价编目。`Build` 先写同目录下的临时文件 `<path>.<随机>.tmp`，写完、`close()` 校验通过后再一次 rename 覆盖目标：重建中途失败不会毁掉旧缓存，正持有旧文件的服务进程也继续读到完整的旧文件（Windows 上走 POSIX 语义 rename，读端句柄带 `FILE_SHARE_DELETE` 才不挡替换）。`Open` 从头到尾只用一个 `PreadFile` 句柄，并把它交给 `CifpArchive` 做惰性段读取，所以文件头和 CIFP 段一定来自同一个文件，不会因为两次打开之间路径被替换而错配。同一目录里若有多个同 cycle 的缓存，`BfdbInventory` 取文件名恰为该 cycle 规范名（`nav_<cycle>.bfdb`）的那个，否则取路径序第一个；落选的进 `discarded()`，`bf-http` / `bf-mcp` 启动时逐个告警。
 - **三段 codec `GraphCodec`/`CifpCodec`/`NavDetailCodec`**：只管「结构体 ↔ bytes」，不碰文件、不写文件头、无自己的版本号。`Encode(…, ByteWriter&, StringPool&)` 把段体追加进容器给的 writer、把串 intern 进容器给的全局池；`Decode(bytes, pool)` 反之。
 
 这也解释了 `GraphSnapshot` 为何只剩纯图数据：cycle/provenance/data_dir 全部上移容器头，只存一份，不再每段重复。（旧 `graph_cache.*`/`cifp_cache.*`/`nav_detail_cache.*` 已改名 `*_codec.*`—— `_cache` 暗示持久化/文件读写，语义已归容器；`_codec` 精确描述新职责。）
