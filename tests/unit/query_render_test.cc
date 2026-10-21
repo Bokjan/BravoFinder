@@ -128,12 +128,34 @@ TEST_CASE("RenderAirways: directed segment line", "[unit][render]") {
   s.from = FixedName("ABC");
   s.to = FixedName("DEF");
   s.distance_nm = 12.5;
-  s.high = false;
+  s.level = bf::AirwayLevel::kLow;
   s.base_fl = 120;
   s.top_fl = 180;
   a.segments.push_back(s);
   const std::string text = bf::service::RenderAirways(Text(), {"Y28"}, {a});
   CHECK(text == "Y28: 1 segments\n  ABC -> DEF  12.5 NM  low  FL120-180\n");
+}
+
+TEST_CASE("RenderAirways: a both-level segment is not shown as low", "[unit][render]") {
+  bf::AirwayInfo a;
+  a.name = "UL9";
+  bf::AirwayLeg s;
+  s.from = FixedName("ABC");
+  s.to = FixedName("DEF");
+  s.distance_nm = 12.5;
+  s.level = bf::AirwayLevel::kBoth;
+  a.segments.push_back(s);
+  const std::string text = bf::service::RenderAirways(Text(), {"UL9"}, {a});
+  CHECK(text == "UL9: 1 segments\n  ABC -> DEF  12.5 NM  both  FL0-0\n");
+
+  const std::string json = bf::service::RenderAirways(Json(), {"UL9"}, {a});
+  rapidjson::Document doc;
+  doc.Parse(json.c_str());
+  REQUIRE(doc.IsArray());
+  REQUIRE(doc.Size() == 1);
+  const auto& seg = doc[0]["segments"][0];
+  CHECK(std::string_view(seg["level"].GetString()) == "both");
+  CHECK(seg["high"].GetBool() == false);  // unchanged: true only for high-only
 }
 
 TEST_CASE("RenderProcedures: summary list text", "[unit][render]") {

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "core/domain/airway.h"
 #include "core/domain/coordinate.h"
 #include "core/domain/fixed_string.h"
 #include "core/domain/procedure.h"
@@ -93,9 +94,9 @@ struct AirwayLeg {
   FixedName8 from{};  // fix ident (no region)
   FixedName8 to{};    // fix ident (no region)
   double distance_nm = 0.0;
-  bool high = false;  // Jet (high) airway segment; false = Victor (low)
-  int base_fl = 0;    // lowest usable flight level (0 = no limit)
-  int top_fl = 0;     // highest usable flight level (0 = no limit)
+  AirwayLevel level = AirwayLevel::kLow;  // low (Victor), high (Jet) or both
+  int base_fl = 0;                        // lowest usable flight level (0 = no limit)
+  int top_fl = 0;                         // highest usable flight level (0 = no limit)
 };
 
 // An airway as its set of directed segments. Segments are not chained into a

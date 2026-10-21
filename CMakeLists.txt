@@ -14,7 +14,7 @@ if(APPLE)
 endif()
 
 project(BravoFinder
-        VERSION 3.26.37
+        VERSION 3.27.0
         DESCRIPTION "A realistic and compliant flight routing engine and its query tools"
         LANGUAGES C CXX)
 

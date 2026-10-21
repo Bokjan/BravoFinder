@@ -276,14 +276,15 @@ void NavDatabase::Impl::BuildAirwayIndex() {
   // kept: AirwayInfo represents reversals honestly. The key is the full leg
   // identity (endpoints + level + FL band), not just (from, to).
   auto leg_key = [](const AirwayLeg& l) {
-    // Use the char '\0'/'\1' overload of operator+, NOT the C-string literals
-    // "\0"/"\1": "\0" is an EMPTY string (length 0), which would drop the
-    // separator entirely for low airways and let (to="WPT", base_fl=120) collide
-    // with (to="WPT1", base_fl=20) on the same key "...WPT120..." -- silently
-    // discarding the second leg as a false duplicate. A char appends the real
-    // null/0x01 byte and keeps every field boundary intact.
-    return std::string(l.from.View()) + '\0' + std::string(l.to.View()) + (l.high ? '\1' : '\0') +
-           std::to_string(l.base_fl) + '\0' + std::to_string(l.top_fl);
+    // The level is appended as its raw value (0x00/0x01/0x02) through the char
+    // overload of operator+, NOT as a C-string literal ("\0" is an EMPTY
+    // string) or a digit: either would let the level byte vanish into or blend
+    // with the digits of base_fl, so (to="WPT", base_fl=120) could collide with
+    // (to="WPT1", base_fl=20) and the second leg be dropped as a false
+    // duplicate. A control byte appears in no ident or number, so it keeps
+    // every field boundary intact.
+    return std::string(l.from.View()) + '\0' + std::string(l.to.View()) +
+           static_cast<char>(l.level) + std::to_string(l.base_fl) + '\0' + std::to_string(l.top_fl);
   };
   // Accumulate into a hash map, then freeze into the sorted resident vector.
   // Build is one-shot at Open; the sorted form is what LookupAirways / ParseRoute
@@ -306,7 +307,7 @@ void NavDatabase::Impl::BuildAirwayIndex() {
       const AirwayLeg leg{std::move(from).value(),
                           std::move(to).value(),
                           e->distance_nm,
-                          e->level == AirwayLevel::kHigh,
+                          e->level,
                           e->base_fl,
                           e->top_fl};
       // A stored name may be a concurrency ("A593-Y592"): register the segment

@@ -117,7 +117,7 @@ Request (all four non-grouped and grouped lookups): `{"ids": ["...", "..."]}`. T
 |---|---|---|
 | `/v1/airports` | `{icao, arinc424_icao_code, lat, lon, elevation_ft, has_procedures, procedures_corrupt}` | `null` |
 | `/v1/procedures` | `{icao, procedures:[{type, name, transition, runway}]}` | `null` |
-| `/v1/airways` | `{name, segments:[{from, to, distance_nm, high, base_fl, top_fl}]}` | `null` |
+| `/v1/airways` | `{name, segments:[{from, to, distance_nm, high, level, base_fl, top_fl}]}` — `level` is `low` / `high` / `both`; `high` is true only for `high` | `null` |
 | `/v1/waypoints` | `WaypointInfo[]` — `{ident, arinc424_icao_code, lat, lon, kind, on_network}` | `[]` |
 | `/v1/navaid-detail` | `NavaidDetailInfo[]` — `{ident, arinc424_icao_code, kind, elev_ft, freq_raw, range_nm, heading}` | `[]` |
 | `/v1/holds` | `HoldInfo[]` — `{fix_ident, fix_arinc424_icao_code, airport_icao, inbound_course, leg_time_min, leg_dist_nm, turn_dir, min_alt_ft, max_alt_ft, speed_limit_kt}` | `[]` |

@@ -44,6 +44,18 @@ inline const char* ToString(ProcedureType t) {
   return "unknown";
 }
 
+inline const char* ToString(AirwayLevel l) {
+  switch (l) {
+    case AirwayLevel::kLow:
+      return "low";
+    case AirwayLevel::kHigh:
+      return "high";
+    case AirwayLevel::kBoth:
+      return "both";
+  }
+  return "low";
+}
+
 namespace detail {
 
 template <class Writer>
@@ -185,8 +197,13 @@ void WriteAirwayJson(Writer& w, const AirwayInfo& a) {
     detail::WriteKeyStr(w, "to", s.to.View());
     w.Key("distance_nm");
     w.Double(s.distance_nm);
+    // "high" predates "level" and stays as it was (true only for a high-only
+    // segment) so existing readers keep working; "level" also tells a segment
+    // usable at both levels apart from a low-only one.
     w.Key("high");
-    w.Bool(s.high);
+    w.Bool(s.level == AirwayLevel::kHigh);
+    w.Key("level");
+    w.String(ToString(s.level));
     w.Key("base_fl");
     w.Int(s.base_fl);
     w.Key("top_fl");
