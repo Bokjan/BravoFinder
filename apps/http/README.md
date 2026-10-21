@@ -125,6 +125,7 @@ Request (all four non-grouped and grouped lookups): `{"ids": ["...", "..."]}`. T
 
 - The grouped lookups (`waypoints` / `navaid-detail` / `holds`) return an inner **array** per id (an ident recurs across regions), empty when unmatched.
 - `freq_raw` is kHz for NDBs, MHz×100 for VOR/DME/ILS. `airport_icao` is `ENRT` for enroute holds.
+- `kind` is `fix` / `vor` / `ndb` / `dme` for waypoints; navaid detail adds `ils_dme` (the DME of an ILS/LOC or MLS) and `other` (a navaid type the source loader does not recognize). ILS DMEs are not route-graph points, so `/v1/waypoints` never returns them; look them up through `/v1/navaid-detail`.
 - Status: missing/non-string `ids` → **400**; **every** id missing → **404** (a partial hit is 200).
 - MSA may be empty for every airport when the source loader lacks MSA data (e.g. Fenix); see `NavDatabase::capabilities().msa_sectors`.
 

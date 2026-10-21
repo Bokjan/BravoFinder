@@ -12,7 +12,9 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -532,4 +534,86 @@ TEST_CASE("dfd/xplane: KJFK procedure legs agree on rnp/turn/speed across loader
   CHECK(matched > 20);
   CHECK(with_rnp > 0);
   CHECK(with_speed > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-loader consistency: ILS/MLS DMEs. Each source flags them its own way
+// (X-Plane: a row-12 DME named "... DME-ILS"; DFD: navaid_class DME column 'I';
+// Fenix: Navaids.Type 8), and every loader must treat them alike: a navaid
+// detail of kind kIlsDme, never a graph vertex.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ILS DMEs are navaid details and never graph vertices in every loader",
+          "[integration][dfd]") {
+  struct Source {
+    const char* name;
+    std::string dir;
+    std::unique_ptr<bf::Loader> loader;
+  };
+  std::vector<Source> sources;
+  const std::string xp = EnsureXPlane12();
+  if (bf::test::HasNavData(xp)) {
+    sources.push_back({"xplane12", xp, std::make_unique<bf::XPlane12Loader>()});
+  }
+  const std::string d1 = EnsureDfd1();
+  if (!d1.empty()) {
+    sources.push_back({"dfd1", d1, std::make_unique<bf::Dfd1Loader>()});
+  }
+  const std::string d2 = EnsureDfd2();
+  if (!d2.empty()) {
+    sources.push_back({"dfd2", d2, std::make_unique<bf::Dfd2Loader>()});
+  }
+  bf::test::SetNavDataDir("navdata/fenix");
+  const std::string fx = bf::test::NavDataDir();
+  if (bf::test::HasDb3(fx)) {
+    sources.push_back({"fenix", fx, std::make_unique<bf::FenixLoader>()});
+  }
+  if (sources.size() < 4) {
+    SKIP("needs all four sources (navdata/xplane12, dfd1, dfd2, fenix)");
+  }
+
+  // (ident, region) of every ILS DME detail, per loader in `sources` order.
+  std::vector<std::set<std::pair<std::string, std::string>>> ils_dmes;
+  for (const Source& src : sources) {
+    INFO("loader " << src.name);
+    bf::Result<bf::NavData> data = src.loader->LoadNavData(src.dir);
+    REQUIRE(data);
+    int non_vertex_kinds = 0;
+    for (const bf::Waypoint& w : data.value().waypoints) {
+      if (!bf::IsGraphVertexKind(w.kind)) {
+        ++non_vertex_kinds;
+      }
+    }
+    CHECK(non_vertex_kinds == 0);
+    std::set<std::pair<std::string, std::string>>& keys = ils_dmes.emplace_back();
+    for (const bf::NavaidDetail& d : data.value().navaid_details) {
+      if (d.kind == bf::WaypointKind::kIlsDme) {
+        keys.emplace(d.ident.ident, d.ident.arinc424_icao_code);
+      }
+    }
+    CHECK(keys.size() > 3000);  // 2601: 3451 (X-Plane 3447)
+    // KBOS's ILS DME: a detail, not a vertex.
+    CHECK(keys.count({"IBOS", "K6"}) == 1);
+    CHECK(std::none_of(data.value().waypoints.begin(), data.value().waypoints.end(),
+                       [](const bf::Waypoint& w) { return w.ident.ident == "IBOS"; }));
+    if (std::string_view(src.name) == "xplane12") {
+      // A row-13 DME named "DME-ILS" is standalone and must stay a vertex: GAI
+      // (Gaillac) ends airways V12, T544, G36, ...
+      CHECK(std::any_of(data.value().waypoints.begin(), data.value().waypoints.end(),
+                        [](const bf::Waypoint& w) {
+                          return w.ident.ident == "GAI" && w.ident.arinc424_icao_code == "LF" &&
+                                 w.kind == bf::WaypointKind::kDme;
+                        }));
+    }
+  }
+
+  // DFD v1, DFD v2 and Fenix agree exactly. X-Plane lists a few of them as
+  // standalone (row 13) DMEs, so its set is a subset short by only a handful
+  // (2601: 4, at ZLDH and VHHX).
+  const auto& x = ils_dmes[0];
+  const auto& v1 = ils_dmes[1];
+  CHECK(ils_dmes[2] == v1);
+  CHECK(ils_dmes[3] == v1);
+  CHECK(std::includes(v1.begin(), v1.end(), x.begin(), x.end()));
+  CHECK(v1.size() - x.size() <= 10);
 }

@@ -127,8 +127,12 @@ WaypointKind NavaidKindFromClass(const std::string& cls) {
     case 'T':
     case 'M':
       return WaypointKind::kDme;
+    case 'I':
+    case 'N':
+    case 'P':
+      return WaypointKind::kIlsDme;  // ILS/LOC or MLS DME
     default:
-      return WaypointKind::kOther;  // I/N/P: ILS or MLS DME component
+      return WaypointKind::kOther;
   }
 }
 
@@ -223,12 +227,10 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, PointDeduper& seen) {
     return Result<void>::Err(s.error());
   }
   sqlite3_stmt* stmt = s.value().get();
+  PointDeduper seen_ils_dme(kLoaderName);
   return ForEachRow(stmt, [&]() {
     const WaypointKind kind = NavaidKindFromClass(ColumnText(stmt, 3));
     if (kind == WaypointKind::kOther) {
-      // ILS/MLS DME component: not enroute-routable. The X-Plane and Fenix
-      // loaders keep these as vertices (kDme / kOther); none carries an
-      // airway edge, so the difference only shows in ident lookups.
       return;
     }
     const Ident key(ColumnText(stmt, 1), ColumnText(stmt, 0));
@@ -237,10 +239,15 @@ Result<void> LoadVhfNavaids(sqlite3* conn, NavData& data, PointDeduper& seen) {
       BF_LOG_WARN("dfd2: skipping '{}/{}' (no position)", key.ident, key.arinc424_icao_code);
       return;
     }
-    if (!seen.Insert(key, *coord)) {
+    // An ILS DME is a navaid detail only (see IsGraphVertexKind), deduplicated
+    // on its own so it never takes a graph point's place.
+    const bool vertex = IsGraphVertexKind(kind);
+    if (!(vertex ? seen : seen_ils_dme).Insert(key, *coord)) {
       return;
     }
-    data.waypoints.push_back(Waypoint{key, *coord, kind});
+    if (vertex) {
+      data.waypoints.push_back(Waypoint{key, *coord, kind});
+    }
     const int freq_raw = static_cast<int>(std::lround(ColumnDouble(stmt, 2) * kCentiScale));
     data.navaid_details.push_back(NavaidDetail{key, kind, ColumnInt(stmt, 6), freq_raw,
                                                ColumnDouble(stmt, 4), ColumnDouble(stmt, 5)});

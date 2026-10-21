@@ -28,6 +28,8 @@ inline const char* ToString(WaypointKind k) {
       return "dme";
     case WaypointKind::kOther:
       return "other";
+    case WaypointKind::kIlsDme:
+      return "ils_dme";
   }
   return "other";
 }

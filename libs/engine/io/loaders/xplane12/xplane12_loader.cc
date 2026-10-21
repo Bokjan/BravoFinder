@@ -112,18 +112,24 @@ uint32_t ParseCycle(const std::string& path) {
   return 0;
 }
 
-// Map an earth_nav.dat row code to a routable waypoint kind, or kOther for row
-// codes that are not enroute navaids (ILS components, markers, etc.).
-WaypointKind NavKindFromRowCode(int code) {
+// Map an earth_nav.dat row to a waypoint kind: kOther for row codes that are
+// not navaids we keep (localizers, glideslopes, markers, etc.). Row 12 is the
+// DME of a VOR or ILS/LOC; one named "... DME-ILS" is an ILS DME (2601: 3447
+// rows, every one an ILS DME in DFD as well) and maps to kIlsDme. Row 13 is a
+// standalone DME/TACAN and stays kDme even when named "DME-ILS": 75 of its 79
+// such rows are standalone in DFD too, and some are airway endpoints (GAI/LF).
+// The other 4 (at ZLDH and VHHX) stay vertices here although DFD and Fenix
+// list them as ILS DMEs; no airway or procedure fix references them.
+WaypointKind NavKindFromRow(int code, bool named_dme_ils) {
   switch (code) {
     case 2:
       return WaypointKind::kNdb;
     case 3:
       return WaypointKind::kVor;
     case 12:
-      return WaypointKind::kDme;
+      return named_dme_ils ? WaypointKind::kIlsDme : WaypointKind::kDme;
     case 13:
-      return WaypointKind::kDme;  // TACAN, treated as a DME-class point
+      return WaypointKind::kDme;  // standalone DME / TACAN
     default:
       return WaypointKind::kOther;
   }
@@ -233,10 +239,23 @@ struct NavRow {
   std::string ident;
   std::string terminal;
   std::string icao_code;
+  WaypointKind kind = WaypointKind::kOther;
 };
 bool ReadNavRow(std::istringstream& row, NavRow& out) {
-  return static_cast<bool>(row >> out.code >> out.lat >> out.lon >> out.elev >> out.freq >>
-                           out.range >> out.hdg >> out.ident >> out.terminal >> out.icao_code);
+  if (!(row >> out.code >> out.lat >> out.lon >> out.elev >> out.freq >> out.range >> out.hdg >>
+        out.ident >> out.terminal >> out.icao_code)) {
+    return false;
+  }
+  // The free-text name runs to the end of the line; its last word tells an ILS
+  // DME from a VOR's or a standalone one. Read off the line itself so the
+  // stream state the row reader checks stays untouched.
+  const std::string text = row.str();
+  std::string_view line = text;
+  while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) {
+    line.remove_suffix(1);
+  }
+  out.kind = NavKindFromRow(out.code, line.ends_with(" DME-ILS"));
+  return true;
 }
 
 // Build the PointIndex from earth_fix.dat + earth_nav.dat alone (the CIFP load
@@ -255,9 +274,8 @@ PointIndex LoadPointIndex(const std::string& data_dir) {
     if (!ReadNavRow(row, r)) {
       return;
     }
-    const WaypointKind kind = NavKindFromRowCode(r.code);
-    if (kind != WaypointKind::kOther) {
-      index.Add(r.ident, r.icao_code, ClassOfKind(kind), r.terminal, Coordinate{r.lat, r.lon});
+    if (IsGraphVertexKind(r.kind)) {
+      index.Add(r.ident, r.icao_code, ClassOfKind(r.kind), r.terminal, Coordinate{r.lat, r.lon});
     }
   });
   return index;
@@ -296,6 +314,9 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
   // share an ident) while keeping distinct same-key points such as per-airport
   // terminal fixes (earth_fix's terminal column names the owning airport).
   PointDeduper seen("xplane12");
+  // ILS DMEs are navaid details only; deduplicated on their own so they never
+  // take a graph point's place.
+  PointDeduper seen_ils_dme("xplane12");
   // Positions by what an airway endpoint names, for the airway position hints.
   PointIndex index;
 
@@ -322,13 +343,19 @@ Result<NavData> XPlane12Loader::LoadNavData(const std::string& data_dir) const {
     if (!ReadNavRow(row, r)) {
       return;
     }
-    WaypointKind kind = NavKindFromRowCode(r.code);
+    const WaypointKind kind = r.kind;
     if (kind == WaypointKind::kOther) {
-      return;  // not an enroute-routable navaid
+      return;  // not a navaid we keep
     }
     const Coordinate coord{r.lat, r.lon};
-    index.Add(r.ident, r.icao_code, ClassOfKind(kind), r.terminal, coord);
     Ident key(r.ident, r.icao_code);
+    if (!IsGraphVertexKind(kind)) {
+      if (seen_ils_dme.Insert(key, coord)) {
+        data.navaid_details.push_back(NavaidDetail{key, kind, r.elev, r.freq, r.range, r.hdg});
+      }
+      return;
+    }
+    index.Add(r.ident, r.icao_code, ClassOfKind(kind), r.terminal, coord);
     if (seen.Insert(key, coord)) {
       data.waypoints.push_back(Waypoint{key, coord, kind});
       data.navaid_details.push_back(NavaidDetail{key, kind, r.elev, r.freq, r.range, r.hdg});

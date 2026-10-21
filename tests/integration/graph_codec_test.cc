@@ -300,6 +300,13 @@ TEST_CASE("graph codec: a corrupt snapshot is rejected on encode, a corrupt sect
     s.kinds[0] = static_cast<bf::WaypointKind>(99);
     expect_encode_rejects(s);
   }
+  SECTION("encode rejects a kind that is never a graph vertex") {
+    for (const bf::WaypointKind k : {bf::WaypointKind::kIlsDme, bf::WaypointKind::kOther}) {
+      bf::GraphSnapshot s = MakeValidSnapshot();
+      s.kinds[0] = k;
+      expect_encode_rejects(s);
+    }
+  }
   SECTION("encode rejects CSR offsets not ending at the edge count") {
     bf::GraphSnapshot s = MakeValidSnapshot();
     s.offsets = {0, 1, 5};  // back != e (1)

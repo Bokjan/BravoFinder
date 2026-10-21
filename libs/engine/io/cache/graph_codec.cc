@@ -17,8 +17,15 @@ namespace {
 // The vertex-record flags byte and the WaypointKind are each serialized as a
 // single U8; guard that the kind still fits, so adding enumerators past 255
 // fails to compile rather than silently truncating on write.
-static_assert(static_cast<int>(WaypointKind::kOther) < 256,
+static_assert(static_cast<int>(WaypointKind::kIlsDme) < 256,
               "WaypointKind no longer fits in the U8 vertex-record field");
+
+// Whether a vertex-record kind byte names a kind that may be a graph vertex
+// (a valid WaypointKind for which IsGraphVertexKind holds).
+bool IsVertexKindByte(uint8_t b) {
+  return b <= static_cast<uint8_t>(WaypointKind::kIlsDme) &&
+         IsGraphVertexKind(static_cast<WaypointKind>(b));
+}
 
 // Wire-layout declarators for the fixed-length records in this section. These
 // exist ONLY so `sizeof` is the single source of truth for the corruption fuses
@@ -135,7 +142,7 @@ Result<void> GraphCodec::Encode(const GraphSnapshot& snapshot, ByteWriter& w, St
       flags |= kFlagHasInbound;
     }
     w.U8(flags);
-    if (static_cast<uint8_t>(snapshot.kinds[i]) > static_cast<uint8_t>(WaypointKind::kOther)) {
+    if (!IsVertexKindByte(static_cast<uint8_t>(snapshot.kinds[i]))) {
       return Result<void>::Err(Error(ErrorCode::kSerializationError, "vertex kind out of range"));
     }
     w.U8(static_cast<uint8_t>(snapshot.kinds[i]));
@@ -413,9 +420,9 @@ Result<GraphSnapshot> GraphCodec::Decode(std::span<const uint8_t> body,
       return bad("corrupt .bfdb: edge airway level out of range");
     }
   }
-  // Per-vertex kind enum must be a valid WaypointKind.
+  // Per-vertex kind enum must be a valid graph-vertex WaypointKind.
   for (const WaypointKind k : snapshot.kinds) {
-    if (static_cast<uint8_t>(k) > static_cast<uint8_t>(WaypointKind::kOther)) {
+    if (!IsVertexKindByte(static_cast<uint8_t>(k))) {
       return bad("corrupt .bfdb: vertex kind out of range");
     }
   }

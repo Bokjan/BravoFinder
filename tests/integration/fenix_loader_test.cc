@@ -139,7 +139,7 @@ TEST_CASE("fenix: LoadNavData enroute dataset", "[integration][fenix]") {
       if (d.kind == bf::WaypointKind::kNdb) {
         if (d.freq_raw < 100 || d.freq_raw > 2000) ++bad;
       } else if (d.kind == bf::WaypointKind::kVor || d.kind == bf::WaypointKind::kDme ||
-                 d.kind == bf::WaypointKind::kOther) {
+                 d.kind == bf::WaypointKind::kIlsDme) {
         const double mhz = d.freq_raw / 100.0;
         if (mhz < 108.0 || mhz > 136.0) ++bad;
       }

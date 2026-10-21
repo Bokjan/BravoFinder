@@ -110,10 +110,11 @@ int ColumnOptInt(sqlite3_stmt* stmt, int col) {
 //     4   VOR-DME                 → kVor           VOR / VOR-DME
 //     5   NDB                     → kNdb           NDB
 //     7   NDB-DME                 → kNdb           NDB primary, DME auxiliary
-//     8   ILS-DME                 → kOther         ILS not enroute-routable
+//     8   ILS-DME                 → kIlsDme        navaid detail only
 //     9   DME (EXCLUDING ILS-DME) → kDme           standalone DME
 //
-// Types 6 and ≥10 absent from real data; fall through to kOther.
+// Types 6 and ≥10 absent from real data; fall through to kOther. Neither
+// kIlsDme nor kOther becomes a graph vertex (IsGraphVertexKind).
 // Note: Type 9 DME idents are 1-3 chars (some NDB-like: 'AS','JA','MS').
 // These are standalone DMEs (UHF-paired), not NDBs — kDme is correct.
 WaypointKind NavaidKindFromType(int type_id) {
@@ -129,6 +130,7 @@ WaypointKind NavaidKindFromType(int type_id) {
     case 7:  // NDB-DME
       return WaypointKind::kNdb;
     case 8:  // ILS-DME
+      return WaypointKind::kIlsDme;
     default:
       return WaypointKind::kOther;
   }
@@ -297,6 +299,9 @@ Result<void> LoadWaypoints(sqlite3* conn, NavData& data) {
       if (nit != navaid_type_of.end()) {
         kind = NavaidKindFromType(nit->second);
       }
+    }
+    if (!IsGraphVertexKind(kind)) {
+      return;  // an ILS DME (or unknown type): a navaid detail, not a vertex
     }
 
     // Fenix lists some points more than once (same ident/region/position under

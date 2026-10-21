@@ -131,9 +131,10 @@ Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
     const uint32_t arinc424_icao_code_off = r.U32();
     const uint32_t arinc424_icao_code_len = r.U32();
     const uint8_t kind_byte = r.U8();
-    // Reject an out-of-range WaypointKind byte (mirrors graph_codec.cc:405)
-    // rather than reinterpreting it into a lookup table slot.
-    if (kind_byte > static_cast<uint8_t>(WaypointKind::kOther)) {
+    // Reject an out-of-range WaypointKind byte (as graph_codec.cc does for
+    // vertex kinds) rather than reinterpreting it into a lookup table slot.
+    // Every kind is valid here: ILS DMEs are details without a vertex.
+    if (kind_byte > static_cast<uint8_t>(WaypointKind::kIlsDme)) {
       return bad("corrupt nav detail section: navaid kind out of range");
     }
     const auto kind = static_cast<WaypointKind>(kind_byte);

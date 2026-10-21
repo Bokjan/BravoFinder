@@ -208,7 +208,8 @@ const ToolMetaDesc kToolMeta[] = {
      "Look up detailed radio-navaid attributes by ident (frequency, service "
      "range, elevation, and heading/variation). An ident is reused across "
      "regions, so each id returns a group of matches. freq_raw is kHz for NDBs "
-     "and MHz*100 for VOR/DME/ILS. Requires a detail cache; empty otherwise."},
+     "and MHz*100 for VOR/DME/ILS. ILS DMEs (kind ils_dme) are found here, not "
+     "by the waypoint lookup. Requires a detail cache; empty otherwise."},
     {kHandlerLookupHolds,
      "Look up holding patterns by fix ident (inbound course, outbound leg "
      "time/distance, turn direction, altitude window, speed limit). Each id "

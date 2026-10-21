@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <optional>
 #include <unordered_set>
@@ -173,6 +174,13 @@ Result<void> GraphBuilder::Populate(const NavData& data) {
   airport_elevations_ft_.reserve(airport_count);
   for (int i = 0; i < waypoint_count; ++i) {
     const Waypoint& w = data.waypoints[i];
+    if (!IsGraphVertexKind(w.kind)) {
+      // Loaders drop these before deduplicating; reaching here is a loader bug.
+      return Result<void>::Err(
+          Error(ErrorCode::kInvalidArgument,
+                std::format("waypoint '{}/{}' has a kind that is never a graph vertex",
+                            w.ident.ident, w.ident.arinc424_icao_code)));
+    }
     Result<FixedIdent> fixed = FixedIdent::FromIdent(w.ident);
     if (!fixed) {
       return Result<void>::Err(std::move(fixed).error());

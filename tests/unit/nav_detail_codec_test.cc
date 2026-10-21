@@ -27,6 +27,9 @@ bf::NavData MakeSampleData() {
   // Same ident, different region -> both must come back from a bare-ident query.
   d.navaid_details.push_back(
       bf::NavaidDetail{bf::Ident("DGC", "LF"), bf::WaypointKind::kNdb, 0, 350, 50.0, 0.0});
+  // An ILS DME: a detail without a graph vertex, so its kind must survive here.
+  d.navaid_details.push_back(
+      bf::NavaidDetail{bf::Ident("IBOS", "K6"), bf::WaypointKind::kIlsDme, 19, 11030, 25.0, 0.0});
 
   bf::HoldFix h1;
   h1.fix = bf::Ident("AE701", "DA");
@@ -100,6 +103,10 @@ TEST_CASE("nav detail codec: encode -> decode round-trips navaids", "[unit][deta
   auto dgc = a.FindNavaids("DGC");
   REQUIRE(dgc.size() == 2);
 
+  auto ils = a.FindNavaids("IBOS");
+  REQUIRE(ils.size() == 1);
+  CHECK(ils[0].kind == bf::WaypointKind::kIlsDme);
+
   // Unknown ident -> empty.
   CHECK(a.FindNavaids("NOPE").empty());
 }
@@ -161,7 +168,7 @@ TEST_CASE("nav detail codec: a byte-corrupted navaid kind is rejected", "[unit][
   constexpr size_t kFirstKindOffset = 8 + 4 * 4;
   static_assert(kFirstKindOffset == 24, "nav detail wire layout drifted");
   REQUIRE(body.size() > kFirstKindOffset);
-  body[kFirstKindOffset] = 0xFF;  // > WaypointKind::kOther (4)
+  body[kFirstKindOffset] = 0xFF;  // > WaypointKind::kIlsDme (5)
   bf::Result<bf::NavDetailArchive> r = bf::NavDetailCodec::Decode(body, pool.blob());
   CHECK_FALSE(r);
   if (!r) {

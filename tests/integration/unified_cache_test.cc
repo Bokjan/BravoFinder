@@ -38,7 +38,7 @@ bf::GraphSnapshot MakeGraph() {
   g.first_airport_vertex = 1;  // vertex 0 waypoint, vertex 1 airport
   g.coords = {{40.0, -73.0}, {41.0, -74.0}};
   g.idents = {Fixed("WAYPT", "K6"), Fixed("KTST", "K6")};
-  g.kinds = {bf::WaypointKind::kFix, bf::WaypointKind::kOther};
+  g.kinds = {bf::WaypointKind::kDme, bf::WaypointKind::kFix};  // airports carry kFix
   g.has_outbound = {1, 0};  // vertex 0 has an out-edge, vertex 1 has none
   g.has_inbound = {0, 1};   // vertex 1 is the edge's destination, vertex 0 is not
   g.offsets = {0, 1, 1};    // vertex 0 has one out-edge, vertex 1 has none
