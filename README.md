@@ -15,9 +15,11 @@ A realistic, fully-compliant flight-route engine in modern C++20 — plus a CLI,
 
 BravoFinder is fundamentally a route-engine **library**; the CLI, MCP server, and REST server are front-ends built on `bf::bravofinder`. If you only want routing inside your own app, you don't need to build the front-ends. Each release publishes a prebuilt SDK — consume `bf::bravofinder` via `find_package(bravofinder)` or `FetchContent`, no source build required. The public entry point is the opaque `bf::NavDatabase` (`libs/engine/io/navdb/nav_database.h`).
 
+The static library (`libbravofinder.a`, `bravofinder.lib` on Windows) bundles the SQLite 3.46.0 amalgamation, built with `SQLITE_OMIT_LOAD_EXTENSION` and `SQLITE_THREADSAFE=1`, and its `sqlite3_*` symbols are neither renamed nor hidden. If your application links SQLite as well, it gets two definitions of each `sqlite3_*` function: an SQLite compiled in as an object file fails to link with duplicate symbols, and a static or shared SQLite library is quietly bypassed, so every `sqlite3_*` call, yours included, goes to the bundled copy. If you need SQLite yourself, use the bundled one and do not link a second.
+
 ## Quick start
 
-Requires C++20 and CMake 3.21+. Dependencies are fetched automatically via FetchContent.
+Requires C++20 and CMake 3.21+. Dependencies are fetched automatically via FetchContent. On macOS the build targets macOS 26.0, the first release whose libc++ provides floating-point `std::from_chars`, so the binaries and the SDK need macOS 26 or later; the prebuilt macOS packages are arm64 only.
 
 ```bash
 cmake --preset release && cmake --build --preset release -j 32
