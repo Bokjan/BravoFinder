@@ -181,11 +181,9 @@ set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 # amalgamation); we additionally mark their headers SYSTEM below so the C++ that
 # includes them stays clean under -Wpedantic -Werror. Pin exact tags.
 #
-# Force static for BOTH C libs up front: set BUILD_SHARED_LIBS OFF before either
-# FetchContent_MakeAvailable so libuv also honors it (it builds only uv_a, the
-# static target we consume, and skips the shared uv target). Setting it only
-# before llhttp -- as this used to -- left libuv's static-only behavior implicit
-# and order-fragile.
+# Force static for BOTH C libs up front. libuv ignores BUILD_SHARED_LIBS: its
+# own LIBUV_BUILD_SHARED (default ON) decides whether the shared `uv` target is
+# built next to uv_a, the static target we consume, so turn that off by name.
 #
 # Must be a CACHE var (with FORCE): llhttp's CMakeLists uses
 # `option(BUILD_SHARED_LIBS "..." ON)`, and option() only consults the CACHE.
@@ -194,6 +192,7 @@ set(_sqlite3_dir ${sqlite3_SOURCE_DIR})
 # to the same Debug llhttp.pdb and race under /MP (MSVC C1041). CACHE+FORCE makes
 # option() see the OFF and skip the shared target (we only consume llhttp_static).
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(LIBUV_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(LIBUV_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LIBUV_BUILD_BENCH OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
@@ -211,6 +210,16 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/nodejs/llhttp.git
   GIT_TAG release/v9.2.1)
 FetchContent_MakeAvailable(llhttp)
+
+# Keep both libraries' install rules out of `cmake --install`: they are linked
+# into bf-http / bf-mcp only, never into libbravofinder.a, so the SDK must not
+# ship their headers, archives, CMake packages or pkg-config files. An
+# EXCLUDE_FROM_ALL directory contributes no install rules (its targets still
+# build whenever something links them). Set as a directory property rather than
+# FetchContent_Declare(EXCLUDE_FROM_ALL), which needs CMake 3.28.
+foreach(_c_dep libuv llhttp)
+  set_property(DIRECTORY ${${_c_dep}_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL TRUE)
+endforeach()
 
 # Present the two C libraries' interface headers as system headers, so including
 # uv.h / llhttp.h from the -Wall -Wextra -Wpedantic -Werror C++ code never trips
