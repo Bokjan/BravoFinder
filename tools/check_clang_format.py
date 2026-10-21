@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject commits whose staged C++ files are not clang-format clean.
+"""Reject C++ files that are not clang-format clean.
 
 BravoFinder's style is enforced by the repo-root `.clang-format`
 (Google base, C++20, ColumnLimit 100). This hook checks only the *staged*
@@ -11,11 +11,13 @@ the offending files and the exact command to fix them:
 
   clang-format -i <file>...   # then `git add` the files and commit again
 
-Shared by the local `pre-commit` hook. Mirrors the sibling
+Shared by the local `pre-commit` hook (staged files) and the CI `lint` job
+(`--all`: every tracked file as checked out). Mirrors the sibling
 `check_commit_messages.py` (check-only, never rewrites).
 
 Usage:
   tools/check_clang_format.py            # hook mode: check staged files
+  tools/check_clang_format.py --all      # CI: check every tracked file
 """
 import difflib
 import os
@@ -50,6 +52,16 @@ def repo_root():
     ).strip()
 
 
+def is_cpp(path):
+    return os.path.splitext(path)[1].lower() in CPP_EXTS
+
+
+def tracked_cpp_files():
+    """Repo-relative paths of every tracked C++ file."""
+    out = subprocess.check_output(["git", "ls-files"], text=True)
+    return [line for line in out.splitlines() if is_cpp(line)]
+
+
 def staged_cpp_files():
     """Repo-relative paths of staged C++ files (added/copied/modified/renamed)."""
     out = subprocess.check_output(
@@ -61,8 +73,7 @@ def staged_cpp_files():
         line = line.strip()
         if not line:
             continue
-        _, ext = os.path.splitext(line)
-        if ext.lower() in CPP_EXTS:
+        if is_cpp(line):
             files.append(line)
     return files
 
@@ -75,10 +86,15 @@ def locate_config(root):
     return None
 
 
-def stage_blob(relpath, dest_dir):
-    """Write the staged blob of `relpath` into dest_dir, mirroring its tree
-    path. Returns the absolute path of the written file."""
-    out = subprocess.check_output(["git", "show", ":" + relpath])
+def stage_blob(relpath, dest_dir, root, staged):
+    """Write `relpath` into dest_dir, mirroring its tree path: the staged blob
+    in hook mode, the checked-out file otherwise. Returns the absolute path of
+    the written file."""
+    if staged:
+        out = subprocess.check_output(["git", "show", ":" + relpath])
+    else:
+        with open(os.path.join(root, relpath), "rb") as f:
+            out = f.read()
     target = os.path.join(dest_dir, relpath)
     os.makedirs(os.path.dirname(target) or dest_dir, exist_ok=True)
     with open(target, "wb") as f:
@@ -96,12 +112,17 @@ def format_bytes(clang_format, abs_path):
 
 
 def main():
+    args = sys.argv[1:]
+    if args not in ([], ["--all"]):
+        print(f"usage: {sys.argv[0]} [--all]", file=sys.stderr)
+        return 2
+    staged = not args
     clang_format = find_clang_format()
     if clang_format is None:
         print(
             "clang-format not found on PATH. Install it to enforce the repo "
             "style (e.g. `pip install clang-format`, or your package manager), "
-            "then retry the commit.",
+            "then retry.",
             file=sys.stderr,
         )
         return 2
@@ -112,15 +133,14 @@ def main():
         print(f"git rev-parse failed: {e}", file=sys.stderr)
         return 2
 
-    files = staged_cpp_files()
+    files = staged_cpp_files() if staged else tracked_cpp_files()
     if not files:
         return 0
 
     config = locate_config(root)
     if config is None:
         print(
-            "No .clang-format found at repo root; cannot determine the style. "
-            "Commit aborted.",
+            "No .clang-format found at repo root; cannot determine the style.",
             file=sys.stderr,
         )
         return 2
@@ -130,13 +150,13 @@ def main():
     try:
         shutil.copy(config, os.path.join(tmp, os.path.basename(config)))
         for relpath in files:
-            abs_path = stage_blob(relpath, tmp)
+            abs_path = stage_blob(relpath, tmp, root, staged)
             formatted, rc, err = format_bytes(clang_format, abs_path)
             if rc != 0:
                 # clang-format itself failed (e.g. unparseable input); treat as
                 # a violation so we never silently pass an unchecked file.
                 print(
-                    f"clang-format failed on staged {relpath}:\n"
+                    f"clang-format failed on {relpath}:\n"
                     f"{err.decode('utf-8', 'replace')}",
                     file=sys.stderr,
                 )
@@ -153,9 +173,13 @@ def main():
         return 0
 
     bad = [v[0] for v in violations]
-    print("Commit rejected: staged C++ file(s) are not clang-format clean.",
-          file=sys.stderr)
-    print("Reformat and re-stage, then commit again:", file=sys.stderr)
+    if staged:
+        print("Commit rejected: staged C++ file(s) are not clang-format clean.",
+              file=sys.stderr)
+        print("Reformat and re-stage, then commit again:", file=sys.stderr)
+    else:
+        print("C++ file(s) are not clang-format clean. Reformat with:",
+              file=sys.stderr)
     print(f"  clang-format -i {' '.join(bad)}", file=sys.stderr)
     print("Offending file(s):", file=sys.stderr)
     for relpath in bad:

@@ -23,7 +23,7 @@ One-line background (details in README / docs/): a realistic/compliant flight ro
 - Error handling uses the project's own `bf::Result<T, E>` (`libs/engine/core/result.h`); expected failures (no route found, missing data) go through `Result`, exceptions are only for truly exceptional situations. **No bare `new`/`delete`, no `goto`, no catch-by-value, no `static`/global mutable state** (v2's static-sharing bugs were one motivation for the rewrite).
 - JSON output uses **RapidJSON `Writer`** (SAX streaming, auto-escaping); no hand-rolled strings, no nlohmann.
 - **Brace every body**: every `if`/`else`/`for`/`while` body uses braces, including single-line bodies (clang-format does not enforce this).
-- **clang-format**: run `clang-format -i` on changed `.h`/`.cc`; the `pre-commit` hook (`tools/hooks/pre-commit` → `tools/check_clang_format.py`) enforces this once `core.hooksPath` is set to `tools/hooks`.
+- **clang-format**: run `clang-format -i` on changed `.h`/`.cc`; the `pre-commit` hook (`tools/hooks/pre-commit` → `tools/check_clang_format.py`) enforces this once `core.hooksPath` is set to `tools/hooks`, and the CI `lint` job checks every tracked file against the pinned clang-format 22.1.5 (a different clang-format release may format differently).
 
 ## Apps, transports, and the service layer (service / MCP / HTTP / CLI)
 
@@ -83,5 +83,5 @@ ctest --preset tsan -j 32    # must run after any concurrency-related change (th
 ## Git
 
 - Commits use English **Conventional Commits**; body paragraphs are single unwrapped lines (same no-hard-wrap discipline as all markdown — see Language); keep the Claude co-author signature.
-- The no-hard-wrap rule is enforced locally by `tools/check_commit_messages.py` via the `commit-msg` hook (`git config core.hooksPath tools/hooks`), which rejects a message that hard-wraps a paragraph. `0367ca0`-style `a -> b` rename lists and bullet/code/table blocks are not paragraphs and are left alone.
+- The no-hard-wrap rule is enforced locally by `tools/check_commit_messages.py` via the `commit-msg` hook (`git config core.hooksPath tools/hooks`), which rejects a message that hard-wraps a paragraph; the CI `lint` job runs the same check over the commits each push adds. `0367ca0`-style `a -> b` rename lists and bullet/code/table blocks are not paragraphs and are left alone.
 - For complex milestones, **align on the approach first, then implement**; at the end of each major task, do a docs / memory handoff.

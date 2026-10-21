@@ -7,8 +7,8 @@ renderer soft-wraps. A hard-wrapped paragraph folds sentences at a column
 boundary across multiple lines, which renders as broken line breaks and makes
 diffs noisy.
 
-This script is shared by the local `commit-msg` hook and the CI `commitlint`
-workflow. It only *detects* violations; it never rewrites anything.
+This script is shared by the local `commit-msg` hook and the CI `lint` job
+(ci.yml). It only *detects* violations; it never rewrites anything.
 
 Usage:
   tools/check_commit_messages.py --range <git-rev-list-range>   # CI: check a range

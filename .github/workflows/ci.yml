@@ -6,6 +6,37 @@ on:
   pull_request:
 
 jobs:
+  # The same two checks the local pre-commit / commit-msg hooks run, for pushes
+  # made without core.hooksPath set. clang-format is pinned: its output shifts
+  # between releases, so the tree is kept clean against this exact version.
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Install clang-format
+        run: pip install clang-format==22.1.5
+
+      - name: clang-format
+        run: python3 tools/check_clang_format.py --all
+
+      - name: Commit messages
+        # Only the commits this push / PR adds. A new branch or a force push
+        # whose old tip is gone has no usable base, so check the tip alone.
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            range="$HEAD_SHA^!"
+          else
+            range="$BASE..$HEAD_SHA"
+          fi
+          python3 tools/check_commit_messages.py --range "$range"
+
   build-and-test:
     strategy:
       fail-fast: false

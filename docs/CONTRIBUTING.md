@@ -77,7 +77,7 @@ build: wire up Catch2 and CLI11 via FetchContent
 
 - **Base**: [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 - **Semantics**: follow the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/) (RAII, `enum class`, spans/views over raw pointers, etc.).
-- **Formatting**: enforced by clang-format (root `.clang-format`, `BasedOnStyle: Google`). Run `clang-format -i` on every changed `.h`/`.cc` before committing, and ensure `clang-format --dry-run --Werror` passes. A local `pre-commit` hook (`tools/hooks/pre-commit` → `tools/check_clang_format.py`) enforces this once `core.hooksPath` is set to `tools/hooks`. Every `if`/`else`/`for`/`while` body uses braces, including single-line bodies.
+- **Formatting**: enforced by clang-format (root `.clang-format`, `BasedOnStyle: Google`). Run `clang-format -i` on every changed `.h`/`.cc` before committing, and ensure `clang-format --dry-run --Werror` passes. A local `pre-commit` hook (`tools/hooks/pre-commit` → `tools/check_clang_format.py`) enforces this once `core.hooksPath` is set to `tools/hooks`; CI runs the same script over every tracked file with clang-format pinned to 22.1.5 (`pip install clang-format==22.1.5`), since other releases can format differently. Every `if`/`else`/`for`/`while` body uses braces, including single-line bodies.
 - **Language standard**: C++20.
 - **No magic numbers**: reference named engine constants instead of hardcoding invariants.
 
@@ -131,6 +131,6 @@ Run through this list before opening a PR. CI and the local hooks catch most of 
 - [ ] **Braces on every body**: all `if`/`else`/`for`/`while` bodies use `{}`, including single-line ones.
 - [ ] **No magic numbers**: engine invariants use their named constants, not literals.
 - [ ] **Builds on all CI platforms**: a clean Linux build is not enough — the CI matrix spans macOS and Windows, which surface platform-specific warnings that Linux does not. Prefer waiting for CI to go green before requesting review.
-- [ ] **Commit message conforms**: Conventional Commits type/scope/subject, English body, and no hard-wrapped paragraph (each paragraph is one logical line).
+- [ ] **Commit message conforms**: Conventional Commits type/scope/subject, English body, and no hard-wrapped paragraph (each paragraph is one logical line); `tools/check_commit_messages.py` checks this locally (`commit-msg` hook) and in CI.
 - [ ] **PR description matches the code**: every claim in the description — data filtering, test results, behavior — is backed by the diff; reconcile any internal inconsistencies.
 - [ ] **Test results stated honestly**: if cases SKIP because the required data is not present, say so; do not report "all tests pass" when the run actually skipped cases.
