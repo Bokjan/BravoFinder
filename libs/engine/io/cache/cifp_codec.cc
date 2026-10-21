@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/domain/arinc_codes.h"
 #include "io/cache/byte_io.h"
 #include "io/cache/cache_messages.h"
 #include "io/cache/crc32c.h"
@@ -229,7 +230,11 @@ Result<CifpData> DeserializeSegment(std::span<const uint8_t> data, std::span<con
       leg.alt1_ft = br.I32();
       leg.alt2_ft = br.I32();
       leg.rnp_centinm = br.U16();
-      leg.turn_dir = static_cast<char>(br.U8());
+      const char turn_byte = static_cast<char>(br.U8());
+      if (turn_byte != '\0' && turn_byte != kTurnLeft && turn_byte != kTurnRight) {
+        return bad("invalid procedure turn direction");
+      }
+      leg.turn_dir = turn_byte;
       leg.speed_limit_kt = br.U16();
       // Only the defined flag bits may be set; anything else is corrupt.
       const uint8_t flags = br.U8();

@@ -116,7 +116,9 @@ class GraphBuilder {
   // first. `inbound` picks the direction filter: false selects fixes with an
   // outbound airway edge (a departure DCT hands off and leaves along one); true
   // selects fixes with an inbound edge (an arrival DCT is reached along one).
-  // Used as the DCT fallback when an airport has no procedure data.
+  // Used as the DCT fallback when an airport has no procedure data. A position
+  // off the globe (NaN, |lat| > 90, |lon| > 180) finds nothing, and a vertex
+  // carrying one is never returned.
   std::vector<int> NearestOnNetwork(const Coordinate& coord, int count, bool inbound) const;
 
   // The airway name for an edge's airway_id, or "DCT" for synthetic edges.

@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -750,6 +751,26 @@ TEST_CASE("NearestOnNetwork matches a full scan across latitudes", "[unit][graph
       CHECK(builder.NearestOnNetwork(at, 5, /*inbound=*/false) == BruteNearest(builder, at, 5));
     }
   }
+}
+
+TEST_CASE("NearestOnNetwork skips positions off the globe", "[unit][graph]") {
+  // A corrupt source row can leave a vertex at NaN or a huge coordinate.
+  // Flooring one to a grid cell is undefined behaviour, and a NaN distance
+  // breaks the nearest-first sort, so such vertices are never indexed or
+  // returned, and an off-globe query finds nothing.
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::vector<bf::Coordinate> coords = {{10.0, 10.0},    {10.5, 10.5}, {nan, 10.2},
+                                              {1e300, -1e300}, {10.2, nan},  {10.1, 10.1}};
+  const bf::GraphBuilder builder = MakePairNetwork(coords);
+  const std::vector<int> got = builder.NearestOnNetwork({10.2, 10.2}, 6, /*inbound=*/false);
+  REQUIRE(got.size() == 3);  // the three on-network vertices on the globe, nearest first
+  CHECK(builder.graph().CoordOf(got[0]).latitude == 10.1);
+  CHECK(builder.graph().CoordOf(got[1]).latitude == 10.0);
+  CHECK(builder.graph().CoordOf(got[2]).latitude == 10.5);
+  CHECK(builder.NearestOnNetwork({nan, 10.0}, 3, /*inbound=*/false).empty());
+  CHECK(builder.NearestOnNetwork({10.0, nan}, 3, /*inbound=*/false).empty());
+  CHECK(builder.NearestOnNetwork({91.0, 10.0}, 3, /*inbound=*/false).empty());
+  CHECK(builder.NearestOnNetwork({10.0, 1e300}, 3, /*inbound=*/false).empty());
 }
 
 }  // namespace

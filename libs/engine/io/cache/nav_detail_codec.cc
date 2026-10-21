@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <tuple>
 
+#include "core/domain/arinc_codes.h"
 #include "io/cache/byte_io.h"
 #include "io/cache/cache_messages.h"
 
@@ -175,6 +176,10 @@ Result<NavDetailArchive> NavDetailCodec::Decode(std::span<const uint8_t> body,
     const int32_t speed_limit_kt = r.I32();
     if (!r.ok()) {
       return bad("truncated nav detail section hold records");
+    }
+    if (turn_raw != static_cast<uint8_t>(kTurnLeft) &&
+        turn_raw != static_cast<uint8_t>(kTurnRight)) {
+      return bad("invalid hold turn direction");
     }
     HoldInfo& h = archive.holds_[i];
     h.fix_ident = resolve(fix_ident_off, fix_ident_len);

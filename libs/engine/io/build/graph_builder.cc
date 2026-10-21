@@ -16,6 +16,20 @@
 
 namespace bf {
 
+namespace {
+
+// Whether `c` is a real position on the globe. A vertex built from a corrupt
+// source row may carry NaN or a huge value; flooring such a coordinate to an
+// int cell is undefined behaviour, and a NaN distance breaks the strict weak
+// order the nearest-neighbour sort needs. Such vertices are kept out of the
+// spatial index and out of NearestOnNetwork altogether.
+bool OnGlobe(const Coordinate& c) {
+  return std::abs(c.latitude) <= kDegreesHalfCircle / 2.0 &&
+         std::abs(c.longitude) <= kDegreesHalfCircle;  // false for NaN as well
+}
+
+}  // namespace
+
 // A coarse spatial index that buckets waypoints by integer (lat, lon) degree.
 // Kept resident on the GraphBuilder so NearestOnNetwork avoids an O(V) scan per
 // route. Defined here (out-of-line) so the index internals stay out of
@@ -48,6 +62,8 @@ class GraphBuilder::DegreeGrid {
     starts_.push_back(static_cast<int>(ids_.size()));  // sentinel end offset
   }
 
+  // `c` must be OnGlobe (the casts below are undefined for NaN / huge values);
+  // the same holds for Near and OutsideLowerBoundNm.
   static int64_t KeyForCoord(const Coordinate& c) {
     return CellKey(static_cast<int32_t>(std::floor(c.latitude)),
                    static_cast<int32_t>(std::floor(c.longitude)));
@@ -295,7 +311,9 @@ void GraphBuilder::RebuildGrid() {
   std::vector<std::pair<int64_t, int>> entries;
   entries.reserve(first_airport_vertex_);
   for (int v = 0; v < first_airport_vertex_; ++v) {
-    entries.emplace_back(DegreeGrid::KeyForCoord(graph_.coords_[v]), v);
+    if (OnGlobe(graph_.coords_[v])) {
+      entries.emplace_back(DegreeGrid::KeyForCoord(graph_.coords_[v]), v);
+    }
   }
   grid_ = std::make_unique<DegreeGrid>(std::move(entries));
 }
@@ -348,7 +366,7 @@ bool GraphBuilder::HasInbound(int vertex) const {
 
 std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int count,
                                                 bool inbound) const {
-  if (count <= 0) {
+  if (count <= 0 || !OnGlobe(coord)) {
     return {};
   }
   const std::vector<uint8_t>& mask = inbound ? has_inbound_ : has_outbound_;
@@ -393,7 +411,7 @@ std::vector<int> GraphBuilder::NearestOnNetwork(const Coordinate& coord, int cou
     scored.reserve(256);
     const int v_count = graph_.VertexCount();
     for (int v = 0; v < v_count; ++v) {
-      if (mask[v]) {
+      if (mask[v] && OnGlobe(graph_.coords_[v])) {
         scored.emplace_back(coord.DistanceTo(graph_.coords_[v]), v);
       }
     }

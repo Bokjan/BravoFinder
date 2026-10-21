@@ -168,3 +168,15 @@ TEST_CASE("nav detail codec: a byte-corrupted navaid kind is rejected", "[unit][
     CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
   }
 }
+
+TEST_CASE("nav detail codec: a hold turn direction other than L/R is rejected", "[unit][detail]") {
+  // The hold renderer prints the byte as a turn direction; a corrupt one must
+  // fail the decode rather than show up as an arbitrary character.
+  bf::NavData data = MakeSampleData();
+  data.hold_fixes[0].turn_dir = 'X';
+  bf::Result<bf::NavDetailArchive> r = RoundTrip(bf::NavDetailArchive::FromData(data));
+  CHECK_FALSE(r);
+  if (!r) {
+    CHECK(r.error().code == bf::ErrorCode::kCacheCorrupt);
+  }
+}

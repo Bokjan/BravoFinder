@@ -270,6 +270,30 @@ TEST_CASE("unified: a rebuild replaces the file without disturbing an open reade
   std::remove(path.c_str());
 }
 
+TEST_CASE("unified: a procedure turn direction other than L/R/none is rejected",
+          "[integration][unified]") {
+  // The procedure detail renders the byte as a turn direction; a corrupt one
+  // must fail the segment fetch rather than show up as an arbitrary character.
+  const std::string path = TempBfdb("turndir");
+  const bf::GraphSnapshot graph = MakeGraph();
+  std::vector<std::pair<std::string, bf::CifpData>> cifp = {{"KTST", MakeCifp()}};
+  cifp[0].second.procedures[0].legs[0].turn_dir = 'X';
+  bf::UnifiedCache::BuildInput in;
+  in.graph = &graph;
+  in.cifp = &cifp;
+  REQUIRE(bf::UnifiedCache::Build(path, in));
+  {
+    bf::Result<bf::UnifiedData> opened = bf::UnifiedCache::Open(path);
+    REQUIRE(opened);
+    auto fetched = opened.value().cifp->Fetch("KTST");
+    CHECK_FALSE(fetched);
+    if (!fetched) {
+      CHECK(fetched.error().code == bf::ErrorCode::kCacheCorrupt);
+    }
+  }
+  std::remove(path.c_str());
+}
+
 // The has_inbound / has_outbound per-vertex flags (flags byte bit0 =
 // has_outbound, bit1 = has_inbound) must survive a round-trip, and
 // specifically an inbound-only vertex (has_inbound && !has_outbound -- a STAR
