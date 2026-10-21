@@ -299,7 +299,7 @@ TEST_CASE("cifp codec: a byte-corrupted segment is rejected by its CRC", "[unit]
   const std::string ok_path = TempPath("ctrl");
   write_body(ok_path);
   bf::Result<bf::CifpArchive> ok_arch =
-      bf::CifpCodec::OpenSection(ok_path, 0, body.size(), section_crc, pool_blob);
+      bf::CifpCodec::OpenSection(bf::PreadFile(ok_path), 0, body.size(), section_crc, pool_blob);
   REQUIRE(ok_arch);
   {
     auto ok_fetch = ok_arch.value().Fetch("KTTT");
@@ -314,7 +314,7 @@ TEST_CASE("cifp codec: a byte-corrupted segment is rejected by its CRC", "[unit]
   const std::string bad_path = TempPath("bad");
   write_body(bad_path);
   bf::Result<bf::CifpArchive> bad_arch =
-      bf::CifpCodec::OpenSection(bad_path, 0, body.size(), section_crc, pool_blob);
+      bf::CifpCodec::OpenSection(bf::PreadFile(bad_path), 0, body.size(), section_crc, pool_blob);
   REQUIRE(bad_arch);
   {
     auto bad_fetch = bad_arch.value().Fetch("KTTT");

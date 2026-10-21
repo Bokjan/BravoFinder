@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 #include "io/cache/unified_cache.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <random>
 #include <span>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -16,6 +20,7 @@
 #include "io/cache/graph_codec.h"
 #include "io/cache/graph_snapshot.h"
 #include "io/cache/nav_detail_codec.h"
+#include "io/cache/pread_file.h"
 
 namespace bf {
 
@@ -40,19 +45,95 @@ constexpr size_t kHeaderCrcSize = 4;  // CRC-32C of [header][section table], rig
 // string length pointing past what was read means the file is corrupt.
 constexpr size_t kMaxHeaderPrefix = 8192;
 
-// ofstream/ifstream speak char*; the cache layer's byte buffers are
-// std::vector<uint8_t>. These two helpers centralize the reinterpret_cast so
-// every read/write site stays byte-typed.
+// ofstream speaks char*; the cache layer's byte buffers are
+// std::vector<uint8_t>. This helper centralizes the reinterpret_cast so every
+// write site stays byte-typed.
 void WriteAll(std::ostream& f, std::span<const uint8_t> b) {
   f.write(reinterpret_cast<const char*>(b.data()), static_cast<std::streamsize>(b.size()));
 }
 
-bool ReadInto(std::istream& f, std::span<uint8_t> b) {
-  if (!b.empty()) {
-    f.read(reinterpret_cast<char*>(b.data()), static_cast<std::streamsize>(b.size()));
-  }
-  return static_cast<bool>(f);
+// A sibling of `path` to write the new cache into before renaming it over
+// `path`. Same directory, so the rename never crosses filesystems; a random
+// suffix, so two concurrent builds of one path do not write into the same
+// file; and a ".tmp" extension, so a directory scan for caches skips it.
+std::string TempPathFor(const std::string& path) {
+  std::random_device rd;
+  const uint64_t tag = (static_cast<uint64_t>(rd()) << 32) | rd();
+  return std::format("{}.{:016x}.tmp", path, tag);
 }
+
+// Replace `to` with `from` in one step: a reader never sees a missing or
+// half-written `to`, and one that already has `to` open keeps the old file.
+Result<void> ReplaceFile(const std::string& from, const std::string& to) {
+  namespace fs = std::filesystem;
+#if defined(_WIN32) && defined(FILE_RENAME_FLAG_POSIX_SEMANTICS)
+  // MoveFileEx (what std::filesystem::rename uses) refuses to replace a file
+  // that some process still has open -- here, any running server reading the
+  // old cache. A POSIX-semantics rename (Windows 10 1607+, NTFS) unlinks the
+  // old name instead, as rename(2) does; the readers' FILE_SHARE_DELETE (see
+  // PreadFile) is what permits it. Where it is unsupported, fall through to
+  // std::filesystem::rename.
+  std::error_code abs_ec;
+  const std::wstring target = fs::absolute(fs::path(to), abs_ec).wstring();
+  const HANDLE h = abs_ec ? INVALID_HANDLE_VALUE
+                          : ::CreateFileW(fs::path(from).c_str(), DELETE,
+                                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                          nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (h != INVALID_HANDLE_VALUE) {
+    // FILE_RENAME_INFO ends in a flexible FileName array; size the buffer for
+    // the target name and align it for the struct.
+    const size_t name_bytes = target.size() * sizeof(wchar_t);
+    std::vector<uint64_t> buf((sizeof(FILE_RENAME_INFO) + name_bytes + sizeof(uint64_t) - 1) /
+                              sizeof(uint64_t));
+    auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buf.data());
+    info->Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+    info->RootDirectory = nullptr;
+    info->FileNameLength = static_cast<DWORD>(name_bytes);
+    std::memcpy(info->FileName, target.data(), name_bytes);
+    const BOOL renamed = ::SetFileInformationByHandle(
+        h, FileRenameInfoEx, info, static_cast<DWORD>(buf.size() * sizeof(uint64_t)));
+    ::CloseHandle(h);
+    if (renamed) {
+      return Result<void>::Ok();
+    }
+  }
+#endif
+  std::error_code ec;
+  fs::rename(fs::path(from), fs::path(to), ec);
+  if (ec) {
+    return Result<void>::Err(
+        Error(ErrorCode::kSerializationError,
+              std::format("cannot replace .bfdb: {} ({}); the previous file, if any, is unchanged",
+                          to, ec.message())));
+  }
+  return Result<void>::Ok();
+}
+
+// Sequential reads through a PreadFile, for walking the container header. The
+// first failed or out-of-range read sticks (like a stream's failbit), so a run
+// of reads can be checked once at the end.
+class FileCursor {
+ public:
+  FileCursor(const PreadFile& file, uint64_t size) : file_(file), size_(size) {}
+
+  bool Read(std::span<uint8_t> dst) {
+    if (!ok_ || dst.size() > remaining() || !file_.ReadAt(dst, pos_)) {
+      ok_ = false;
+      return false;
+    }
+    pos_ += dst.size();
+    return true;
+  }
+
+  uint64_t pos() const { return pos_; }
+  uint64_t remaining() const { return size_ - pos_; }
+
+ private:
+  const PreadFile& file_;
+  uint64_t size_;
+  uint64_t pos_ = 0;
+  bool ok_ = true;
+};
 
 }  // namespace
 
@@ -193,38 +274,61 @@ Result<void> UnifiedCache::Build(const std::string& path, const BuildInput& inpu
     cw.U32(Crc32C::Update(Crc32C::Compute(header), table));
   }
 
-  std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  if (!f.is_open()) {
-    return Result<void>::Err(
-        Error(ErrorCode::kDataMissing, std::format("cannot open .bfdb for writing: {}", path)));
+  // Write a temporary file beside `path` and rename it over `path` only once
+  // every byte is written. Truncating `path` in place would destroy a good
+  // cache whenever the rebuild fails part-way, and would change the bytes under
+  // a server that has the old file open; a rename leaves the old file intact
+  // for both.
+  const std::string tmp_path = TempPathFor(path);
+  auto discard_tmp = [&] {
+    std::error_code ignored;
+    std::filesystem::remove(tmp_path, ignored);
+  };
+  {
+    std::ofstream f(tmp_path, std::ios::binary | std::ios::trunc);
+    if (!f.is_open()) {
+      return Result<void>::Err(Error(ErrorCode::kDataMissing,
+                                     std::format("cannot open .bfdb for writing: {}", tmp_path)));
+    }
+    WriteAll(f, header);
+    WriteAll(f, table);
+    WriteAll(f, header_crc);
+    WriteAll(f, pool_blob);
+    WriteAll(f, graph_body);
+    if (has_cifp) {
+      WriteAll(f, cifp_body);
+    }
+    if (has_detail) {
+      WriteAll(f, detail_body);
+    }
+    // close() flushes the buffered tail; a failure there only shows after it.
+    f.close();
+    if (f.fail()) {
+      discard_tmp();
+      return Result<void>::Err(
+          Error(ErrorCode::kSerializationError, std::format("failed writing .bfdb: {}", path)));
+    }
   }
-  WriteAll(f, header);
-  WriteAll(f, table);
-  WriteAll(f, header_crc);
-  WriteAll(f, pool_blob);
-  WriteAll(f, graph_body);
-  if (has_cifp) {
-    WriteAll(f, cifp_body);
+  Result<void> replaced = ReplaceFile(tmp_path, path);
+  if (!replaced) {
+    discard_tmp();
   }
-  if (has_detail) {
-    WriteAll(f, detail_body);
-  }
-  if (!f) {
-    return Result<void>::Err(
-        Error(ErrorCode::kSerializationError, std::format("failed writing .bfdb: {}", path)));
-  }
-  return Result<void>::Ok();
+  return replaced;
 }
 
 Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
-  std::ifstream f(path, std::ios::binary);
-  if (!f.is_open()) {
+  const PreadFile file(path);
+  const std::optional<uint64_t> file_size = file.is_open() ? file.Size() : std::nullopt;
+  if (!file_size) {
     return Result<UnifiedHeader>::Err(
         Error(ErrorCode::kDataMissing, std::format("cannot open .bfdb: {}", path)));
   }
-  std::vector<uint8_t> buf(kMaxHeaderPrefix);
-  ReadInto(f, buf);  // may short-read a tiny file; gcount() tells how much
-  buf.resize(static_cast<size_t>(f.gcount()));
+  // The whole prefix in one read, or the whole file if it is smaller.
+  std::vector<uint8_t> buf(static_cast<size_t>(std::min<uint64_t>(*file_size, kMaxHeaderPrefix)));
+  if (!file.ReadAt(buf, 0)) {
+    return Result<UnifiedHeader>::Err(
+        Error(ErrorCode::kDataMissing, std::format("cannot read .bfdb: {}", path)));
+  }
   if (buf.size() < 4) {
     return Result<UnifiedHeader>::Err(
         Error(ErrorCode::kCacheCorrupt, std::format("truncated .bfdb: {}", path)));
@@ -269,13 +373,16 @@ Result<UnifiedHeader> UnifiedCache::ReadHeader(const std::string& path) {
 }
 
 Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
-  std::ifstream f(path, std::ios::binary | std::ios::ate);
-  if (!f.is_open()) {
+  // One handle serves every read, the CIFP archive's lazy segment fetches
+  // included: were the path replaced by a rebuild part-way through, a second
+  // open would see the new file at offsets taken from the old one's header.
+  PreadFile file(path);
+  const std::optional<uint64_t> size = file.is_open() ? file.Size() : std::nullopt;
+  if (!size) {
     return Result<UnifiedData>::Err(
         Error(ErrorCode::kDataMissing, std::format("cannot open .bfdb: {}", path)));
   }
-  const std::streamoff file_size = f.tellg();
-  f.seekg(0);
+  const uint64_t file_size = *size;
 
   auto bad = [&](const char* why) {
     return Result<UnifiedData>::Err(Error(ErrorCode::kCacheCorrupt, WithRebuildHint(why)));
@@ -287,58 +394,50 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
 
   // Read the fixed header + provenance strings + section table + global pool.
   // These are near the file start; the (large) section bodies are read
-  // individually afterward, so this initial read stays small.
-  auto readN = [&](std::vector<uint8_t>& dst, size_t n) {
-    dst.resize(n);
-    if (n > 0) {
-      f.read(reinterpret_cast<char*>(dst.data()), static_cast<std::streamsize>(n));
+  // individually afterward, so this initial read stays small. Every read is
+  // bounded by the bytes left in the file, so a corrupt length fails before it
+  // can size an allocation.
+  FileCursor cur(file, file_size);
+  auto readN = [&](std::vector<uint8_t>& dst, uint64_t n) {
+    if (n > cur.remaining()) {
+      return false;
     }
-    return static_cast<bool>(f);
+    dst.resize(static_cast<size_t>(n));
+    return cur.Read(dst);
   };
   auto readU32 = [&](uint32_t& v) {
-    unsigned char b[4];
-    f.read(reinterpret_cast<char*>(b), 4);
+    uint8_t b[4] = {};
+    const bool ok = cur.Read(b);
     v = static_cast<uint32_t>(b[0]) | (static_cast<uint32_t>(b[1]) << 8) |
         (static_cast<uint32_t>(b[2]) << 16) | (static_cast<uint32_t>(b[3]) << 24);
-    return static_cast<bool>(f);
+    return ok;
   };
   auto readU8 = [&](uint8_t& v) {
-    unsigned char b = 0;
-    f.read(reinterpret_cast<char*>(&b), 1);
-    v = b;
-    return static_cast<bool>(f);
+    uint8_t b[1] = {};
+    const bool ok = cur.Read(b);
+    v = b[0];
+    return ok;
   };
   auto readU64 = [&](uint64_t& v) {
-    unsigned char b[8];
-    f.read(reinterpret_cast<char*>(b), 8);
+    uint8_t b[8] = {};
+    const bool ok = cur.Read(b);
     v = 0;
     for (int i = 0; i < 8; ++i) {
       v |= static_cast<uint64_t>(b[i]) << (8 * i);
     }
-    return static_cast<bool>(f);
+    return ok;
   };
   auto readStr = [&](std::string& s) {
     uint32_t len = 0;
-    if (!readU32(len)) {
-      return false;
-    }
-    // Bound the length by the bytes still ahead of the stream cursor, not the
-    // whole file: len <= file_size can still be larger than what remains after
-    // the current position, letting readN resize(len) before failing at EOF.
-    const std::streamoff remaining = file_size - static_cast<std::streamoff>(f.tellg());
-    if (static_cast<std::streamoff>(len) > remaining) {
+    if (!readU32(len) || len > cur.remaining()) {
       return false;
     }
     s.resize(len);
-    if (len > 0) {
-      f.read(s.data(), static_cast<std::streamsize>(len));
-    }
-    return static_cast<bool>(f);
+    return cur.Read(std::span<uint8_t>(reinterpret_cast<uint8_t*>(s.data()), s.size()));
   };
 
-  char magic[4];
-  f.read(magic, 4);
-  if (!f || std::memcmp(magic, kMagic, 4) != 0) {
+  uint8_t magic[4] = {};
+  if (!cur.Read(magic) || std::memcmp(magic, kMagic, 4) != 0) {
     return bad("not a .bfdb file (bad magic)");
   }
   uint32_t format = 0;
@@ -380,8 +479,7 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   }
   // Bound by the bytes remaining after the cursor, not the whole file (the pool
   // and every section body still lie ahead, so pool_len can never exceed this).
-  const std::streamoff pool_remaining = file_size - static_cast<std::streamoff>(f.tellg());
-  if (static_cast<std::streamoff>(pool_len) > pool_remaining) {
+  if (pool_len > cur.remaining()) {
     return bad("corrupt .bfdb: pool length exceeds file");
   }
 
@@ -400,8 +498,7 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     }
     // Absent section: off == len == 0. Present: must lie within the file.
     if (rows[i].off != 0 || rows[i].len != 0) {
-      if (rows[i].off > static_cast<uint64_t>(file_size) ||
-          rows[i].len > static_cast<uint64_t>(file_size) - rows[i].off) {
+      if (rows[i].off > file_size || rows[i].len > file_size - rows[i].off) {
         return bad("corrupt .bfdb: section reference out of range");
       }
     }
@@ -409,21 +506,19 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
 
   // Header CRC over every byte read so far ([header][section table]): re-read
   // that prefix (a few hundred bytes) and compare.
-  const std::streamoff header_end = f.tellg();
+  const uint64_t header_end = cur.pos();
   uint32_t header_crc = 0;
   if (!readU32(header_crc)) {
     return bad("truncated .bfdb header");
   }
   {
-    std::vector<uint8_t> prefix;
-    f.seekg(0);
-    if (!readN(prefix, static_cast<size_t>(header_end))) {
+    std::vector<uint8_t> prefix(static_cast<size_t>(header_end));
+    if (!file.ReadAt(prefix, 0)) {
       return bad("truncated .bfdb header");
     }
     if (Crc32C::Compute(prefix) != header_crc) {
       return bad("corrupt .bfdb: header CRC mismatch");
     }
-    f.seekg(header_end + static_cast<std::streamoff>(kHeaderCrcSize));
   }
 
   // Global string pool, read once into memory and shared by every section decode.
@@ -465,15 +560,11 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
     return bad("corrupt .bfdb: missing graph section");
   }
 
-  // A helper to read one section body into a buffer at its offset.
+  // A helper to read one section body into a buffer at its offset (already
+  // checked against the file size above).
   auto readSection = [&](const Row& row, std::vector<uint8_t>& dst) {
-    f.clear();
-    f.seekg(static_cast<std::streamoff>(row.off));
     dst.resize(static_cast<size_t>(row.len));
-    if (row.len > 0) {
-      f.read(reinterpret_cast<char*>(dst.data()), static_cast<std::streamsize>(row.len));
-    }
-    return static_cast<bool>(f);
+    return file.ReadAt(dst, row.off);
   };
 
   // Graph section (always present): decode against the global pool.
@@ -513,8 +604,8 @@ Result<UnifiedData> UnifiedCache::Open(const std::string& path) {
   // needs its own copy of the global pool blob to resolve segment string refs.
   // This is the last use of `pool`, so move it into the archive.
   if (cifp_row != nullptr && !(cifp_row->off == 0 && cifp_row->len == 0)) {
-    Result<CifpArchive> c =
-        CifpCodec::OpenSection(path, cifp_row->off, cifp_row->len, cifp_row->crc, std::move(pool));
+    Result<CifpArchive> c = CifpCodec::OpenSection(std::move(file), cifp_row->off, cifp_row->len,
+                                                   cifp_row->crc, std::move(pool));
     if (!c) {
       return Result<UnifiedData>::Err(std::move(c).error());
     }

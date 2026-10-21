@@ -222,6 +222,54 @@ TEST_CASE("unified: a full round-trip preserves all three sections", "[integrati
   std::remove(path.c_str());
 }
 
+TEST_CASE("unified: a rebuild replaces the file without disturbing an open reader",
+          "[integration][unified]") {
+  // A server holds the cache open (the CIFP archive keeps a handle for lazy
+  // segment reads) while `bf build` rewrites the same path. The build must
+  // succeed, the reader must keep reading the file it opened -- a rewrite in
+  // place would put new bytes under its old offsets -- and a fresh open must
+  // see the new file. No temporary file may be left behind.
+  const std::string path = TempBfdb("replace");
+  const bf::GraphSnapshot graph = MakeGraph();
+  const std::vector<std::pair<std::string, bf::CifpData>> old_cifp = {{"KTST", MakeCifp()}};
+  // A longer procedure name moves every later byte of the new file.
+  std::vector<std::pair<std::string, bf::CifpData>> new_cifp = {{"KTST", MakeCifp()}};
+  new_cifp[0].second.procedures[0].name = "REPLACEMENTSID";
+  bf::UnifiedCache::BuildInput in;
+  in.graph = &graph;
+  in.cifp = &old_cifp;
+  in.header.cycle = 2601;
+  REQUIRE(bf::UnifiedCache::Build(path, in));
+  {
+    bf::Result<bf::UnifiedData> reader = bf::UnifiedCache::Open(path);
+    REQUIRE(reader);
+    REQUIRE(reader.value().cifp.has_value());
+
+    in.cifp = &new_cifp;
+    in.header.cycle = 2602;
+    REQUIRE(bf::UnifiedCache::Build(path, in));
+
+    auto old_fetch = reader.value().cifp->Fetch("KTST");
+    REQUIRE(old_fetch);
+    REQUIRE(old_fetch.value().has_value());
+    CHECK(old_fetch.value()->procedures[0].name == "TESTSID");
+
+    bf::Result<bf::UnifiedData> fresh = bf::UnifiedCache::Open(path);
+    REQUIRE(fresh);
+    CHECK(fresh.value().header.cycle == 2602);
+    auto new_fetch = fresh.value().cifp->Fetch("KTST");
+    REQUIRE(new_fetch);
+    REQUIRE(new_fetch.value().has_value());
+    CHECK(new_fetch.value()->procedures[0].name == "REPLACEMENTSID");
+  }
+
+  const std::filesystem::path file(path);
+  for (const auto& de : std::filesystem::directory_iterator(file.parent_path())) {
+    CHECK_FALSE(de.path().filename().string().starts_with(file.filename().string() + "."));
+  }
+  std::remove(path.c_str());
+}
+
 // The has_inbound / has_outbound per-vertex flags (flags byte bit0 =
 // has_outbound, bit1 = has_inbound) must survive a round-trip, and
 // specifically an inbound-only vertex (has_inbound && !has_outbound -- a STAR

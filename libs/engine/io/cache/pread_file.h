@@ -10,9 +10,16 @@
 //
 // Move-only: it owns the underlying descriptor/handle and closes it on
 // destruction. A default-constructed or moved-from instance is not is_open().
+//
+// The handle does not block the file from being replaced: `bf build` writes a
+// new cache beside the old one and renames it over the path, and an open
+// PreadFile keeps reading the file it opened. On Windows that needs
+// FILE_SHARE_DELETE, without which the rename fails while any reader is open.
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -30,6 +37,7 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -42,10 +50,11 @@ class PreadFile {
   // Open `path` read-only. Check is_open() afterwards.
   explicit PreadFile(const std::string& path) {
 #ifdef _WIN32
-    handle_ = ::CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                            FILE_ATTRIBUTE_NORMAL, nullptr);
+    handle_ = ::CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 #else
-    fd_ = ::open(path.c_str(), O_RDONLY);
+    // O_CLOEXEC: a child process the host spawns must not inherit the handle.
+    fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
 #endif
   }
 
@@ -76,6 +85,23 @@ class PreadFile {
   bool is_open() const { return fd_ >= 0; }
 #endif
 
+  // The file's size in bytes, or nullopt if it cannot be queried.
+  std::optional<uint64_t> Size() const {
+#ifdef _WIN32
+    LARGE_INTEGER size{};
+    if (!::GetFileSizeEx(handle_, &size)) {
+      return std::nullopt;
+    }
+    return static_cast<uint64_t>(size.QuadPart);
+#else
+    struct stat st{};
+    if (::fstat(fd_, &st) != 0) {
+      return std::nullopt;
+    }
+    return static_cast<uint64_t>(st.st_size);
+#endif
+  }
+
   // Read exactly `dst.size()` bytes at absolute `offset` into `dst`. Returns true
   // only if all bytes were read. Does not move any shared file position, so
   // concurrent calls on the same PreadFile are safe.
@@ -97,6 +123,9 @@ class PreadFile {
       got += read;
 #else
       const ssize_t n = ::pread(fd_, base + got, len - got, static_cast<off_t>(offset + got));
+      if (n < 0 && errno == EINTR) {
+        continue;  // interrupted by a signal before reading anything: retry
+      }
       if (n <= 0) {
         return false;
       }

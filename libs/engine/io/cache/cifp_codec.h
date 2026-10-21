@@ -93,15 +93,17 @@ class CifpCodec {
   static Result<uint32_t> Encode(const std::vector<std::pair<std::string, CifpData>>& procedures,
                                  ByteWriter& w, StringPool& pool);
 
-  // Open the CIFP section of the unified file at `path` into a CifpArchive: read
-  // the directory (bounded by the section), verify the directory prefix against
-  // `section_crc` (the CRC stored in the section-table row, covering airport_count
-  // + directory rows -- the lazy segments carry their own per-segment CRC and are
-  // not covered here), resolve ICAO codes against the global pool blob, and hold
-  // a pread handle for lazy segment fetches. Takes an owned copy of the global
-  // pool blob (needed by Fetch). `section_offset` / `section_length` locate the
-  // CIFP section within the file.
-  static Result<CifpArchive> OpenSection(const std::string& path, uint64_t section_offset,
+  // Open the CIFP section of the unified file behind `file` into a CifpArchive:
+  // read the directory (bounded by the section), verify the directory prefix
+  // against `section_crc` (the CRC stored in the section-table row, covering
+  // airport_count + directory rows -- the lazy segments carry their own
+  // per-segment CRC and are not covered here), resolve ICAO codes against the
+  // global pool blob, and keep `file` for lazy segment fetches. `file` is the
+  // handle the container header was read through, so the directory and every
+  // segment come from that same file even if the path is replaced meanwhile.
+  // Takes an owned copy of the global pool blob (needed by Fetch).
+  // `section_offset` / `section_length` locate the CIFP section within the file.
+  static Result<CifpArchive> OpenSection(PreadFile file, uint64_t section_offset,
                                          uint64_t section_length, uint32_t section_crc,
                                          std::vector<uint8_t> pool_blob);
 

@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
-#include <fstream>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -337,21 +336,20 @@ Result<uint32_t> CifpCodec::Encode(const std::vector<std::pair<std::string, Cifp
   return Result<uint32_t>::Ok(static_cast<uint32_t>(entries.size()));
 }
 
-Result<CifpArchive> CifpCodec::OpenSection(const std::string& path, uint64_t section_offset,
+Result<CifpArchive> CifpCodec::OpenSection(PreadFile file, uint64_t section_offset,
                                            uint64_t section_length, uint32_t section_crc,
                                            std::vector<uint8_t> pool_blob) {
   auto bad = [&](std::string_view why) {
     return Result<CifpArchive>::Err(Error(ErrorCode::kCacheCorrupt, WithRebuildHint(why)));
   };
 
-  // Open a positional-read handle on the unified file and read the CIFP section's
-  // directory. The per-airport segments stay on disk and are fetched lazily.
+  // Read the CIFP section's directory through the container's handle. The
+  // per-airport segments stay on disk and are fetched lazily.
   CifpArchive archive;
-  archive.file_ = PreadFile(path);
+  archive.file_ = std::move(file);
   if (!archive.file_.is_open()) {
     return Result<CifpArchive>::Err(
-        Error(ErrorCode::kDataMissing,
-              std::format("cannot open .bfdb for CIFP segment reads: {}", path)));
+        Error(ErrorCode::kDataMissing, "no open .bfdb handle for CIFP segment reads"));
   }
   archive.pool_ = std::move(pool_blob);
 
