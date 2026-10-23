@@ -5,6 +5,11 @@ on:
     branches: [v3]
   pull_request:
 
+# Every job only checks out and builds; actions/cache authenticates with the
+# runner's own cache token, not GITHUB_TOKEN, so read access is all it needs.
+permissions:
+  contents: read
+
 jobs:
   # The same two checks the local pre-commit / commit-msg hooks run, for pushes
   # made without core.hooksPath set. clang-format is pinned: its output shifts
